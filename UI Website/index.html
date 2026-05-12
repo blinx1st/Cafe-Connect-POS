@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coffee Coffee Shop</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&family=Playfair+Display:wght@500;600;700&family=Poppins:wght@400;500;600;700&family=Reggae+One&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="site-header" data-header>
+      <a class="brand" href="#home">Coffee Connect</a>
+      <button
+        class="nav-toggle"
+        type="button"
+        aria-label="Open navigation"
+        aria-expanded="false"
+        data-nav-toggle
+      >
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <nav class="nav" data-nav>
+        <a href="#home">Home</a>
+        <a href="#coffee">Coffee</a>
+        <a href="#bakery">Bakery</a>
+        <a href="#shop">Shop</a>
+        <a href="#about">About</a>
+        <a class="login-link" href="#login">Login</a>
+        <button class="search-button" type="button" aria-label="Search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M10.7 18.2a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Zm0-2.2a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6Zm5.6.1 4 4-1.7 1.7-4-4 1.7-1.7Z"
+            />
+          </svg>
+        </button>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" id="home">
+        <div class="hero-content">
+          <p class="eyebrow">Welcome</p>
+          <h1>We serve the richest coffee in the city!</h1>
+          <p class="hero-copy">
+            Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do
+            eiusmod tempor
+          </p>
+          <a class="button button-light" href="#coffee">Order Now</a>
+        </div>
+      </section>
+
+      <section class="categories" aria-label="Coffee categories">
+        <div class="category">
+          <img src="assets/icon-hot.svg" alt="" />
+          <span>Hot Coffee</span>
+        </div>
+        <div class="category">
+          <img src="assets/icon-cold.svg" alt="" />
+          <span>Cold Coffee</span>
+        </div>
+        <div class="category">
+          <img src="assets/icon-cup.svg" alt="" />
+          <span>Cup Coffee</span>
+        </div>
+        <div class="category">
+          <img src="assets/icon-dessert.svg" alt="" />
+          <span>Dessert</span>
+        </div>
+      </section>
+
+      <section class="product-section" id="coffee">
+        <div class="section-heading">
+          <h2>Our Special Coffee</h2>
+        </div>
+        <div class="carousel-shell">
+          <button
+            class="arrow-button"
+            type="button"
+            aria-label="Previous coffee products"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M15.8 5.6 9.4 12l6.4 6.4-1.8 1.8L5.8 12 14 3.8l1.8 1.8Z"
+              />
+            </svg>
+          </button>
+          <div class="product-grid">
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/coffee-1.png"
+                  alt="A blue cup of lungo coffee"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add Lungo coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/coffee-2.png"
+                  alt="Coffee beside green leaves"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add iced lungo coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/coffee-3.png"
+                  alt="A dark cup of latte art coffee"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add latte coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/coffee-4.png"
+                  alt="A cup of coffee with leaf latte art"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add cappuccino coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+          </div>
+          <button
+            class="arrow-button"
+            type="button"
+            aria-label="Next coffee products"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M8.2 18.4 14.6 12 8.2 5.6 10 3.8l8.2 8.2-8.2 8.2-1.8-1.8Z"
+              />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="product-section" id="bakery">
+        <div class="section-heading">
+          <h2>Our Special Dessert</h2>
+        </div>
+        <div class="carousel-shell">
+          <button
+            class="arrow-button"
+            type="button"
+            aria-label="Previous dessert products"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M15.8 5.6 9.4 12l6.4 6.4-1.8 1.8L5.8 12 14 3.8l1.8 1.8Z"
+              />
+            </svg>
+          </button>
+          <div class="product-grid">
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/dessert-1.png"
+                  alt="Two coffees on a wood table"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add dessert coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+            <article class="product-card">
+              <div class="product-media">
+                <img src="assets/dessert-2.png" alt="Coffee on a dark plate" />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add roasted coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/dessert-3.png"
+                  alt="Coffee cup on a dark surface"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add dark roast coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+            <article class="product-card">
+              <div class="product-media">
+                <img
+                  src="assets/dessert-4.png"
+                  alt="Foamy coffee in a white cup"
+                />
+                <button
+                  class="favorite-button"
+                  type="button"
+                  aria-label="Add flat white coffee to favorites"
+                >
+                  <img src="assets/heart.svg" alt="" />
+                </button>
+              </div>
+              <div class="product-body">
+                <h3>Lungo coffee</h3>
+                <p>Lorem ipsum dolor sit amet, consectetur adipisicing elit,</p>
+                <div class="product-actions">
+                  <strong>Rs. 200</strong>
+                  <button type="button">Order Now</button>
+                </div>
+              </div>
+            </article>
+          </div>
+          <button
+            class="arrow-button"
+            type="button"
+            aria-label="Next dessert products"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M8.2 18.4 14.6 12 8.2 5.6 10 3.8l8.2 8.2-8.2 8.2-1.8-1.8Z"
+              />
+            </svg>
+          </button>
+        </div>
+      </section>
+
+      <section class="beans-banner" id="shop">
+        <img class="beans-side beans-left" src="assets/beans-left.png" alt="" />
+        <div class="beans-copy">
+          <h2>Check Out Our Best Coffee Beans</h2>
+          <a class="button button-dark" href="#shop">
+            Explore Our Products
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M8.7 17.3 14 12 8.7 6.7l1.6-1.6L17.2 12l-6.9 6.9-1.6-1.6Z"
+              />
+            </svg>
+          </a>
+        </div>
+        <img
+          class="beans-side beans-right"
+          src="assets/beans-right.png"
+          alt=""
+        />
+      </section>
+
+      <section class="testimonials" id="about">
+        <p class="join-title">Come and Join</p>
+        <h2>Our Happy Customers</h2>
+        <div class="testimonial-grid">
+          <article class="testimonial-card side-card">
+            <div class="testimonial-head">
+              <img src="assets/avatar-2.png" alt="James Smith" />
+              <div>
+                <h3>James Smith</h3>
+                <p>Entrepreneur</p>
+              </div>
+              <span class="stars" aria-label="4 out of 5 stars">****</span>
+            </div>
+            <p>
+              Lorem ipsum dolor sit amet, consectetur adipisicing elit, Lorem
+              ipsum dolor sit amet, consectetur adipisicing elit.
+            </p>
+          </article>
+          <article class="testimonial-card featured-card">
+            <div class="testimonial-head">
+              <img src="assets/avatar-1.png" alt="James Smith" />
+              <div>
+                <h3>James Smith</h3>
+                <p>Entrepreneur</p>
+              </div>
+              <span class="stars" aria-label="5 out of 5 stars">*****</span>
+            </div>
+            <p>
+              Lorem ipsum dolor sit amet, consectetur adipisicing elit, Lorem
+              ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod
+              tempor incididunt.
+            </p>
+          </article>
+          <article class="testimonial-card side-card">
+            <div class="testimonial-head">
+              <img src="assets/avatar-2.png" alt="James Smith" />
+              <div>
+                <h3>James Smith</h3>
+                <p>Entrepreneur</p>
+              </div>
+              <span class="stars" aria-label="4 out of 5 stars">****</span>
+            </div>
+            <p>
+              Lorem ipsum dolor sit amet, consectetur adipisicing elit, Lorem
+              ipsum dolor sit amet, consectetur adipisicing elit.
+            </p>
+          </article>
+        </div>
+        <div class="slider-dots" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+      </section>
+
+      <section class="newsletter">
+        <img
+          class="newsletter-beans newsletter-left"
+          src="assets/newsletter-beans.png"
+          alt=""
+        />
+        <div class="newsletter-content">
+          <h2>Join in and get 15% off!</h2>
+          <p>Subscribe to our newsletter and get 15% off discount code.</p>
+          <form class="subscribe-form">
+            <label>
+              <img src="assets/mail.svg" alt="" />
+              <span class="sr-only">Email address</span>
+              <input type="email" placeholder="Email address" />
+            </label>
+            <button type="submit">Subscribe</button>
+          </form>
+        </div>
+        <img
+          class="newsletter-beans newsletter-right"
+          src="assets/newsletter-beans.png"
+          alt=""
+        />
+      </section>
+    </main>
+
+    <footer class="footer">
+      <a class="footer-brand" href="#home">Coffee</a>
+      <div class="footer-column">
+        <h2>Privacy</h2>
+        <a href="#">Terms of use</a>
+        <a href="#">Privacy policy</a>
+        <a href="#">Cookies</a>
+      </div>
+      <div class="footer-column">
+        <h2>Services</h2>
+        <a href="#">Shop</a>
+        <a href="#">Order ahead</a>
+        <a href="#">Menu</a>
+      </div>
+      <div class="footer-column">
+        <h2>About Us</h2>
+        <a href="#">Find a location</a>
+        <a href="#">About us</a>
+        <a href="#">Our story</a>
+      </div>
+      <div class="footer-column">
+        <h2>Information</h2>
+        <a href="#">Plans &amp; pricing</a>
+        <a href="#">Sell your products</a>
+        <a href="#">Jobs</a>
+      </div>
+      <div class="footer-column social-column">
+        <h2>Social Media</h2>
+        <div class="social-links">
+          <a href="#" aria-label="X">X</a>
+          <a href="#" aria-label="Instagram"
+            ><img src="assets/instagram.svg" alt=""
+          /></a>
+          <a href="#" aria-label="Facebook"
+            ><img src="assets/facebook.svg" alt=""
+          /></a>
+          <a href="#" aria-label="LinkedIn"
+            ><img src="assets/linkedin.svg" alt=""
+          /></a>
+        </div>
+      </div>
+    </footer>
+
+    <script src="script.js"></script>
+  </body>
+</html>
