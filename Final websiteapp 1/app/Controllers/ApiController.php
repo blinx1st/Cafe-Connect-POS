@@ -12,6 +12,7 @@ use App\Models\Dashboard;
 use App\Models\Inventory;
 use App\Models\Invoice;
 use App\Models\Order;
+use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\Report;
 use App\Models\Staff;
@@ -32,13 +33,18 @@ final class ApiController extends Controller
 
             $result = match ($route) {
                 '/api/bootstrap', '/api/website-bootstrap' => $this->websiteBootstrap(),
-                '/api/pos-bootstrap' => $this->posBootstrap(),
+                '/api/pos-bootstrap' => $this->posBootstrap($payload),
                 '/api/member-session' => $auth->memberSession(),
                 '/api/member-login' => $auth->memberLogin($payload),
                 '/api/member-register' => $auth->memberRegister($payload),
                 '/api/member-logout' => $auth->memberLogout(),
                 '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
-                '/api/customer-create' => (new Customer())->create($payload),
+                '/api/pos-session-login' => (new PosSession())->login($payload),
+                '/api/pos-session-current' => (new PosSession())->current($payload),
+                '/api/pos-session-heartbeat' => (new PosSession())->heartbeat($payload),
+                '/api/pos-session-logout' => (new PosSession())->logout($payload),
+                '/api/pos-session-report' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => ['session_reports' => (new PosSession())->report($payload)]),
+                '/api/customer-create' => $this->withRole($auth, $payload, ['cashier', 'marketing', 'manager', 'owner', 'admin'], fn () => (new Customer())->create($payload)),
                 '/api/newsletter-subscribe' => (new Customer())->newsletterSubscribe($payload),
                 '/api/favorite-toggle' => (new Customer())->toggleFavorite($payload),
                 '/api/checkout' => $this->checkout($payload, $auth),
@@ -53,8 +59,8 @@ final class ApiController extends Controller
                 '/api/inventory' => (new Inventory())->overview(),
                 '/api/stock-movement' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => (new Inventory())->createMovement($payload)),
                 '/api/cash-transaction' => $this->withRole($auth, $payload, ['cashier', 'manager', 'owner', 'admin'], fn () => $this->createCashTransaction($payload)),
-                '/api/product-save' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => (new Product())->save($payload)),
-                '/api/staff-save' => $this->withRole($auth, $payload, ['owner', 'admin'], fn () => (new Staff())->save($payload)),
+                '/api/product-save' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => $this->saveProduct($payload)),
+                '/api/staff-save' => $this->withRole($auth, $payload, ['owner', 'admin'], fn () => $this->saveStaff($payload)),
                 '/api/reports' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => (new Report())->data()),
                 default => throw new \InvalidArgumentException('Unknown API route: ' . $route),
             };
@@ -86,6 +92,11 @@ final class ApiController extends Controller
                 'dashboard' => '/api/dashboard',
                 'campaigns' => '/api/campaigns',
                 'create_campaign' => '/api/create-campaign',
+                'pos_session_login' => '/api/pos-session-login',
+                'pos_session_current' => '/api/pos-session-current',
+                'pos_session_heartbeat' => '/api/pos-session-heartbeat',
+                'pos_session_logout' => '/api/pos-session-logout',
+                'pos_session_report' => '/api/pos-session-report',
                 default => '/api/' . str_replace('_', '-', (string) $_GET['action']),
             };
         }
@@ -105,11 +116,24 @@ final class ApiController extends Controller
         ];
     }
 
-    private function posBootstrap(): array
+    private function posBootstrap(array $payload): array
     {
         $product = new Product();
         $staff = new Staff();
         $order = new Order();
+        $posSession = new PosSession();
+        $currentSession = null;
+        $sessionReports = $posSession->report($payload);
+        $reports = (new Report())->data();
+        $reports['session_reports'] = $sessionReports;
+
+        if (!empty($payload['pos_session_id']) && !empty($payload['session_token'])) {
+            try {
+                $currentSession = $posSession->current($payload)['current_session'] ?? null;
+            } catch (Throwable) {
+                $currentSession = null;
+            }
+        }
 
         return [
             'products' => $product->active(),
@@ -122,7 +146,9 @@ final class ApiController extends Controller
             'dashboard' => (new Dashboard())->data(),
             'campaigns' => (new Campaign())->performance(),
             'inventory' => (new Inventory())->overview(),
-            'reports' => (new Report())->data(),
+            'reports' => $reports,
+            'current_session' => $currentSession,
+            'session_reports' => $sessionReports,
             'roles' => Staff::ROLES,
         ];
     }
@@ -130,18 +156,57 @@ final class ApiController extends Controller
     private function createCashTransaction(array $payload): array
     {
         $db = Database::pdo();
+        $amount = max(0, (float) ($payload['amount'] ?? 0));
+        $transactionType = in_array(($payload['transaction_type'] ?? 'in'), ['in', 'out'], true) ? $payload['transaction_type'] : 'in';
+        $reason = trim((string) ($payload['reason'] ?? 'POS transaction'));
         $db->prepare(
-            "INSERT INTO cash_transactions (branch_id, staff_id, transaction_type, reason, amount, created_at)
-             VALUES (:branch_id, :staff_id, :transaction_type, :reason, :amount, NOW())"
+            "INSERT INTO cash_transactions (branch_id, staff_id, pos_session_id, transaction_type, reason, amount, created_at)
+             VALUES (:branch_id, :staff_id, :pos_session_id, :transaction_type, :reason, :amount, NOW())"
         )->execute([
             'branch_id' => max(1, (int) ($payload['branch_id'] ?? 1)),
             'staff_id' => max(1, (int) ($payload['staff_id'] ?? 1)),
-            'transaction_type' => in_array(($payload['transaction_type'] ?? 'in'), ['in', 'out'], true) ? $payload['transaction_type'] : 'in',
-            'reason' => trim((string) ($payload['reason'] ?? 'POS transaction')),
-            'amount' => max(0, (float) ($payload['amount'] ?? 0)),
+            'pos_session_id' => max(1, (int) ($payload['pos_session_id'] ?? 0)),
+            'transaction_type' => $transactionType,
+            'reason' => $reason,
+            'amount' => $amount,
+        ]);
+
+        (new PosSession())->logFromPayload($payload, 'cash_transaction', [
+            'entity_type' => 'cash_transaction',
+            'entity_id' => (int) $db->lastInsertId(),
+            'amount' => $amount,
+            'status_to' => $transactionType,
+            'note' => $reason,
         ]);
 
         return (new Report())->data();
+    }
+
+    private function saveProduct(array $payload): array
+    {
+        $result = (new Product())->save($payload);
+        (new PosSession())->logFromPayload($payload, 'product_save', [
+            'entity_type' => 'product',
+            'entity_id' => (int) ($result['id'] ?? $payload['id'] ?? 0),
+            'amount' => max(0, (float) ($payload['price'] ?? 0)),
+            'status_to' => (string) ($payload['status'] ?? 'active'),
+            'note' => (string) ($payload['product_name'] ?? 'Product save'),
+        ]);
+
+        return $result;
+    }
+
+    private function saveStaff(array $payload): array
+    {
+        $result = (new Staff())->save($payload);
+        (new PosSession())->logFromPayload($payload, 'staff_save', [
+            'entity_type' => 'staff',
+            'entity_id' => (int) ($result['id'] ?? $payload['id'] ?? 0),
+            'status_to' => (string) ($payload['staff_role'] ?? 'staff'),
+            'note' => (string) ($payload['staff_name'] ?? 'Staff save'),
+        ]);
+
+        return $result;
     }
 
     private function checkout(array $payload, AuthController $auth): array

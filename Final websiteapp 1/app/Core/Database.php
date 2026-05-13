@@ -40,6 +40,7 @@ final class Database
                 "SELECT
                     (SELECT COUNT(*) FROM product_categories) AS product_categories_count,
                     (SELECT COUNT(*) FROM staff_shifts) AS staff_shifts_count,
+                    (SELECT COUNT(*) FROM pos_activity_logs) AS pos_activity_logs_count,
                     (SELECT COUNT(*) FROM service_orders) AS service_orders_count,
                     (SELECT COUNT(*) FROM newsletter_subscribers) AS newsletter_count"
             );

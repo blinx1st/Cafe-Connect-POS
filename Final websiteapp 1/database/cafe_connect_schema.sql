@@ -17,6 +17,7 @@ DROP TABLE IF EXISTS marketing_emails;
 DROP TABLE IF EXISTS customer_interactions;
 DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS invoice_details;
+DROP TABLE IF EXISTS pos_activity_logs;
 DROP TABLE IF EXISTS invoices;
 DROP TABLE IF EXISTS service_order_items;
 DROP TABLE IF EXISTS service_orders;
@@ -147,15 +148,28 @@ CREATE TABLE pos_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
+    shift_id INT NULL,
+    session_token VARCHAR(80) NOT NULL,
+    staff_role ENUM('waiter', 'cashier', 'barista', 'owner', 'manager', 'marketing', 'admin') NOT NULL,
     opened_at DATETIME NOT NULL,
     closed_at DATETIME NULL,
+    last_seen_at DATETIME NULL,
+    login_ip VARCHAR(64) NULL,
+    user_agent VARCHAR(255) NULL,
     opening_cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     expected_cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     closing_cash_amount DECIMAL(12,2) NULL,
     cash_difference_amount DECIMAL(12,2) NULL,
     status ENUM('open', 'closed') NOT NULL DEFAULT 'open',
+    closed_reason ENUM('manual', 'timeout', 'system') NULL,
     notes VARCHAR(255) NULL,
+    UNIQUE KEY uq_pos_sessions_token (session_token),
+    KEY idx_pos_sessions_staff_status (staff_id, status),
     KEY idx_pos_sessions_branch_date (branch_id, opened_at),
+    CONSTRAINT fk_pos_sessions_shift
+        FOREIGN KEY (shift_id) REFERENCES staff_shifts(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
     CONSTRAINT fk_pos_sessions_branch
         FOREIGN KEY (branch_id) REFERENCES branches(id)
         ON UPDATE CASCADE
@@ -311,15 +325,29 @@ CREATE TABLE service_order_items (
     note VARCHAR(255) NULL,
     line_total DECIMAL(12,2) NOT NULL,
     kitchen_status ENUM('waiting', 'preparing', 'ready', 'served') NOT NULL DEFAULT 'waiting',
+    preparing_started_at DATETIME NULL,
+    ready_at DATETIME NULL,
+    served_at DATETIME NULL,
+    prepared_by_staff_id INT NULL,
+    prepared_by_session_id INT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_service_order_items_order (service_order_id),
     KEY idx_service_order_items_kitchen (kitchen_status),
+    KEY idx_service_order_items_prepared_by (prepared_by_staff_id, ready_at),
     CONSTRAINT fk_service_order_items_order
         FOREIGN KEY (service_order_id) REFERENCES service_orders(id)
         ON UPDATE CASCADE
         ON DELETE CASCADE,
     CONSTRAINT fk_service_order_items_product
         FOREIGN KEY (product_id) REFERENCES products(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_service_order_items_prepared_staff
+        FOREIGN KEY (prepared_by_staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_service_order_items_prepared_session
+        FOREIGN KEY (prepared_by_session_id) REFERENCES pos_sessions(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -335,6 +363,8 @@ CREATE TABLE invoices (
     sales_channel ENUM('pos', 'website', 'delivery') NOT NULL DEFAULT 'pos',
     invoice_date DATE NOT NULL,
     invoice_time TIME NOT NULL,
+    bill_started_at DATETIME NULL,
+    paid_at DATETIME NULL,
     subtotal_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     membership_discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     voucher_discount_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -347,6 +377,7 @@ CREATE TABLE invoices (
     KEY idx_invoices_customer_date (customer_id, invoice_date),
     KEY idx_invoices_channel_date (sales_channel, invoice_date),
     KEY idx_invoices_service_order (service_order_id),
+    KEY idx_invoices_pos_session_paid (pos_session_id, paid_at),
     CONSTRAINT fk_invoices_branch
         FOREIGN KEY (branch_id) REFERENCES branches(id)
         ON UPDATE CASCADE
@@ -407,6 +438,37 @@ CREATE TABLE invoice_details (
         FOREIGN KEY (product_id) REFERENCES products(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE pos_activity_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    pos_session_id INT NOT NULL,
+    staff_id INT NOT NULL,
+    staff_role ENUM('waiter', 'cashier', 'barista', 'owner', 'manager', 'marketing', 'admin') NOT NULL,
+    action_type VARCHAR(60) NOT NULL,
+    entity_type VARCHAR(60) NULL,
+    entity_id INT NULL,
+    product_id INT NULL,
+    quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+    amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    status_from VARCHAR(40) NULL,
+    status_to VARCHAR(40) NULL,
+    note VARCHAR(255) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_pos_activity_session_action (pos_session_id, action_type, created_at),
+    KEY idx_pos_activity_staff_date (staff_id, created_at),
+    CONSTRAINT fk_pos_activity_session
+        FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_pos_activity_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_pos_activity_product
+        FOREIGN KEY (product_id) REFERENCES products(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE customer_interactions (
@@ -515,6 +577,7 @@ CREATE TABLE stock_movements (
     material_id INT NOT NULL,
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
+    pos_session_id INT NULL,
     movement_type ENUM('import', 'sales_export', 'waste_export') NOT NULL,
     quantity DECIMAL(12,2) NOT NULL,
     total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -533,6 +596,10 @@ CREATE TABLE stock_movements (
     CONSTRAINT fk_stock_movements_staff
         FOREIGN KEY (staff_id) REFERENCES staff(id)
         ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_stock_movements_session
+        FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
+        ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -540,6 +607,7 @@ CREATE TABLE cash_transactions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
+    pos_session_id INT NULL,
     transaction_type ENUM('in', 'out') NOT NULL,
     reason VARCHAR(180) NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
@@ -551,6 +619,10 @@ CREATE TABLE cash_transactions (
         ON DELETE RESTRICT,
     CONSTRAINT fk_cash_transactions_staff
         FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_cash_transactions_session
+        FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -640,9 +712,18 @@ INSERT INTO staff_shifts (staff_id, shift_name, starts_at, ends_at, work_date) V
 (8, 'Evening cashier', '13:00:00', '21:00:00', '2026-05-13');
 
 INSERT INTO pos_sessions (
-    branch_id, staff_id, opened_at, opening_cash_amount, expected_cash_amount, status, notes
+    branch_id, staff_id, shift_id, session_token, staff_role, opened_at, closed_at, last_seen_at,
+    opening_cash_amount, expected_cash_amount, closing_cash_amount, cash_difference_amount,
+    status, closed_reason, notes
 ) VALUES
-(1, 2, '2026-05-13 07:00:00', 1000000, 1000000, 'open', 'Demo session for cashier role.');
+(1, 2, 2, 'demo-cashier-session-20260511', 'cashier', '2026-05-11 07:00:00', '2026-05-11 15:00:00', '2026-05-11 14:58:00',
+ 1000000, 1137750, 1137750, 0, 'closed', 'manual', 'Demo cashier checkout session.'),
+(1, 1, 1, 'demo-waiter-session-20260513', 'waiter', '2026-05-13 07:05:00', '2026-05-13 15:00:00', '2026-05-13 14:55:00',
+ 0, 0, 0, 0, 'closed', 'manual', 'Demo waiter service session.'),
+(1, 3, 3, 'demo-barista-session-20260513', 'barista', '2026-05-13 07:00:00', '2026-05-13 15:00:00', '2026-05-13 14:57:00',
+ 0, 0, 0, 0, 'closed', 'manual', 'Demo barista kitchen session.'),
+(1, 2, 2, 'demo-cashier-session-20260513', 'cashier', '2026-05-13 07:00:00', '2026-05-13 15:00:00', '2026-05-13 14:58:00',
+ 1000000, 1020000, 1020000, 0, 'closed', 'manual', 'Demo cashier cash session.');
 
 INSERT INTO product_categories (category_code, category_name, display_order) VALUES
 ('coffee', 'Coffee', 1),
@@ -741,16 +822,31 @@ INSERT INTO service_order_items (
 (3, 9, 1, 68000, 'L', NULL, NULL, 68000, 'served'),
 (3, 8, 1, 58000, NULL, NULL, NULL, 58000, 'served');
 
+UPDATE service_order_items
+SET preparing_started_at = '2026-05-13 09:26:00',
+    ready_at = '2026-05-13 09:34:00',
+    prepared_by_staff_id = 3,
+    prepared_by_session_id = 3
+WHERE id IN (3, 4);
+
+UPDATE service_order_items
+SET preparing_started_at = '2026-05-13 09:42:00',
+    ready_at = '2026-05-13 09:48:00',
+    served_at = '2026-05-13 09:55:00',
+    prepared_by_staff_id = 3,
+    prepared_by_session_id = 3
+WHERE id IN (5, 6);
+
 INSERT INTO invoices (
     branch_id, staff_id, pos_session_id, service_order_id, customer_id, voucher_id, sales_channel,
-    invoice_date, invoice_time, subtotal_amount, membership_discount_amount, voucher_discount_amount,
+    invoice_date, invoice_time, bill_started_at, paid_at, subtotal_amount, membership_discount_amount, voucher_discount_amount,
     total_amount, points_earned, payment_method, status, created_at
 ) VALUES
-(1, 2, 1, NULL, 1, 3, 'website', '2026-05-10', '09:30:00', 165000, 16500, 15000, 133500, 13, 'e_wallet', 'paid', '2026-05-10 09:32:00'),
-(1, 2, 1, NULL, 2, NULL, 'pos', '2026-05-11', '14:10:00', 145000, 7250, 0, 137750, 13, 'cash', 'paid', '2026-05-11 14:12:00'),
-(2, 8, NULL, NULL, 4, NULL, 'pos', '2026-05-12', '18:05:00', 262000, 26200, 0, 235800, 23, 'card', 'paid', '2026-05-12 18:08:00'),
-(3, 8, NULL, NULL, 5, NULL, 'delivery', '2026-05-13', '08:40:00', 110000, 5500, 0, 104500, 10, 'e_wallet', 'paid', '2026-05-13 08:43:00'),
-(1, 2, 1, NULL, NULL, NULL, 'pos', '2026-05-13', '10:05:00', 70000, 0, 0, 70000, 0, 'cash', 'paid', '2026-05-13 10:07:00');
+(1, 2, NULL, NULL, 1, 3, 'website', '2026-05-10', '09:30:00', '2026-05-10 09:30:00', '2026-05-10 09:32:00', 165000, 16500, 15000, 133500, 13, 'e_wallet', 'paid', '2026-05-10 09:32:00'),
+(1, 2, 1, NULL, 2, NULL, 'pos', '2026-05-11', '14:10:00', '2026-05-11 14:10:00', '2026-05-11 14:12:00', 145000, 7250, 0, 137750, 13, 'cash', 'paid', '2026-05-11 14:12:00'),
+(2, 8, NULL, NULL, 4, NULL, 'pos', '2026-05-12', '18:05:00', '2026-05-12 18:05:00', '2026-05-12 18:08:00', 262000, 26200, 0, 235800, 23, 'card', 'paid', '2026-05-12 18:08:00'),
+(3, 8, NULL, NULL, 5, NULL, 'delivery', '2026-05-13', '08:40:00', '2026-05-13 08:40:00', '2026-05-13 08:43:00', 110000, 5500, 0, 104500, 10, 'e_wallet', 'paid', '2026-05-13 08:43:00'),
+(1, 2, 4, NULL, NULL, NULL, 'pos', '2026-05-13', '10:05:00', '2026-05-13 10:05:00', '2026-05-13 10:07:00', 70000, 0, 0, 70000, 0, 'cash', 'paid', '2026-05-13 10:07:00');
 
 INSERT INTO payments (invoice_id, payment_method, payment_provider, amount, paid_at, transaction_reference, status) VALUES
 (1, 'e_wallet', 'Demo Momo', 133500, '2026-05-10 09:32:00', 'WEB-000001', 'paid'),
@@ -769,6 +865,21 @@ INSERT INTO invoice_details (invoice_id, product_id, quantity, unit_price, size,
 (4, 3, 1, 60000, 'M', NULL, 60000),
 (4, 5, 1, 48000, 'M', NULL, 48000),
 (5, 2, 2, 35000, 'M', NULL, 70000);
+
+INSERT INTO pos_activity_logs (
+    pos_session_id, staff_id, staff_role, action_type, entity_type, entity_id,
+    product_id, quantity, amount, status_from, status_to, note, created_at
+) VALUES
+(1, 2, 'cashier', 'session_login', 'pos_session', 1, NULL, 0, 1000000, NULL, 'open', 'POS login', '2026-05-11 07:00:00'),
+(1, 2, 'cashier', 'checkout', 'invoice', 2, NULL, 4, 137750, NULL, 'cash', 'Direct POS checkout', '2026-05-11 14:12:00'),
+(1, 2, 'cashier', 'session_logout', 'pos_session', 1, NULL, 0, 1137750, 'open', 'closed', 'POS logout', '2026-05-11 15:00:00'),
+(2, 1, 'waiter', 'session_login', 'pos_session', 2, NULL, 0, 0, NULL, 'open', 'POS login', '2026-05-13 07:05:00'),
+(2, 1, 'waiter', 'order_created', 'service_order', 1, NULL, 3, 158000, NULL, 'preparing', 'OD-101', '2026-05-13 09:12:00'),
+(2, 1, 'waiter', 'order_created', 'service_order', 2, NULL, 4, 154000, NULL, 'ready', 'OD-102', '2026-05-13 09:25:00'),
+(3, 3, 'barista', 'kitchen_ready', 'service_order_item', 3, 7, 2, 84000, 'preparing', 'ready', 'OD-102 - Croissant Butter', '2026-05-13 09:34:00'),
+(3, 3, 'barista', 'kitchen_ready', 'service_order_item', 4, 2, 2, 70000, 'preparing', 'ready', 'OD-102 - Vietnamese Phin Coffee', '2026-05-13 09:34:00'),
+(4, 2, 'cashier', 'checkout', 'invoice', 5, NULL, 2, 70000, NULL, 'cash', 'Direct POS checkout', '2026-05-13 10:07:00'),
+(4, 2, 'cashier', 'cash_transaction', 'cash_transaction', 2, NULL, 0, 120000, NULL, 'out', 'Buy small supplies', '2026-05-13 11:20:00');
 
 INSERT INTO customer_interactions (
     customer_id, staff_id, invoice_id, interaction_type, interaction_note, sentiment, created_at
@@ -808,16 +919,16 @@ INSERT INTO inventory_materials (material_name, unit, stock_quantity, min_stock_
 ('Croissant dough', 'pack', 9, 12, 'Bakery Partner', '2026-05-13 07:00:00');
 
 INSERT INTO stock_movements (
-    movement_code, material_id, branch_id, staff_id, movement_type, quantity, total_amount, note, created_at
+    movement_code, material_id, branch_id, staff_id, pos_session_id, movement_type, quantity, total_amount, note, created_at
 ) VALUES
-('IM-001', 1, 1, 7, 'import', 20, 3800000, 'Weekly bean import.', '2026-05-12 08:00:00'),
-('SA-002', 3, 1, 3, 'sales_export', 12, 0, 'Milk used in morning shift.', '2026-05-13 12:00:00'),
-('WA-003', 5, 1, 7, 'waste_export', 2, 0, 'Damaged pastry packs.', '2026-05-13 13:30:00');
+('IM-001', 1, 1, 7, NULL, 'import', 20, 3800000, 'Weekly bean import.', '2026-05-12 08:00:00'),
+('SA-002', 3, 1, 3, 3, 'sales_export', 12, 0, 'Milk used in morning shift.', '2026-05-13 12:00:00'),
+('WA-003', 5, 1, 7, NULL, 'waste_export', 2, 0, 'Damaged pastry packs.', '2026-05-13 13:30:00');
 
-INSERT INTO cash_transactions (branch_id, staff_id, transaction_type, reason, amount, created_at) VALUES
-(1, 2, 'in', 'Opening cash float', 1000000, '2026-05-13 07:00:00'),
-(1, 2, 'out', 'Buy small supplies', 120000, '2026-05-13 11:20:00'),
-(1, 2, 'in', 'Cash order correction', 70000, '2026-05-13 10:07:00');
+INSERT INTO cash_transactions (branch_id, staff_id, pos_session_id, transaction_type, reason, amount, created_at) VALUES
+(1, 2, NULL, 'in', 'Opening cash float', 1000000, '2026-05-13 07:00:00'),
+(1, 2, 4, 'out', 'Buy small supplies', 120000, '2026-05-13 11:20:00'),
+(1, 2, 4, 'in', 'Cash order correction', 70000, '2026-05-13 10:07:00');
 
 INSERT INTO loyalty_point_transactions (customer_id, invoice_id, transaction_type, points, description, created_at) VALUES
 (1, 1, 'earn', 13, 'Earned points from invoice #1', '2026-05-10 09:32:00'),

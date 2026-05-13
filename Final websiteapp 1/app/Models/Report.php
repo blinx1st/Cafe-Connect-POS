@@ -17,6 +17,7 @@ final class Report extends Model
             'revenue_by_channel' => $this->revenueByChannel($start, $end),
             'staff_performance' => $this->staffPerformance($start, $end),
             'cash_transactions' => $this->cashTransactions(),
+            'session_reports' => (new PosSession())->report(),
         ];
     }
 
@@ -52,7 +53,7 @@ final class Report extends Model
     private function cashTransactions(): array
     {
         return $this->db->query(
-            "SELECT ct.id, ct.transaction_type, ct.reason, ct.amount, ct.created_at,
+            "SELECT ct.id, ct.pos_session_id, ct.transaction_type, ct.reason, ct.amount, ct.created_at,
                     s.staff_name, b.branch_name
              FROM cash_transactions ct
              JOIN staff s ON s.id = ct.staff_id

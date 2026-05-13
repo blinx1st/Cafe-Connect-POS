@@ -41,6 +41,11 @@ final class Invoice extends Model
         $voucherId = isset($data['voucher_id']) && $data['voucher_id'] !== '' ? (int) $data['voucher_id'] : null;
         $paymentMethod = in_array(($data['payment_method'] ?? 'cash'), ['cash', 'card', 'e_wallet'], true) ? $data['payment_method'] : 'cash';
         $salesChannel = in_array(($data['sales_channel'] ?? 'pos'), ['pos', 'website', 'delivery'], true) ? $data['sales_channel'] : 'pos';
+        $posSessionId = $salesChannel === 'website' ? null : (int) ($data['pos_session_id'] ?? 0);
+        $billStartedAt = $this->dateTimeOrNow((string) ($data['bill_started_at'] ?? ($order['created_at'] ?? '')));
+        $paidAt = date('Y-m-d H:i:s');
+        $invoiceDate = substr($paidAt, 0, 10);
+        $invoiceTime = substr($paidAt, 11, 8);
 
         $productModel = new Product();
         $productIds = array_map(static fn ($item) => (int) ($item['product_id'] ?? 0), $items);
@@ -79,21 +84,26 @@ final class Invoice extends Model
         try {
             $this->db->prepare(
                 "INSERT INTO invoices (
-                    branch_id, staff_id, service_order_id, customer_id, voucher_id, sales_channel,
-                    invoice_date, invoice_time, subtotal_amount, membership_discount_amount,
+                    branch_id, staff_id, pos_session_id, service_order_id, customer_id, voucher_id, sales_channel,
+                    invoice_date, invoice_time, bill_started_at, paid_at, subtotal_amount, membership_discount_amount,
                     voucher_discount_amount, total_amount, points_earned, payment_method, status
                  ) VALUES (
-                    :branch_id, :staff_id, :service_order_id, :customer_id, :voucher_id, :sales_channel,
-                    CURDATE(), CURTIME(), :subtotal_amount, :membership_discount_amount,
+                    :branch_id, :staff_id, :pos_session_id, :service_order_id, :customer_id, :voucher_id, :sales_channel,
+                    :invoice_date, :invoice_time, :bill_started_at, :paid_at, :subtotal_amount, :membership_discount_amount,
                     :voucher_discount_amount, :total_amount, :points_earned, :payment_method, 'paid'
                  )"
             )->execute([
                 'branch_id' => $branchId,
                 'staff_id' => $staffId,
+                'pos_session_id' => $posSessionId ?: null,
                 'service_order_id' => $orderId ?: null,
                 'customer_id' => $customerId,
                 'voucher_id' => $voucherId,
                 'sales_channel' => $salesChannel,
+                'invoice_date' => $invoiceDate,
+                'invoice_time' => $invoiceTime,
+                'bill_started_at' => $billStartedAt,
+                'paid_at' => $paidAt,
                 'subtotal_amount' => $subtotal,
                 'membership_discount_amount' => $membershipDiscount,
                 'voucher_discount_amount' => $voucherDiscount,
@@ -119,12 +129,13 @@ final class Invoice extends Model
 
             $this->db->prepare(
                 "INSERT INTO payments (invoice_id, payment_method, payment_provider, amount, paid_at, transaction_reference, status)
-                 VALUES (:invoice_id, :payment_method, :provider, :amount, NOW(), :ref, 'paid')"
+                 VALUES (:invoice_id, :payment_method, :provider, :amount, :paid_at, :ref, 'paid')"
             )->execute([
                 'invoice_id' => $invoiceId,
                 'payment_method' => $paymentMethod,
                 'provider' => $paymentMethod === 'cash' ? null : 'Demo ' . $paymentMethod,
                 'amount' => $total,
+                'paid_at' => $paidAt,
                 'ref' => strtoupper($salesChannel) . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
             ]);
 
@@ -156,6 +167,16 @@ final class Invoice extends Model
             if ($orderId > 0) {
                 (new Order())->markPaid($orderId, $staffId);
             }
+            if ($posSessionId) {
+                (new PosSession())->logFromPayload($data, 'checkout', [
+                    'entity_type' => 'invoice',
+                    'entity_id' => $invoiceId,
+                    'quantity' => array_sum(array_map(static fn ($item) => (int) $item['quantity'], $prepared)),
+                    'amount' => $total,
+                    'status_to' => $paymentMethod,
+                    'note' => $orderId > 0 ? 'Checkout service order #' . $orderId : 'Direct POS checkout',
+                ]);
+            }
 
             $this->db->commit();
 
@@ -166,6 +187,9 @@ final class Invoice extends Model
                 'voucher_discount_amount' => $voucherDiscount,
                 'total_amount' => $total,
                 'points_earned' => $points,
+                'bill_started_at' => $billStartedAt,
+                'paid_at' => $paidAt,
+                'pos_session_id' => $posSessionId,
                 'customer' => $customerId ? (new Customer())->lookup((string) $customerId) : null,
             ];
         } catch (\Throwable $exception) {
@@ -203,5 +227,15 @@ final class Invoice extends Model
              SET c.membership_tier_id = mt.id
              WHERE c.id = :customer_id"
         )->execute(['customer_id' => $customerId]);
+    }
+
+    private function dateTimeOrNow(string $value): string
+    {
+        $timestamp = trim($value) !== '' ? strtotime($value) : false;
+        if ($timestamp === false) {
+            return date('Y-m-d H:i:s');
+        }
+
+        return date('Y-m-d H:i:s', $timestamp);
     }
 }

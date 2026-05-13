@@ -42,7 +42,7 @@ final class Inventory extends Model
     public function movements(): array
     {
         return $this->db->query(
-            "SELECT sm.id, sm.movement_code, sm.movement_type, sm.quantity, sm.total_amount,
+            "SELECT sm.id, sm.movement_code, sm.movement_type, sm.quantity, sm.total_amount, sm.pos_session_id,
                     sm.note, sm.created_at, im.material_name, s.staff_name, b.branch_name
              FROM stock_movements sm
              JOIN inventory_materials im ON im.id = sm.material_id
@@ -62,32 +62,44 @@ final class Inventory extends Model
         $materialId = max(1, (int) ($data['material_id'] ?? 1));
         $branchId = max(1, (int) ($data['branch_id'] ?? 1));
         $staffId = max(1, (int) ($data['staff_id'] ?? 1));
+        $posSessionId = max(1, (int) ($data['pos_session_id'] ?? 0));
         $sign = $type === 'import' ? 1 : -1;
 
         $this->db->beginTransaction();
         try {
             $this->db->prepare(
                 "INSERT INTO stock_movements (
-                    movement_code, material_id, branch_id, staff_id, movement_type, quantity, total_amount, note
+                    movement_code, material_id, branch_id, staff_id, pos_session_id, movement_type, quantity, total_amount, note
                  ) VALUES (
-                    :code, :material_id, :branch_id, :staff_id, :movement_type, :quantity, :total_amount, :note
+                    :code, :material_id, :branch_id, :staff_id, :pos_session_id, :movement_type, :quantity, :total_amount, :note
                  )"
             )->execute([
                 'code' => strtoupper(substr($type, 0, 2)) . '-' . date('His'),
                 'material_id' => $materialId,
                 'branch_id' => $branchId,
                 'staff_id' => $staffId,
+                'pos_session_id' => $posSessionId,
                 'movement_type' => $type,
                 'quantity' => $quantity,
                 'total_amount' => max(0, (float) ($data['total_amount'] ?? 0)),
                 'note' => trim((string) ($data['note'] ?? '')),
             ]);
+            $movementId = (int) $this->db->lastInsertId();
 
             $this->db->prepare(
                 "UPDATE inventory_materials
                  SET stock_quantity = GREATEST(stock_quantity + :delta, 0), last_updated = NOW()
                  WHERE id = :id"
             )->execute(['delta' => $quantity * $sign, 'id' => $materialId]);
+
+            (new PosSession())->logFromPayload($data, 'stock_movement', [
+                'entity_type' => 'stock_movement',
+                'entity_id' => $movementId,
+                'quantity' => $quantity,
+                'amount' => max(0, (float) ($data['total_amount'] ?? 0)),
+                'status_to' => $type,
+                'note' => trim((string) ($data['note'] ?? '')),
+            ]);
 
             $this->db->commit();
             return $this->overview();

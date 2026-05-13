@@ -85,7 +85,7 @@ final class Dashboard extends Model
     private function recentInvoices(): array
     {
         return $this->db->query(
-            "SELECT i.id, i.invoice_date, i.invoice_time, i.sales_channel, i.total_amount,
+            "SELECT i.id, i.invoice_date, i.invoice_time, i.bill_started_at, i.paid_at, i.sales_channel, i.total_amount,
                     i.payment_method, COALESCE(c.customer_name, 'Guest') AS customer_name,
                     b.branch_name
              FROM invoices i

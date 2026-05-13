@@ -84,6 +84,15 @@ final class Campaign extends Model
                 ]);
             }
 
+            (new PosSession())->logFromPayload($data, 'campaign_created', [
+                'entity_type' => 'promotion',
+                'entity_id' => $promotionId,
+                'quantity' => count($customers),
+                'amount' => max(0, (float) ($data['discount_value'] ?? 0)),
+                'status_to' => 'active',
+                'note' => $name,
+            ]);
+
             $this->db->commit();
             return ['promotion_id' => $promotionId, 'issued_count' => count($customers), 'campaigns' => $this->performance()];
         } catch (\Throwable $exception) {

@@ -2298,6 +2298,20 @@ body {
   font-weight: 800;
 }
 
+.pos-body .session-chip {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius);
+  padding: 0 10px;
+  color: #f7e9df;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
 .pos-body .avatar {
   width: 28px;
   height: 28px;
@@ -2504,6 +2518,13 @@ body {
 
 .pos-body .table-card {
   min-height: 132px;
+}
+
+.pos-body .order-meta {
+  margin: -4px 0 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .pos-body .data-table {

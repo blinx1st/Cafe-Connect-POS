@@ -20,6 +20,33 @@ function Invoke-CafeApi {
   return $response.data
 }
 
+function New-PosSession {
+  param(
+    [int]$StaffId,
+    [int]$OpeningCash = 0
+  )
+
+  $session = Invoke-CafeApi "pos-session-login" @{
+    staff_id = $StaffId
+    opening_cash_amount = $OpeningCash
+  }
+
+  return $session.staff
+}
+
+function Add-Session {
+  param(
+    [hashtable]$Body,
+    $Staff
+  )
+
+  $Body.staff_id = $Staff.id
+  $Body.pos_session_id = $Staff.pos_session_id
+  $Body.session_token = $Staff.session_token
+  $Body.staff_role = $Staff.staff_role
+  return $Body
+}
+
 $suffix = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 $phone = "098$suffix".Substring(0, 10)
 
@@ -31,18 +58,25 @@ $member = Invoke-CafeApi "member-register" @{
 
 Invoke-CafeApi "member-lookup" @{ identity = $phone } | Out-Null
 
-Invoke-CafeApi "checkout" @{
+$cashier = New-PosSession -StaffId 2 -OpeningCash 1000000
+$waiter = New-PosSession -StaffId 1
+$barista = New-PosSession -StaffId 3
+$manager = New-PosSession -StaffId 7
+
+$checkoutBody = Add-Session @{
   staff_id = 2
   branch_id = 1
   customer_id = $member.member.id
   payment_method = "cash"
   sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
   items = @(
     @{ product_id = 1; quantity = 1; size = "M" }
   )
-} | Out-Null
+} $cashier
+Invoke-CafeApi "checkout" $checkoutBody | Out-Null
 
-$orderResult = Invoke-CafeApi "create-order" @{
+$orderBody = Add-Session @{
   staff_id = 1
   waiter_id = 1
   branch_id = 1
@@ -51,17 +85,27 @@ $orderResult = Invoke-CafeApi "create-order" @{
   items = @(
     @{ product_id = 2; quantity = 1; size = "M" }
   )
-}
+} $waiter
+$orderResult = Invoke-CafeApi "create-order" $orderBody
 
 $createdOrder = $orderResult.orders | Where-Object { $_.id -eq $orderResult.order_id } | Select-Object -First 1
 $firstItem = $createdOrder.items | Select-Object -First 1
 
-Invoke-CafeApi "update-order-item" @{
+$kitchenBody = Add-Session @{
   staff_id = 3
   item_id = $firstItem.id
   status = "ready"
-} | Out-Null
+} $barista
+Invoke-CafeApi "update-order-item" $kitchenBody | Out-Null
 
 Invoke-CafeApi "dashboard" @{} | Out-Null
+
+$reportBody = Add-Session @{} $manager
+Invoke-CafeApi "pos-session-report" $reportBody | Out-Null
+
+Invoke-CafeApi "pos-session-logout" (Add-Session @{} $cashier) | Out-Null
+Invoke-CafeApi "pos-session-logout" (Add-Session @{} $waiter) | Out-Null
+Invoke-CafeApi "pos-session-logout" (Add-Session @{} $barista) | Out-Null
+Invoke-CafeApi "pos-session-logout" (Add-Session @{} $manager) | Out-Null
 
 Write-Host "Smoke API test completed. Reset install.php afterward if you want clean sample data."

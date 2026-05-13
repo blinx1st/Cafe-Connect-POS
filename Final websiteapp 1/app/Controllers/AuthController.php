@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Controller;
 use App\Core\Session;
 use App\Models\Customer;
+use App\Models\PosSession;
 use App\Models\Staff;
 use InvalidArgumentException;
 
@@ -61,7 +62,7 @@ final class AuthController extends Controller
         return ['member' => null];
     }
 
-    public function requireStaffRole(array $payload, array $allowedRoles): array
+    public function requireStaffRole(array $payload, array $allowedRoles, bool $requireSession = true): array
     {
         $staffId = (int) ($payload['staff_id'] ?? 0);
         if ($staffId <= 0) {
@@ -75,6 +76,10 @@ final class AuthController extends Controller
 
         if (!in_array($staff['staff_role'], $allowedRoles, true)) {
             throw new InvalidArgumentException('Role ' . role_label((string) $staff['staff_role']) . ' không có quyền thực hiện thao tác này.');
+        }
+
+        if ($requireSession) {
+            (new PosSession())->requireOpen($payload, $staff);
         }
 
         return $staff;

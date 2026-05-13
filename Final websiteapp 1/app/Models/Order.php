@@ -77,6 +77,8 @@ final class Order extends Model
         $waiterId = max(1, (int) ($data['waiter_id'] ?? $data['staff_id'] ?? 1));
         $customerId = isset($data['customer_id']) && $data['customer_id'] !== '' ? (int) $data['customer_id'] : null;
         $note = trim((string) ($data['note'] ?? ''));
+        $totalQuantity = 0;
+        $subtotal = 0.0;
 
         $productModel = new Product();
         $products = $productModel->byIds(array_map(static fn ($item) => (int) ($item['product_id'] ?? 0), $items));
@@ -112,6 +114,9 @@ final class Order extends Model
                     throw new InvalidArgumentException('Invalid product in service order.');
                 }
                 $unitPrice = (float) $products[$productId]['price'];
+                $lineTotal = $unitPrice * $quantity;
+                $totalQuantity += $quantity;
+                $subtotal += $lineTotal;
                 $itemStmt->execute([
                     'order_id' => $orderId,
                     'product_id' => $productId,
@@ -120,11 +125,19 @@ final class Order extends Model
                     'size' => in_array(($item['size'] ?? 'M'), ['S', 'M', 'L'], true) ? $item['size'] : 'M',
                     'topping' => trim((string) ($item['topping'] ?? '')) ?: null,
                     'note' => trim((string) ($item['note'] ?? '')) ?: null,
-                    'line_total' => $unitPrice * $quantity,
+                    'line_total' => $lineTotal,
                 ]);
             }
 
             $this->db->prepare("UPDATE dining_tables SET status = 'occupied' WHERE id = :id")->execute(['id' => $tableId]);
+            (new PosSession())->logFromPayload($data, 'order_created', [
+                'entity_type' => 'service_order',
+                'entity_id' => $orderId,
+                'quantity' => $totalQuantity,
+                'amount' => $subtotal,
+                'status_to' => 'preparing',
+                'note' => $orderCode,
+            ]);
             $this->db->commit();
 
             return ['order_id' => $orderId, 'orders' => $this->activeOrders(), 'tables' => $this->tables()];
@@ -144,14 +157,58 @@ final class Order extends Model
 
         $this->db->beginTransaction();
         try {
-            $this->db->prepare(
-                "UPDATE service_order_items SET kitchen_status = :status WHERE id = :id"
-            )->execute(['status' => $status, 'id' => $itemId]);
-
-            $stmt = $this->db->prepare("SELECT service_order_id FROM service_order_items WHERE id = :id");
+            $stmt = $this->db->prepare(
+                "SELECT soi.id, soi.service_order_id, soi.product_id, soi.quantity, soi.line_total,
+                        soi.kitchen_status, p.product_name, so.order_code
+                 FROM service_order_items soi
+                 JOIN products p ON p.id = soi.product_id
+                 JOIN service_orders so ON so.id = soi.service_order_id
+                 WHERE soi.id = :id
+                 FOR UPDATE"
+            );
             $stmt->execute(['id' => $itemId]);
-            $orderId = (int) $stmt->fetchColumn();
+            $item = $stmt->fetch();
+            if (!$item) {
+                throw new InvalidArgumentException('Service order item not found.');
+            }
+
+            $set = ['kitchen_status = :status'];
+            $params = ['status' => $status, 'id' => $itemId];
+            $staffId = (int) ($data['staff_id'] ?? 0);
+            $sessionId = (int) ($data['pos_session_id'] ?? 0);
+            if ($status === 'preparing') {
+                $set[] = 'preparing_started_at = COALESCE(preparing_started_at, NOW())';
+                $set[] = 'prepared_by_staff_id = :prepared_staff_id';
+                $set[] = 'prepared_by_session_id = :prepared_session_id';
+                $params['prepared_staff_id'] = $staffId ?: null;
+                $params['prepared_session_id'] = $sessionId ?: null;
+            } elseif ($status === 'ready') {
+                $set[] = 'preparing_started_at = COALESCE(preparing_started_at, created_at)';
+                $set[] = 'ready_at = COALESCE(ready_at, NOW())';
+                $set[] = 'prepared_by_staff_id = :prepared_staff_id';
+                $set[] = 'prepared_by_session_id = :prepared_session_id';
+                $params['prepared_staff_id'] = $staffId ?: null;
+                $params['prepared_session_id'] = $sessionId ?: null;
+            } elseif ($status === 'served') {
+                $set[] = 'served_at = COALESCE(served_at, NOW())';
+            }
+
+            $this->db->prepare(
+                "UPDATE service_order_items SET " . implode(', ', $set) . " WHERE id = :id"
+            )->execute($params);
+
+            $orderId = (int) $item['service_order_id'];
             $this->syncOrderStatus($orderId);
+            (new PosSession())->logFromPayload($data, 'kitchen_' . $status, [
+                'entity_type' => 'service_order_item',
+                'entity_id' => $itemId,
+                'product_id' => (int) $item['product_id'],
+                'quantity' => (int) $item['quantity'],
+                'amount' => (float) $item['line_total'],
+                'status_from' => (string) $item['kitchen_status'],
+                'status_to' => $status,
+                'note' => $item['order_code'] . ' - ' . $item['product_name'],
+            ]);
             $this->db->commit();
         } catch (\Throwable $exception) {
             $this->db->rollBack();

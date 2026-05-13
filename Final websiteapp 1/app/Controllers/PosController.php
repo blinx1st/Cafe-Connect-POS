@@ -130,6 +130,8 @@ final class PosController extends Controller
             'campaigns' => [],
             'inventory' => null,
             'reports' => null,
+            'current_session' => null,
+            'session_reports' => [],
             'roles' => Staff::ROLES,
         ];
 
@@ -151,6 +153,7 @@ final class PosController extends Controller
         $data['campaigns'] = (new Campaign())->performance();
         $data['inventory'] = (new Inventory())->overview();
         $data['reports'] = (new Report())->data();
+        $data['session_reports'] = $data['reports']['session_reports'] ?? [];
 
         return $data;
     }
