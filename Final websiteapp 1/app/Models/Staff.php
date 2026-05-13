@@ -33,6 +33,22 @@ final class Staff extends Model
         )->fetchAll();
     }
 
+    public function find(int $id): ?array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT s.id, s.staff_name, s.staff_role, s.phone_number, s.email, s.status,
+                    s.branch_id, b.branch_name
+             FROM staff s
+             JOIN branches b ON b.id = s.branch_id
+             WHERE s.id = :id AND s.status = 'active'
+             LIMIT 1"
+        );
+        $stmt->execute(['id' => $id]);
+        $staff = $stmt->fetch();
+
+        return $staff ?: null;
+    }
+
     public function save(array $data): array
     {
         $id = (int) ($data['id'] ?? 0);

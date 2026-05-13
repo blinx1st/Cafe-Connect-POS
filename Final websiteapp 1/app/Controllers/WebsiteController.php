@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Database;
+use App\Core\Session;
 use App\Models\Customer;
 use App\Models\Product;
 
@@ -24,6 +25,7 @@ final class WebsiteController extends Controller
                 'reviews' => [],
                 'staff' => [],
                 'branches' => [],
+                'member' => null,
             ],
         ];
 
@@ -33,6 +35,15 @@ final class WebsiteController extends Controller
             $data['appData']['products'] = $product->active();
             $data['appData']['categories'] = $product->categories();
             $data['appData']['reviews'] = $customer->reviews();
+            $memberId = (int) Session::get('member_customer_id', 0);
+            if ($memberId > 0) {
+                $member = $customer->lookup((string) $memberId);
+                if ($member) {
+                    $data['appData']['member'] = $member;
+                } else {
+                    Session::forget('member_customer_id');
+                }
+            }
         }
 
         $this->view('website/home', $data);

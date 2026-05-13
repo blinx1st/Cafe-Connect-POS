@@ -28,29 +28,34 @@ final class ApiController extends Controller
 
             $payload = request_payload();
             $route = $this->route();
+            $auth = new AuthController();
 
             $result = match ($route) {
                 '/api/bootstrap', '/api/website-bootstrap' => $this->websiteBootstrap(),
                 '/api/pos-bootstrap' => $this->posBootstrap(),
+                '/api/member-session' => $auth->memberSession(),
+                '/api/member-login' => $auth->memberLogin($payload),
+                '/api/member-register' => $auth->memberRegister($payload),
+                '/api/member-logout' => $auth->memberLogout(),
                 '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
                 '/api/customer-create' => (new Customer())->create($payload),
                 '/api/newsletter-subscribe' => (new Customer())->newsletterSubscribe($payload),
                 '/api/favorite-toggle' => (new Customer())->toggleFavorite($payload),
-                '/api/checkout' => (new Invoice())->checkout($payload),
+                '/api/checkout' => $this->checkout($payload, $auth),
                 '/api/orders' => ['orders' => (new Order())->activeOrders(), 'tables' => (new Order())->tables()],
-                '/api/create-order' => (new Order())->create($payload),
-                '/api/update-order-item' => (new Order())->updateItemStatus($payload),
+                '/api/create-order' => $this->withRole($auth, $payload, ['waiter', 'manager', 'owner', 'admin'], fn () => (new Order())->create($payload)),
+                '/api/update-order-item' => $this->withRole($auth, $payload, ['barista', 'waiter', 'manager', 'owner', 'admin'], fn () => (new Order())->updateItemStatus($payload)),
                 '/api/kitchen' => ['kitchen' => (new Order())->kitchenQueue()],
-                '/api/checkout-order' => (new Invoice())->checkout($payload),
+                '/api/checkout-order' => $this->withRole($auth, $payload, ['cashier', 'manager', 'owner', 'admin'], fn () => (new Invoice())->checkout($payload)),
                 '/api/dashboard' => (new Dashboard())->data(),
                 '/api/campaigns' => ['campaigns' => (new Campaign())->performance()],
-                '/api/create-campaign' => (new Campaign())->create($payload),
+                '/api/create-campaign' => $this->withRole($auth, $payload, ['marketing', 'manager', 'owner', 'admin'], fn () => (new Campaign())->create($payload)),
                 '/api/inventory' => (new Inventory())->overview(),
-                '/api/stock-movement' => (new Inventory())->createMovement($payload),
-                '/api/cash-transaction' => $this->createCashTransaction($payload),
-                '/api/product-save' => (new Product())->save($payload),
-                '/api/staff-save' => (new Staff())->save($payload),
-                '/api/reports' => (new Report())->data(),
+                '/api/stock-movement' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => (new Inventory())->createMovement($payload)),
+                '/api/cash-transaction' => $this->withRole($auth, $payload, ['cashier', 'manager', 'owner', 'admin'], fn () => $this->createCashTransaction($payload)),
+                '/api/product-save' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => (new Product())->save($payload)),
+                '/api/staff-save' => $this->withRole($auth, $payload, ['owner', 'admin'], fn () => (new Staff())->save($payload)),
+                '/api/reports' => $this->withRole($auth, $payload, ['manager', 'owner', 'admin'], fn () => (new Report())->data()),
                 default => throw new \InvalidArgumentException('Unknown API route: ' . $route),
             };
 
@@ -71,6 +76,10 @@ final class ApiController extends Controller
         if (isset($_GET['action'])) {
             return match ((string) $_GET['action']) {
                 'bootstrap' => '/api/bootstrap',
+                'member_session' => '/api/member-session',
+                'member_login' => '/api/member-login',
+                'member_register' => '/api/member-register',
+                'member_logout' => '/api/member-logout',
                 'member_lookup' => '/api/member-lookup',
                 'customer_create' => '/api/customer-create',
                 'checkout' => '/api/checkout',
@@ -133,5 +142,21 @@ final class ApiController extends Controller
         ]);
 
         return (new Report())->data();
+    }
+
+    private function checkout(array $payload, AuthController $auth): array
+    {
+        $salesChannel = $payload['sales_channel'] ?? 'pos';
+        if ($salesChannel !== 'website' || !empty($payload['order_id'])) {
+            $auth->requireStaffRole($payload, ['cashier', 'manager', 'owner', 'admin']);
+        }
+
+        return (new Invoice())->checkout($payload);
+    }
+
+    private function withRole(AuthController $auth, array $payload, array $roles, callable $callback): mixed
+    {
+        $auth->requireStaffRole($payload, $roles);
+        return $callback();
     }
 }

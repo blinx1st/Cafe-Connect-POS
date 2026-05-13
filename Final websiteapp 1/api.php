@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 $legacyActionMap = [
     'bootstrap' => '/api/bootstrap',
+    'member_session' => '/api/member-session',
+    'member_login' => '/api/member-login',
+    'member_register' => '/api/member-register',
+    'member_logout' => '/api/member-logout',
     'member_lookup' => '/api/member-lookup',
     'customer_create' => '/api/customer-create',
     'voucher_validate' => '/api/member-lookup',

@@ -31,7 +31,7 @@ const posModules = [
 ];
 
 const state = {
-  site: { cart: [], customer: null, voucherId: "" },
+  site: { cart: [], customer: cafeApp.member || null, voucherId: "" },
   pos: {
     cart: [],
     customer: null,
@@ -100,10 +100,15 @@ async function api(endpoint, payload = {}) {
   }
 
   const clean = String(endpoint).replace(/^\/?api\/?/, "");
+  const requestPayload = { ...payload };
+  if (pageName === "pos" && state.pos.user && !Object.prototype.hasOwnProperty.call(requestPayload, "staff_id")) {
+    requestPayload.staff_id = state.pos.user.id;
+  }
+
   const response = await fetch(`${apiBase}?endpoint=${encodeURIComponent(clean)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(requestPayload),
   });
   const json = await response.json();
   if (!json.ok) {
@@ -295,6 +300,53 @@ function renderMiniMember(scope) {
   `;
 }
 
+function setSiteMember(member) {
+  state.site.customer = member || null;
+  state.site.voucherId = "";
+  renderMemberAccount();
+  renderMiniMember("site");
+  renderVoucherOptions("site");
+  renderSiteProducts();
+  renderProfile("portal", state.site.customer);
+}
+
+function renderMemberAccount() {
+  const target = document.querySelector("[data-member-auth-status]");
+  if (!target) return;
+
+  const member = state.site.customer;
+  if (!member) {
+    target.innerHTML = `
+      <h3>Chưa đăng nhập</h3>
+      <p>Đăng nhập bằng số điện thoại để dùng voucher, tích điểm và đồng bộ đơn hàng với POS.</p>
+      <div class="metric-grid two">
+        <div class="metric"><strong>0</strong><small>Điểm hiện có</small></div>
+        <div class="metric"><strong>0</strong><small>Voucher khả dụng</small></div>
+      </div>
+    `;
+    return;
+  }
+
+  const usableCount = member.vouchers?.filter((voucher) => voucher.usable).length || 0;
+  target.innerHTML = `
+    <div class="profile-head">
+      <span class="avatar">${escapeHtml((member.customer_name || "?").slice(0, 1))}</span>
+      <div>
+        <h3>${escapeHtml(member.customer_name)}</h3>
+        <p>${escapeHtml(member.phone_number)} · ${escapeHtml(member.email || "Chưa có email")}</p>
+      </div>
+    </div>
+    <div class="metric-grid two">
+      <div class="metric"><strong>${Number(member.current_points || 0).toLocaleString("vi-VN")}</strong><small>Điểm</small></div>
+      <div class="metric"><strong>${usableCount}</strong><small>Voucher khả dụng</small></div>
+    </div>
+    <div class="account-actions">
+      <a class="secondary-link" href="#member">Xem hồ sơ</a>
+      <button class="secondary-btn" type="button" data-member-logout>Đăng xuất</button>
+    </div>
+  `;
+}
+
 function voucherStatusClass(voucher) {
   if (voucher.usable) return "good";
   if (["redeemed", "expired", "cancelled"].includes(voucher.status)) return "bad";
@@ -424,13 +476,18 @@ async function lookupMember(scope, identity) {
   }
 
   if (scope === "site" || scope === "pos") {
-    state[scope].customer = customer;
-    state[scope].voucherId = "";
-    renderMiniMember(scope);
-    renderVoucherOptions(scope);
-    if (scope === "site") renderSiteProducts();
-  } else {
+    if (scope === "site") {
+      setSiteMember(customer);
+    } else {
+      state[scope].customer = customer;
+      state[scope].voucherId = "";
+      renderMiniMember(scope);
+      renderVoucherOptions(scope);
+    }
+  } else if (scope === "crm") {
     state.pos.customer = customer;
+    renderProfile(scope, customer);
+  } else {
     renderProfile(scope, customer);
   }
 
@@ -441,6 +498,11 @@ async function checkoutScope(scope, extraPayload = {}) {
   const cart = cartFor(scope);
   if (!cart.length && !extraPayload.order_id) {
     showToast("Giỏ hàng đang rỗng.");
+    return;
+  }
+  if (scope === "site" && !state.site.customer) {
+    showToast("Vui lòng đăng nhập hoặc đăng ký thành viên trước khi đặt hàng.");
+    document.querySelector("#account")?.scrollIntoView({ behavior: "smooth", block: "start" });
     return;
   }
 
@@ -463,7 +525,11 @@ async function checkoutScope(scope, extraPayload = {}) {
   }
   state[scope].voucherId = "";
   if (result.customer && (scope === "site" || scope === "pos")) {
-    state[scope].customer = result.customer;
+    if (scope === "site") {
+      setSiteMember(result.customer);
+    } else {
+      state[scope].customer = result.customer;
+    }
   }
   renderCart(scope);
   renderVoucherOptions(scope);
@@ -1160,6 +1226,17 @@ function wireEvents() {
       return;
     }
 
+    if (event.target.closest("[data-member-logout]")) {
+      try {
+        await api("member-logout");
+        setSiteMember(null);
+        showToast("Đã đăng xuất tài khoản thành viên.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+
     if (event.target.closest("[data-pos-refresh]")) {
       try {
         await refreshPosData();
@@ -1299,6 +1376,8 @@ function wireEvents() {
 
   document.addEventListener("submit", async (event) => {
     const lookupForm = event.target.closest("[data-member-lookup]");
+    const memberLoginForm = event.target.closest("[data-member-login]");
+    const memberRegisterForm = event.target.closest("[data-member-register]");
     const createForm = event.target.closest("[data-customer-create]");
     const newsletterForm = event.target.closest("[data-newsletter-form]");
     const serviceOrderForm = event.target.closest("[data-service-order-create]");
@@ -1307,6 +1386,31 @@ function wireEvents() {
     const cashForm = event.target.closest("[data-cash-transaction]");
     const productForm = event.target.closest("[data-product-save]");
     const staffForm = event.target.closest("[data-staff-save]");
+
+    if (memberLoginForm) {
+      event.preventDefault();
+      try {
+        const result = await api("member-login", Object.fromEntries(new FormData(memberLoginForm)));
+        setSiteMember(result.member);
+        showToast("Đăng nhập thành viên thành công.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+
+    if (memberRegisterForm) {
+      event.preventDefault();
+      try {
+        const result = await api("member-register", Object.fromEntries(new FormData(memberRegisterForm)));
+        setSiteMember(result.member);
+        memberRegisterForm.reset();
+        showToast(result.member?.was_existing ? "Số điện thoại đã tồn tại, đã đăng nhập hồ sơ." : "Đã tạo tài khoản thành viên.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
 
     if (lookupForm) {
       event.preventDefault();
@@ -1470,9 +1574,15 @@ function wireEvents() {
 }
 
 function initialRender() {
+  renderMemberAccount();
   renderSiteProducts();
   renderReviews();
   renderCart("site");
+  if (state.site.customer) {
+    renderMiniMember("site");
+    renderVoucherOptions("site");
+    renderProfile("portal", state.site.customer);
+  }
 
   if (pageName === "pos") {
     renderPosApp();

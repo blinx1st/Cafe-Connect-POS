@@ -5,6 +5,7 @@
   </button>
   <nav class="site-nav" data-nav>
     <a href="#menu">Menu</a>
+    <a href="#account">Tài khoản</a>
     <a href="#order">Đặt hàng</a>
     <a href="#member">Thành viên</a>
     <a href="#reviews">Đánh giá</a>
@@ -25,8 +26,8 @@
       <h1>Cafe Connect</h1>
       <p>Website khách hàng kết nối trực tiếp với POS: đơn hàng, điểm thành viên, voucher và lịch sử mua đều dùng chung một database.</p>
       <div class="hero-actions">
-        <a class="primary-btn" href="#order">Đặt món</a>
-        <a class="ghost-btn" href="#member">Tra cứu thành viên</a>
+        <a class="primary-btn" href="#account">Đăng nhập thành viên</a>
+        <a class="ghost-btn" href="#order">Đặt món</a>
       </div>
     </div>
   </section>
@@ -36,6 +37,33 @@
     <article><img src="<?= e(asset_url('images/icon-cold.svg')) ?>" alt=""><span>Cà phê lạnh</span></article>
     <article><img src="<?= e(asset_url('images/icon-cup.svg')) ?>" alt=""><span>Trà & matcha</span></article>
     <article><img src="<?= e(asset_url('images/icon-dessert.svg')) ?>" alt=""><span>Bánh ngọt</span></article>
+  </section>
+
+  <section class="section-shell" id="account">
+    <div class="section-title">
+      <p class="eyebrow">Member account</p>
+      <h2>Đăng nhập hoặc đăng ký thành viên</h2>
+      <p>Dùng số điện thoại để đăng nhập. Thành viên đăng ký trên website sẽ xuất hiện ngay trong POS CRM.</p>
+    </div>
+    <div class="member-account-grid">
+      <section class="auth-card">
+        <h3>Đăng nhập</h3>
+        <form class="lookup-form wide" data-member-login>
+          <label>Số điện thoại / email <input type="text" name="identity" value="0900000001" required></label>
+          <button type="submit">Đăng nhập</button>
+        </form>
+      </section>
+      <section class="auth-card">
+        <h3>Đăng ký nhanh</h3>
+        <form class="create-form compact" data-member-register>
+          <label>Họ tên <input name="customer_name" required></label>
+          <label>Số điện thoại <input name="phone_number" required></label>
+          <label>Email <input type="email" name="email"></label>
+          <button type="submit" class="primary-btn">Tạo tài khoản</button>
+        </form>
+      </section>
+      <section class="auth-card member-auth-status" data-member-auth-status></section>
+    </div>
   </section>
 
   <section class="section-shell" id="menu">
@@ -52,7 +80,7 @@
       <div class="section-title compact">
         <p class="eyebrow">Website order</p>
         <h2>Đặt món và tích điểm</h2>
-        <p>Khách nhập số điện thoại thành viên, chọn voucher khả dụng và đơn được lưu với sales_channel = website.</p>
+        <p>Đăng nhập thành viên để dùng voucher, lưu hóa đơn vào hồ sơ và cộng điểm tự động.</p>
       </div>
 
       <aside class="cart-panel">
@@ -60,7 +88,7 @@
           <label>Số điện thoại / email <input type="text" name="identity" value="0900000001" placeholder="0900000001"></label>
           <button type="submit">Tra cứu</button>
         </form>
-        <div data-member-result="site" class="member-result muted-box">Nhập số điện thoại để xem điểm và voucher.</div>
+        <div data-member-result="site" class="member-result muted-box">Đăng nhập hoặc tra cứu số điện thoại để xem điểm và voucher.</div>
         <div data-site-cart class="cart-list"></div>
         <label class="field">Voucher <select data-site-voucher><option value="">Không dùng voucher</option></select></label>
         <label class="field">Thanh toán
