@@ -648,6 +648,134 @@ p {
   transform: scaleX(-1);
 }
 
+.member-portal {
+  width: var(--container);
+  margin: 0 auto;
+  padding: 96px 0 72px;
+}
+
+.member-heading {
+  max-width: 760px;
+  margin-bottom: 34px;
+}
+
+.member-heading .eyebrow {
+  margin-bottom: 14px;
+  color: #7a563d;
+}
+
+.member-heading h2 {
+  margin: 0 0 14px;
+  font-family: "Playfair Display", serif;
+  font-size: clamp(34px, 4vw, 56px);
+  line-height: 1.08;
+}
+
+.member-heading p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.member-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1.1fr) repeat(3, minmax(210px, 1fr));
+  gap: 18px;
+}
+
+.member-card {
+  min-width: 0;
+  padding: 22px;
+  border: 1.5px solid var(--sand);
+  border-radius: 18px;
+  background: #fffaf3;
+  box-shadow: var(--shadow);
+}
+
+.profile-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+}
+
+.profile-avatar {
+  width: 64px;
+  height: 64px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #6f2b21;
+  font-weight: 800;
+}
+
+.card-label {
+  margin: 0 0 8px;
+  color: #8b6f5c;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.member-card h3 {
+  margin: 0 0 10px;
+  font-size: 22px;
+}
+
+.member-card p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.member-stats {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.member-stats span {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f1e5d8;
+}
+
+.member-stats strong {
+  font-size: 20px;
+}
+
+.member-stats small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.voucher-card button {
+  min-height: 42px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: #30261c;
+  font-weight: 700;
+}
+
+.history-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.history-row:last-child {
+  border-bottom: 0;
+}
+
 .footer {
   display: grid;
   grid-template-columns: 1.3fr repeat(5, auto);
@@ -817,6 +945,10 @@ p {
   .newsletter-beans {
     opacity: 0.32;
   }
+
+  .member-grid {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -923,6 +1055,11 @@ p {
 
   .newsletter-beans {
     opacity: 0.14;
+  }
+
+  .member-grid,
+  .member-stats {
+    grid-template-columns: 1fr;
   }
 
   .footer {

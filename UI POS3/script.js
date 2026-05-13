@@ -20,6 +20,7 @@ const roles = {
     nav: [
       { id: "cashier", label: "Màn hình thu ngân" },
       { id: "payment", label: "Thanh toán" },
+      { id: "customers", label: "CRM khách hàng" },
       { id: "finance", label: "Thu chi" },
     ],
   },
@@ -30,11 +31,12 @@ const roles = {
     description: "Theo dõi doanh thu, món bán chạy và vận hành.",
     nav: [
       { id: "owner", label: "Tổng quan" },
+      { id: "customers", label: "Khách hàng" },
       { id: "menuAdmin", label: "Quản lý món" },
       { id: "employees", label: "Nhân viên" },
       { id: "reportsRevenue", label: "BC doanh thu" },
       { id: "reportsSales", label: "BC bán hàng" },
-      { id: "promotions", label: "Khuyến mãi" },
+      { id: "promotions", label: "CRM Campaign" },
     ],
   },
   barista: {
@@ -213,9 +215,89 @@ const transactions = [
 ];
 
 const promotions = [
-  { code: "KM100", name: "Giảm 10% hóa đơn từ 150K", discount: "10%", active: true, range: "01/05 - 31/05" },
-  { code: "KM200", name: "Mua 2 cà phê tặng 1 bánh", discount: "Combo", active: true, range: "10/05 - 20/05" },
-  { code: "KM300", name: "Happy hour sau 19h", discount: "15%", active: false, range: "15/05 - 30/05" },
+  { code: "KM100", name: "Birthday Voucher", discount: "20.000đ", target: "birthday", active: true, range: "01/05 - 31/05", issued: 320, redeemed: 87, revenue: 15600000 },
+  { code: "KM200", name: "Inactive Customer Reactivation", discount: "30.000đ", target: "inactive", active: true, range: "10/05 - 20/05", issued: 180, redeemed: 42, revenue: 7140000 },
+  { code: "KM300", name: "Gold Member Weekend", discount: "15%", target: "gold", active: false, range: "15/05 - 30/05", issued: 95, redeemed: 18, revenue: 4380000 },
+];
+
+const tierRules = [
+  { name: "Đồng", min: 0, discountRate: 0 },
+  { name: "Bạc", min: 500000, discountRate: 5 },
+  { name: "Vàng", min: 3000000, discountRate: 10 },
+];
+
+const customers = [
+  {
+    id: "C001",
+    name: "Nguyễn An",
+    phone: "0901234001",
+    email: "an.nguyen@email.com",
+    tier: "Vàng",
+    points: 1250,
+    totalSpending: 3560000,
+    birthday: "18/03",
+    segment: "VIP / Birthday",
+    lastVisit: "12/05/2026",
+  },
+  {
+    id: "C002",
+    name: "Trần Bình",
+    phone: "0901234002",
+    email: "binh.tran@email.com",
+    tier: "Bạc",
+    points: 620,
+    totalSpending: 1280000,
+    birthday: "02/09",
+    segment: "Returning",
+    lastVisit: "08/05/2026",
+  },
+  {
+    id: "C003",
+    name: "Lê Mai",
+    phone: "0901234003",
+    email: "mai.le@email.com",
+    tier: "Đồng",
+    points: 180,
+    totalSpending: 320000,
+    birthday: "21/05",
+    segment: "New / Birthday",
+    lastVisit: "01/05/2026",
+  },
+  {
+    id: "C004",
+    name: "Phạm Long",
+    phone: "0901234004",
+    email: "long.pham@email.com",
+    tier: "Bạc",
+    points: 410,
+    totalSpending: 890000,
+    birthday: "12/12",
+    segment: "Inactive 30+",
+    lastVisit: "28/03/2026",
+  },
+];
+
+const vouchers = [
+  { code: "BDAY-AN-20K", customerId: "C001", campaign: "KM100", title: "Birthday Voucher", discountValue: 20000, status: "active", expires: "31/05/2026" },
+  { code: "GOLD-WEEKEND", customerId: "C001", campaign: "KM300", title: "Gold Member Weekend", discountValue: 30000, status: "active", expires: "30/05/2026" },
+  { code: "BACK-BINH", customerId: "C002", campaign: "KM200", title: "Comeback Voucher", discountValue: 30000, status: "active", expires: "20/05/2026" },
+  { code: "BDAY-MAI-20K", customerId: "C003", campaign: "KM100", title: "Birthday Voucher", discountValue: 20000, status: "issued", expires: "31/05/2026" },
+  { code: "OLD-LONG", customerId: "C004", campaign: "KM200", title: "Inactive Customer Reactivation", discountValue: 30000, status: "expired", expires: "30/04/2026" },
+];
+
+const customerInteractions = [
+  { customerId: "C001", date: "12/05/2026", channel: "POS", note: "Mua 4 món tại Cầu Giấy, dùng voucher sinh nhật." },
+  { customerId: "C001", date: "10/05/2026", channel: "Email", note: "Đã gửi ưu đãi Gold Member Weekend." },
+  { customerId: "C002", date: "08/05/2026", channel: "POS", note: "Thanh toán đơn mang đi, tích thêm 11 điểm." },
+  { customerId: "C004", date: "05/05/2026", channel: "CRM", note: "Đưa vào nhóm khách 30 ngày chưa quay lại." },
+];
+
+const purchaseHistory = [
+  { customerId: "C001", invoice: "HD-000120", date: "12/05/2026", branch: "Cầu Giấy", amount: 196000, points: 18, channel: "POS" },
+  { customerId: "C001", invoice: "HD-000109", date: "01/05/2026", branch: "Tây Hồ", amount: 142000, points: 14, channel: "Website" },
+  { customerId: "C002", invoice: "HD-000115", date: "08/05/2026", branch: "Hoàn Kiếm", amount: 118000, points: 11, channel: "POS" },
+  { customerId: "C003", invoice: "HD-000088", date: "01/05/2026", branch: "Website", amount: 79000, points: 7, channel: "Website" },
+  { customerId: "C004", invoice: "HD-000041", date: "28/03/2026", branch: "Đống Đa", amount: 84000, points: 8, channel: "POS" },
 ];
 
 const state = {
@@ -231,7 +313,9 @@ const state = {
   selectedServeOrderId: "OD-1026",
   servedOrderId: null,
   paymentMethod: "cash",
-  selectedPromotion: "KM100",
+  selectedCustomerId: "C001",
+  customerQuery: "0901234001",
+  selectedPromotion: "BDAY-AN-20K",
   modal: null,
   toast: "",
 };
@@ -253,6 +337,30 @@ function money(value) {
 
 function getProduct(id) {
   return products.find((product) => product.id === id);
+}
+
+function getCustomer(id = state.selectedCustomerId) {
+  return customers.find((customer) => customer.id === id) || null;
+}
+
+function getTierRule(customer = getCustomer()) {
+  return tierRules.find((tier) => tier.name === customer?.tier) || tierRules[0];
+}
+
+function availableVouchers(customerId = state.selectedCustomerId) {
+  return vouchers.filter((voucher) => voucher.customerId === customerId && voucher.status === "active");
+}
+
+function updateCustomerTier(customer) {
+  const nextTier = tierRules
+    .slice()
+    .reverse()
+    .find((tier) => customer.totalSpending >= tier.min);
+  if (nextTier) customer.tier = nextTier.name;
+}
+
+function customerPurchaseHistory(customerId = state.selectedCustomerId) {
+  return purchaseHistory.filter((item) => item.customerId === customerId);
 }
 
 function orderTotal(order) {
@@ -475,11 +583,8 @@ function renderCashier() {
 }
 
 function renderCartPanel() {
-  const items = [...state.cart.entries()].map(([id, quantity]) => ({ product: getProduct(id), quantity }));
-  const subtotal = items.reduce((total, item) => total + item.product.price * item.quantity, 0);
-  const discount = subtotal >= 150000 ? 10000 : 0;
-  const tax = Math.round((subtotal - discount) * 0.08);
-  const total = subtotal - discount + tax;
+  const totals = cartTotals();
+  const { items, customer } = totals;
 
   return `
     <aside class="panel order-panel">
@@ -502,9 +607,10 @@ function renderCartPanel() {
         </label>
         <label class="field">
           <span>Khách hàng</span>
-          <input value="Khách lẻ" />
+          <input value="${customer ? `${customer.name} - ${customer.tier}` : "Khách lẻ"}" readonly />
         </label>
       </div>
+      ${renderCustomerMiniCard()}
       <div class="order-table">
         <div class="order-row header">
           <span>Món</span>
@@ -535,10 +641,11 @@ function renderCartPanel() {
         }
       </div>
       <div class="summary">
-        <div><span>Tạm tính</span><strong>${money(subtotal)}</strong></div>
-        <div><span>Giảm giá</span><strong>${money(discount)}</strong></div>
-        <div><span>VAT 8%</span><strong>${money(tax)}</strong></div>
-        <div class="total-line"><span>Thanh toán</span><strong>${money(total)}</strong></div>
+        <div><span>Tạm tính</span><strong>${money(totals.subtotal)}</strong></div>
+        <div><span>Giảm hạng ${customer ? customer.tier : ""}</span><strong>${money(totals.membershipDiscount)}</strong></div>
+        <div><span>Voucher</span><strong>${money(totals.voucherDiscount)}</strong></div>
+        <div><span>VAT 8%</span><strong>${money(totals.tax)}</strong></div>
+        <div class="total-line"><span>Thanh toán</span><strong>${money(totals.total)}</strong></div>
       </div>
       <div class="payment-actions">
         <button class="secondary-btn" data-clear-cart>Hủy đơn</button>
@@ -548,13 +655,41 @@ function renderCartPanel() {
   `;
 }
 
+function renderCustomerMiniCard() {
+  const customer = getCustomer();
+  if (!customer) {
+    return `
+      <div class="crm-mini-card">
+        <strong>Khách vãng lai</strong>
+        <span>Chưa ghi nhận điểm hoặc voucher. Vào màn thanh toán để tra SĐT/tạo khách mới.</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="crm-mini-card">
+      <div>
+        <strong>${customer.name}</strong>
+        <span>${customer.phone} · Hạng ${customer.tier} · ${customer.points} điểm</span>
+      </div>
+      <button class="chip-btn" data-view="customers">Mở hồ sơ</button>
+    </div>
+  `;
+}
+
 function cartTotals() {
   const items = [...state.cart.entries()].map(([id, quantity]) => ({ product: getProduct(id), quantity }));
   const subtotal = items.reduce((total, item) => total + item.product.price * item.quantity, 0);
-  const promotion = promotions.find((item) => item.code === state.selectedPromotion && item.active);
-  const discount = promotion && subtotal >= 150000 ? Math.round(subtotal * 0.1) : 0;
+  const customer = getCustomer();
+  const tier = getTierRule(customer);
+  const voucher = vouchers.find((item) => item.code === state.selectedPromotion && item.customerId === customer?.id && item.status === "active");
+  const membershipDiscount = customer ? Math.round((subtotal * tier.discountRate) / 100) : 0;
+  const voucherDiscount = voucher ? Math.min(voucher.discountValue, Math.max(0, subtotal - membershipDiscount)) : 0;
+  const discount = membershipDiscount + voucherDiscount;
   const tax = Math.round((subtotal - discount) * 0.08);
-  return { items, subtotal, promotion, discount, tax, total: subtotal - discount + tax };
+  const total = subtotal - discount + tax;
+  const pointsEarned = customer ? Math.floor(total / 10000) : 0;
+  return { items, subtotal, customer, tier, voucher, membershipDiscount, voucherDiscount, discount, tax, total, pointsEarned };
 }
 
 function renderWaiterOrder() {
@@ -636,8 +771,10 @@ function renderPayment() {
           </div>
           <div class="summary">
             <div><span>Tạm tính</span><strong>${money(totals.subtotal)}</strong></div>
-            <div><span>Khuyến mãi ${totals.promotion ? totals.promotion.code : ""}</span><strong>${money(totals.discount)}</strong></div>
+            <div><span>Giảm hạng ${totals.customer ? totals.customer.tier : ""}</span><strong>${money(totals.membershipDiscount)}</strong></div>
+            <div><span>Voucher ${totals.voucher ? totals.voucher.code : ""}</span><strong>${money(totals.voucherDiscount)}</strong></div>
             <div><span>VAT 8%</span><strong>${money(totals.tax)}</strong></div>
+            <div><span>Điểm sẽ cộng</span><strong>+${totals.pointsEarned}</strong></div>
             <div class="total-line"><span>Cần thanh toán</span><strong>${money(totals.total)}</strong></div>
           </div>
         </section>
@@ -648,18 +785,21 @@ function renderPayment() {
               <h2>Khách hàng</h2>
             </div>
           </div>
+          <form class="crm-search" data-customer-search-form>
+            <label class="search-box">
+              ${icons.search}
+              <input name="customerQuery" value="${state.customerQuery}" placeholder="Nhập SĐT/email/tên khách" />
+            </label>
+            <button class="primary-btn" type="submit">Tra CRM</button>
+          </form>
+          ${renderSelectedCustomerPanel()}
           <div class="form-grid one">
             <label class="field">
-              <span>Tên khách hàng</span>
-              <input value="Khách lẻ" />
-            </label>
-            <label class="field">
-              <span>Mã khuyến mãi</span>
+              <span>Voucher khả dụng</span>
               <select data-promotion>
-                ${promotions
-                  .map(
-                    (promo) => `<option value="${promo.code}" ${state.selectedPromotion === promo.code ? "selected" : ""}>${promo.code} - ${promo.name}</option>`,
-                  )
+                <option value="">Không dùng voucher</option>
+                ${availableVouchers(totals.customer?.id)
+                  .map((voucher) => `<option value="${voucher.code}" ${state.selectedPromotion === voucher.code ? "selected" : ""}>${voucher.code} - ${money(voucher.discountValue)}</option>`)
                   .join("")}
               </select>
             </label>
@@ -684,6 +824,57 @@ function renderPayment() {
       </section>
     </main>
   `);
+}
+
+function renderSelectedCustomerPanel() {
+  const customer = getCustomer();
+  if (!customer) {
+    return `
+      <div class="crm-customer-card">
+        <div class="empty-state">Không tìm thấy khách hàng. Nhập thông tin dưới đây để tạo hồ sơ mới tại POS.</div>
+        ${quickCustomerForm()}
+      </div>
+    `;
+  }
+
+  const tier = getTierRule(customer);
+  const history = customerPurchaseHistory(customer.id);
+  return `
+    <article class="crm-customer-card">
+      <div class="crm-profile-head">
+        <span class="avatar">${customer.tier.slice(0, 1)}</span>
+        <div>
+          <h3>${customer.name}</h3>
+          <p>${customer.phone} · ${customer.email}</p>
+        </div>
+        <span class="status-badge ready">${customer.segment}</span>
+      </div>
+      <div class="crm-stats">
+        <span><strong>${customer.tier}</strong><small>Hạng thành viên</small></span>
+        <span><strong>${customer.points}</strong><small>Điểm hiện có</small></span>
+        <span><strong>${tier.discountRate}%</strong><small>Giảm theo hạng</small></span>
+        <span><strong>${availableVouchers(customer.id).length}</strong><small>Voucher khả dụng</small></span>
+      </div>
+      <div class="muted">Lần gần nhất: ${customer.lastVisit} · Tổng chi tiêu: ${money(customer.totalSpending)}</div>
+      <div class="mini-history">
+        ${history
+          .slice(0, 2)
+          .map((item) => `<span>${item.invoice} · ${item.channel} · ${money(item.amount)}</span>`)
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function quickCustomerForm() {
+  return `
+    <form class="quick-customer-form" data-quick-customer-form>
+      <label class="field"><span>Tên khách mới</span><input name="name" required placeholder="VD: Nguyễn Minh" /></label>
+      <label class="field"><span>Số điện thoại</span><input name="phone" required placeholder="090..." /></label>
+      <label class="field"><span>Email</span><input name="email" placeholder="email@example.com" /></label>
+      <button class="primary-btn" type="submit">Tạo hồ sơ CRM</button>
+    </form>
+  `;
 }
 
 function renderFinance() {
@@ -1041,13 +1232,15 @@ function renderStationColumn(group) {
 
 function renderOwner() {
   const revenue = orders.reduce((total, order) => total + orderTotal(order), 0);
+  const returningCustomers = customers.filter((customer) => customer.totalSpending >= 500000).length;
+  const activeVouchers = vouchers.filter((voucher) => voucher.status === "active").length;
   return shell(`
     <main class="page">
       ${pageHeading("Màn hình chính của chủ cửa hàng", "Tổng quan vận hành")}
       <section class="owner-grid">
         ${metricCard("Doanh thu hôm nay", money(revenue), "+12% so với hôm qua")}
-        ${metricCard("Order đang mở", orders.filter((order) => order.status !== "paid").length, "Theo dõi thời gian thực")}
-        ${metricCard("Món đang bán", products.length, "Bao gồm đồ uống và bánh")}
+        ${metricCard("Khách thành viên", customers.length, `${returningCustomers} khách quay lại`)}
+        ${metricCard("Voucher khả dụng", activeVouchers, "Đang chờ dùng tại POS/Website")}
         ${metricCard("Món chờ trả", orders.reduce((sum, order) => sum + readyItemCount(order), 0), "Cần phục vụ xử lý")}
       </section>
       <section class="screen-grid">
@@ -1067,22 +1260,23 @@ function renderOwner() {
         <div class="panel">
           <div class="panel-head">
             <div>
-              <span class="eyebrow">Bán chạy</span>
-              <h2>Top món hôm nay</h2>
+              <span class="eyebrow">CRM</span>
+              <h2>Khách cần chăm sóc</h2>
             </div>
           </div>
           <div class="list">
-            ${products
-              .slice(0, 5)
+            ${customers
+              .slice()
+              .sort((a, b) => b.totalSpending - a.totalSpending)
               .map(
-                (product, index) => `
-                  <div class="list-item">
+                (customer, index) => `
+                  <button class="list-item customer-list-button" data-open-customer="${customer.id}">
                     <div class="list-top">
-                      <strong>${index + 1}. ${product.name}</strong>
-                      <span class="price">${money(product.price)}</span>
+                      <strong>${index + 1}. ${customer.name}</strong>
+                      <span class="mini-badge ${customer.tier === "Vàng" ? "ready" : customer.segment.includes("Inactive") ? "preparing" : ""}">${customer.tier}</span>
                     </div>
-                    <div class="muted">Đã bán ${34 - index * 4} phần · Còn ${product.stock} phần</div>
-                  </div>
+                    <div class="muted">${customer.segment} · ${customer.points} điểm · ${money(customer.totalSpending)}</div>
+                  </button>
                 `,
               )
               .join("")}
@@ -1161,6 +1355,101 @@ function renderAddDishView() {
       </section>
     </main>
   `);
+}
+
+function renderCustomers() {
+  const selected = getCustomer();
+  const filtered = customers.filter((customer) => {
+    const keyword = state.search.trim().toLowerCase();
+    if (!keyword) return true;
+    return [customer.name, customer.phone, customer.email, customer.tier, customer.segment].some((value) => value.toLowerCase().includes(keyword));
+  });
+
+  return shell(`
+    <main class="page">
+      ${pageHeading(
+        "Customer Profile Search & Detail",
+        "Hồ sơ CRM khách hàng",
+        '<button class="secondary-btn" data-view="payment">Dùng trong POS</button><button class="primary-btn" data-view="promotions">Gửi ưu đãi</button>',
+      )}
+      <section class="admin-layout crm-layout">
+        <section class="panel">
+          <div class="panel-head">
+            <label class="search-box">
+              ${icons.search}
+              <input data-search value="${state.search}" placeholder="Tìm theo tên, SĐT, email, hạng..." />
+            </label>
+          </div>
+          <div class="list">
+            ${filtered
+              .map(
+                (customer) => `
+                  <button class="list-item customer-list-button ${state.selectedCustomerId === customer.id ? "active" : ""}" data-open-customer="${customer.id}">
+                    <div class="list-top">
+                      <strong>${customer.name}</strong>
+                      <span class="status-badge ${customer.tier === "Vàng" ? "ready" : customer.segment.includes("Inactive") ? "preparing" : ""}">${customer.tier}</span>
+                    </div>
+                    <div class="muted">${customer.phone} · ${customer.segment} · ${customer.points} điểm</div>
+                  </button>
+                `,
+              )
+              .join("")}
+          </div>
+        </section>
+        <aside class="panel panel-pad">
+          ${
+            selected
+              ? renderCustomerDetail(selected)
+              : `<div class="empty-state">Chọn một khách hàng để xem hồ sơ, lịch sử mua và voucher.</div>`
+          }
+        </aside>
+      </section>
+    </main>
+  `);
+}
+
+function renderCustomerDetail(customer) {
+  const history = customerPurchaseHistory(customer.id);
+  const customerVouchers = vouchers.filter((voucher) => voucher.customerId === customer.id);
+  const interactions = customerInteractions.filter((item) => item.customerId === customer.id);
+  return `
+    <div class="crm-profile-head large">
+      <span class="avatar">${customer.tier.slice(0, 1)}</span>
+      <div>
+        <span class="eyebrow">Customer ${customer.id}</span>
+        <h2>${customer.name}</h2>
+        <p>${customer.phone} · ${customer.email}</p>
+      </div>
+    </div>
+    <div class="crm-stats">
+      <span><strong>${customer.tier}</strong><small>Hạng</small></span>
+      <span><strong>${customer.points}</strong><small>Điểm</small></span>
+      <span><strong>${money(customer.totalSpending)}</strong><small>Tổng chi</small></span>
+      <span><strong>${customer.lastVisit}</strong><small>Lần gần nhất</small></span>
+    </div>
+    <div class="section-block">
+      <div class="panel-head compact-head"><div><span class="eyebrow">Voucher</span><h3>Ưu đãi cá nhân</h3></div></div>
+      <div class="line-items">
+        ${customerVouchers
+          .map((voucher) => `<div class="line-item"><span>${voucher.title}</span><strong>${voucher.code}</strong><span class="mini-badge ${voucher.status === "active" ? "ready" : voucher.status === "expired" ? "paid" : "preparing"}">${voucher.status}</span></div>`)
+          .join("")}
+      </div>
+    </div>
+    <div class="section-block">
+      <div class="panel-head compact-head"><div><span class="eyebrow">Purchase history</span><h3>Lịch sử mua hàng</h3></div></div>
+      <div class="line-items">
+        ${history
+          .map((item) => `<div class="line-item"><span>${item.invoice} · ${item.branch}</span><strong>${money(item.amount)}</strong><span>+${item.points} điểm</span></div>`)
+          .join("")}
+      </div>
+    </div>
+    <div class="section-block">
+      <div class="panel-head compact-head"><div><span class="eyebrow">After-sale care</span><h3>Chăm sóc sau bán</h3></div></div>
+      <div class="line-items">
+        ${interactions.map((item) => `<div class="line-item"><span>${item.date} · ${item.channel}</span><strong>${item.note}</strong><span></span></div>`).join("")}
+      </div>
+    </div>
+  `;
 }
 
 function renderEmployees() {
@@ -1302,9 +1591,18 @@ function renderReport(kind) {
 }
 
 function renderPromotions() {
+  const totalIssued = promotions.reduce((sum, promo) => sum + promo.issued, 0);
+  const totalRedeemed = promotions.reduce((sum, promo) => sum + promo.redeemed, 0);
+  const usageRate = totalIssued ? Math.round((totalRedeemed / totalIssued) * 100) : 0;
   return shell(`
     <main class="page">
-      ${pageHeading("Quản lý khuyến mãi", "Chương trình khuyến mãi", '<button class="primary-btn" data-view="addPromotion">+ Thêm mã khuyến mãi</button>')}
+      ${pageHeading("Marketing Campaign & Voucher Management", "Tự động chăm sóc khách hàng", '<button class="primary-btn" data-view="addPromotion">+ Tạo campaign</button>')}
+      <section class="owner-grid">
+        ${metricCard("Voucher đã phát hành", totalIssued, "Theo campaign đang quản lý")}
+        ${metricCard("Voucher đã dùng", totalRedeemed, `${usageRate}% usage rate`)}
+        ${metricCard("Doanh thu từ campaign", money(promotions.reduce((sum, promo) => sum + promo.revenue, 0)), "Hóa đơn có voucher")}
+        ${metricCard("Khách cần kích hoạt", customers.filter((customer) => customer.segment.includes("Inactive")).length, "30 ngày chưa quay lại")}
+      </section>
       <section class="promo-grid">
         ${promotions
           .map(
@@ -1312,15 +1610,30 @@ function renderPromotions() {
               <article class="promo-card">
                 <div class="promo-code">${promo.code}</div>
                 <h3>${promo.name}</h3>
-                <p class="muted">${promo.range}</p>
+                <p class="muted">${promo.range} · Segment: ${promo.target}</p>
                 <div class="list-top">
                   <strong>${promo.discount}</strong>
                   <span class="status-badge ${promo.active ? "ready" : "paid"}">${promo.active ? "Đang áp dụng" : "Tạm dừng"}</span>
                 </div>
+                <div class="campaign-meter">
+                  <span style="width:${promo.issued ? Math.round((promo.redeemed / promo.issued) * 100) : 0}%"></span>
+                </div>
+                <div class="muted">${promo.redeemed}/${promo.issued} voucher đã dùng · ${money(promo.revenue)}</div>
               </article>
             `,
           )
           .join("")}
+      </section>
+      <section class="panel panel-pad crm-email-preview">
+        <div>
+          <span class="eyebrow">Email automation</span>
+          <h2>Voucher đã gửi tự động</h2>
+          <p class="muted">Mô phỏng luồng Odoo: đến thời gian đặt sẵn, CRM gửi voucher cho nhóm sinh nhật, Gold hoặc khách lâu chưa quay lại.</p>
+        </div>
+        <div class="email-card">
+          <strong>Xin chào Nguyễn An, Coffee Connect tặng bạn voucher sinh nhật 20.000đ</strong>
+          <span>Mã BDAY-AN-20K · Hạn dùng 31/05/2026 · Dùng được tại POS và Website.</span>
+        </div>
       </section>
     </main>
   `);
@@ -1528,6 +1841,7 @@ function render() {
     finance: renderFinance,
     cashIn: () => renderCashForm("in"),
     cashOut: () => renderCashForm("out"),
+    customers: renderCustomers,
     waiter: renderWaiter,
     waiterOrder: renderWaiterOrder,
     serveOrders: renderServeOrders,
@@ -1617,6 +1931,48 @@ function handleAddDish(form) {
   render();
 }
 
+function completeCheckout() {
+  const totals = cartTotals();
+  const customer = totals.customer;
+  if (customer) {
+    customer.points += totals.pointsEarned;
+    customer.totalSpending += totals.total;
+    customer.lastVisit = "13/05/2026";
+    updateCustomerTier(customer);
+    purchaseHistory.unshift({
+      customerId: customer.id,
+      invoice: `HD-${String(130 + purchaseHistory.length).padStart(6, "0")}`,
+      date: "13/05/2026",
+      branch: "Cầu Giấy",
+      amount: totals.total,
+      points: totals.pointsEarned,
+      channel: "POS",
+    });
+    customerInteractions.unshift({
+      customerId: customer.id,
+      date: "13/05/2026",
+      channel: "POS",
+      note: `Thanh toán ${money(totals.total)}, cộng ${totals.pointsEarned} điểm.`,
+    });
+  }
+
+  if (totals.voucher) {
+    totals.voucher.status = "redeemed";
+    totals.voucher.usedAt = "13/05/2026";
+    const campaign = promotions.find((item) => item.code === totals.voucher.campaign);
+    if (campaign) {
+      campaign.redeemed += 1;
+      campaign.revenue += totals.total;
+    }
+  }
+
+  state.cart.clear();
+  state.selectedPromotion = "";
+  state.view = "customers";
+  showToast(customer ? `Thanh toán thành công, đã cộng ${totals.pointsEarned} điểm cho ${customer.name}` : "Thanh toán thành công");
+  render();
+}
+
 document.addEventListener("click", (event) => {
   const roleButton = event.target.closest("[data-role]");
   if (roleButton) {
@@ -1672,9 +2028,16 @@ document.addEventListener("click", (event) => {
   }
 
   if (event.target.closest("[data-checkout]")) {
-    state.cart.clear();
-    state.view = "cashier";
-    showToast("Thanh toán thành công");
+    completeCheckout();
+    return;
+  }
+
+  const openCustomer = event.target.closest("[data-open-customer]");
+  if (openCustomer) {
+    state.selectedCustomerId = openCustomer.dataset.openCustomer;
+    const firstVoucher = availableVouchers(state.selectedCustomerId)[0];
+    state.selectedPromotion = firstVoucher?.code || "";
+    state.view = "customers";
     render();
     return;
   }
@@ -1759,6 +2122,60 @@ document.addEventListener("submit", (event) => {
     return;
   }
 
+  const customerSearchForm = event.target.closest("[data-customer-search-form]");
+  if (customerSearchForm) {
+    event.preventDefault();
+    const data = new FormData(customerSearchForm);
+    const query = String(data.get("customerQuery") || "").trim().toLowerCase();
+    state.customerQuery = query;
+    const found = customers.find((customer) =>
+      [customer.name, customer.phone, customer.email].some((value) => value.toLowerCase().includes(query)),
+    );
+    if (found) {
+      state.selectedCustomerId = found.id;
+      const firstVoucher = availableVouchers(found.id)[0];
+      state.selectedPromotion = firstVoucher?.code || "";
+      showToast(`Đã nhận diện khách hàng: ${found.name}`);
+    } else {
+      state.selectedCustomerId = null;
+      state.selectedPromotion = "";
+      showToast("Không tìm thấy khách, có thể tạo hồ sơ mới");
+    }
+    render();
+    return;
+  }
+
+  const quickCustomerFormEl = event.target.closest("[data-quick-customer-form]");
+  if (quickCustomerFormEl) {
+    event.preventDefault();
+    const data = new FormData(quickCustomerFormEl);
+    const customer = {
+      id: `C${String(customers.length + 1).padStart(3, "0")}`,
+      name: String(data.get("name") || "Khách mới"),
+      phone: String(data.get("phone") || ""),
+      email: String(data.get("email") || ""),
+      tier: "Đồng",
+      points: 0,
+      totalSpending: 0,
+      birthday: "Chưa cập nhật",
+      segment: "New",
+      lastVisit: "13/05/2026",
+    };
+    customers.unshift(customer);
+    state.selectedCustomerId = customer.id;
+    state.customerQuery = customer.phone;
+    state.selectedPromotion = "";
+    customerInteractions.unshift({
+      customerId: customer.id,
+      date: "13/05/2026",
+      channel: "POS",
+      note: "Tạo hồ sơ khách hàng mới tại quầy.",
+    });
+    showToast(`Đã tạo hồ sơ CRM cho ${customer.name}`);
+    render();
+    return;
+  }
+
   const dishFormEl = event.target.closest("[data-add-dish-form]");
   if (dishFormEl) {
     event.preventDefault();
@@ -1811,8 +2228,12 @@ document.addEventListener("submit", (event) => {
       code: String(data.get("code") || "KMNEW"),
       name: String(data.get("name") || "Chương trình mới"),
       discount: String(data.get("discount") || "10%"),
+      target: "all",
       active: true,
       range: "12/05 - 31/05",
+      issued: customers.length,
+      redeemed: 0,
+      revenue: 0,
     });
     state.view = "promotions";
     showToast("Đã thêm mã khuyến mãi");
@@ -1854,6 +2275,21 @@ document.addEventListener("input", (event) => {
     const nextCursor = Math.min(cursor, nextSearch.value.length);
     nextSearch.focus();
     nextSearch.setSelectionRange(nextCursor, nextCursor);
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const promotion = event.target.closest("[data-promotion]");
+  if (promotion) {
+    state.selectedPromotion = promotion.value;
+    render();
+    return;
+  }
+
+  const paymentMethod = event.target.closest("[data-payment-method]");
+  if (paymentMethod) {
+    state.paymentMethod = paymentMethod.value;
+    render();
   }
 });
 

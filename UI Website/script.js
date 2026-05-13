@@ -2,6 +2,7 @@ const header = document.querySelector("[data-header]");
 const nav = document.querySelector("[data-nav]");
 const navToggle = document.querySelector("[data-nav-toggle]");
 const favoriteButtons = document.querySelectorAll(".favorite-button");
+const copyVoucherButton = document.querySelector("[data-copy-voucher]");
 
 const updateHeader = () => {
   header.classList.toggle("is-scrolled", window.scrollY > 20);
@@ -25,6 +26,11 @@ favoriteButtons.forEach((button) => {
   button.addEventListener("click", () => {
     button.classList.toggle("is-active");
   });
+});
+
+copyVoucherButton?.addEventListener("click", () => {
+  copyVoucherButton.textContent = "Đã lưu voucher BDAY-AN-20K";
+  copyVoucherButton.disabled = true;
 });
 
 updateHeader();

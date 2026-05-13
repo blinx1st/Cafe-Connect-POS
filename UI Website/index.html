@@ -27,12 +27,13 @@
         <span></span>
       </button>
       <nav class="nav" data-nav>
-        <a href="#home">Home</a>
-        <a href="#coffee">Coffee</a>
-        <a href="#bakery">Bakery</a>
-        <a href="#shop">Shop</a>
-        <a href="#about">About</a>
-        <a class="login-link" href="#login">Login</a>
+        <a href="#home">Trang chủ</a>
+        <a href="#coffee">Cà phê</a>
+        <a href="#bakery">Bánh</a>
+        <a href="#shop">Cửa hàng</a>
+        <a href="#member">Thành viên</a>
+        <a href="#about">Đánh giá</a>
+        <a class="login-link" href="#member">Đăng nhập</a>
         <button class="search-button" type="button" aria-label="Search">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
@@ -46,13 +47,13 @@
     <main>
       <section class="hero" id="home">
         <div class="hero-content">
-          <p class="eyebrow">Welcome</p>
-          <h1>We serve the richest coffee in the city!</h1>
+          <p class="eyebrow">Coffee Connect CRM</p>
+          <h1>Thưởng cà phê, tích điểm và nhận ưu đãi cá nhân.</h1>
           <p class="hero-copy">
-            Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do
-            eiusmod tempor
+            Website đồng bộ với POS để lưu lịch sử mua hàng, phân hạng thành
+            viên và gửi voucher đúng khách hàng.
           </p>
-          <a class="button button-light" href="#coffee">Order Now</a>
+          <a class="button button-light" href="#member">Xem quyền lợi</a>
         </div>
       </section>
 
@@ -392,6 +393,61 @@
           <span></span>
           <span></span>
           <span></span>
+        </div>
+      </section>
+
+      <section class="member-portal" id="member">
+        <div class="member-heading">
+          <p class="eyebrow">Member Portal</p>
+          <h2>Cổng thành viên kết nối trực tiếp với POS</h2>
+          <p>
+            Khách hàng dùng cùng số điện thoại tại website và quầy. Mỗi hóa đơn
+            thanh toán sẽ cập nhật điểm, hạng, voucher và lịch sử mua hàng.
+          </p>
+        </div>
+        <div class="member-grid">
+          <aside class="member-card profile-card">
+            <span class="profile-avatar">V</span>
+            <div>
+              <p class="card-label">Hồ sơ khách hàng</p>
+              <h3>Nguyễn An</h3>
+              <p>0901234001 · an.nguyen@email.com</p>
+            </div>
+            <div class="member-stats">
+              <span><strong>Vàng</strong><small>Hạng</small></span>
+              <span><strong>1.250</strong><small>Điểm</small></span>
+              <span><strong>10%</strong><small>Ưu đãi hạng</small></span>
+            </div>
+          </aside>
+          <article class="member-card voucher-card">
+            <p class="card-label">Voucher của tôi</p>
+            <h3>BDAY-AN-20K</h3>
+            <p>Giảm 20.000đ cho đơn tiếp theo, hạn dùng 31/05/2026.</p>
+            <button type="button" data-copy-voucher>Áp dụng khi đặt hàng</button>
+          </article>
+          <article class="member-card history-card">
+            <p class="card-label">Lịch sử đơn hàng</p>
+            <div class="history-row">
+              <span>HD-000120 · POS Cầu Giấy</span>
+              <strong>196.000đ</strong>
+            </div>
+            <div class="history-row">
+              <span>HD-000109 · Website</span>
+              <strong>142.000đ</strong>
+            </div>
+            <div class="history-row">
+              <span>Điểm vừa nhận</span>
+              <strong>+32</strong>
+            </div>
+          </article>
+          <article class="member-card email-card">
+            <p class="card-label">Chăm sóc tự động</p>
+            <h3>Email voucher sinh nhật đã gửi</h3>
+            <p>
+              CRM tự động gửi ưu đãi theo sinh nhật, hạng thành viên hoặc khách
+              lâu chưa quay lại.
+            </p>
+          </article>
         </div>
       </section>
 

@@ -7,14 +7,21 @@ USE cafe_connect_crm;
 SET FOREIGN_KEY_CHECKS = 0;
 
 DROP TABLE IF EXISTS loyalty_point_transactions;
+DROP TABLE IF EXISTS campaign_recipients;
+DROP TABLE IF EXISTS marketing_emails;
+DROP TABLE IF EXISTS customer_interactions;
+DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS branch_inventory;
 DROP TABLE IF EXISTS invoice_details;
 DROP TABLE IF EXISTS invoices;
+DROP TABLE IF EXISTS pos_sessions;
 DROP TABLE IF EXISTS vouchers;
 DROP TABLE IF EXISTS promotions;
 DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS staff;
 DROP TABLE IF EXISTS branches;
+DROP TABLE IF EXISTS customer_segment_memberships;
+DROP TABLE IF EXISTS customer_segments;
 DROP TABLE IF EXISTS customers;
 DROP TABLE IF EXISTS membership_tiers;
 
@@ -43,7 +50,10 @@ CREATE TABLE customers (
     phone_number VARCHAR(20) NOT NULL,
     email VARCHAR(150) NULL,
     gender ENUM('male', 'female', 'other') NULL,
+    birth_date DATE NULL,
     address VARCHAR(255) NULL,
+    preferred_channel ENUM('pos', 'website', 'delivery', 'email', 'zalo', 'sms') NOT NULL DEFAULT 'pos',
+    last_visit_date DATE NULL,
     current_points INT NOT NULL DEFAULT 0,
     total_spending DECIMAL(12,2) NOT NULL DEFAULT 0,
     status ENUM('active', 'inactive', 'blocked') NOT NULL DEFAULT 'active',
@@ -57,6 +67,31 @@ CREATE TABLE customers (
         FOREIGN KEY (membership_tier_id) REFERENCES membership_tiers(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_segments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    segment_code VARCHAR(50) NOT NULL,
+    segment_name VARCHAR(120) NOT NULL,
+    rule_description TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_customer_segments_code UNIQUE (segment_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_segment_memberships (
+    customer_id INT NOT NULL,
+    segment_id INT NOT NULL,
+    assigned_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    source ENUM('manual', 'auto') NOT NULL DEFAULT 'auto',
+    PRIMARY KEY (customer_id, segment_id),
+    CONSTRAINT fk_customer_segment_memberships_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_customer_segment_memberships_segment
+        FOREIGN KEY (segment_id) REFERENCES customer_segments(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE branches (
@@ -85,6 +120,33 @@ CREATE TABLE staff (
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE pos_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_id INT NOT NULL,
+    staff_id INT NOT NULL,
+    opened_at DATETIME NOT NULL,
+    closed_at DATETIME NULL,
+    opening_cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    expected_cash_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    closing_cash_amount DECIMAL(12,2) NULL,
+    cash_difference_amount DECIMAL(12,2) NULL,
+    status ENUM('open', 'closed') NOT NULL DEFAULT 'open',
+    notes VARCHAR(255) NULL,
+    CONSTRAINT chk_pos_sessions_cash CHECK (
+        opening_cash_amount >= 0
+        AND expected_cash_amount >= 0
+        AND (closing_cash_amount IS NULL OR closing_cash_amount >= 0)
+    ),
+    CONSTRAINT fk_pos_sessions_branch
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_pos_sessions_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE products (
     id INT AUTO_INCREMENT PRIMARY KEY,
     product_name VARCHAR(150) NOT NULL,
@@ -105,12 +167,16 @@ CREATE TABLE promotions (
     start_date DATE NOT NULL,
     end_date DATE NOT NULL,
     target_segment ENUM('all', 'bronze', 'silver', 'gold', 'birthday', 'inactive') NOT NULL DEFAULT 'all',
+    campaign_channel ENUM('pos', 'website', 'email', 'zalo', 'sms', 'omnichannel') NOT NULL DEFAULT 'omnichannel',
     discount_type ENUM('fixed', 'percentage') NOT NULL DEFAULT 'fixed',
     discount_value DECIMAL(12,2) NOT NULL DEFAULT 0,
+    voucher_quantity INT NOT NULL DEFAULT 0,
+    usage_limit_per_customer INT NOT NULL DEFAULT 1,
     status ENUM('draft', 'active', 'cancelled', 'completed') NOT NULL DEFAULT 'draft',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT chk_promotions_date_range CHECK (start_date <= end_date),
-    CONSTRAINT chk_promotions_discount_value CHECK (discount_value >= 0)
+    CONSTRAINT chk_promotions_discount_value CHECK (discount_value >= 0),
+    CONSTRAINT chk_promotions_limits CHECK (voucher_quantity >= 0 AND usage_limit_per_customer > 0)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE vouchers (
@@ -135,12 +201,58 @@ CREATE TABLE vouchers (
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE marketing_emails (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    promotion_id INT NULL,
+    created_by_staff_id INT NOT NULL,
+    email_subject VARCHAR(200) NOT NULL,
+    email_body TEXT NOT NULL,
+    scheduled_at DATETIME NULL,
+    sent_at DATETIME NULL,
+    status ENUM('draft', 'scheduled', 'sent', 'cancelled') NOT NULL DEFAULT 'draft',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_marketing_emails_promotion
+        FOREIGN KEY (promotion_id) REFERENCES promotions(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_marketing_emails_staff
+        FOREIGN KEY (created_by_staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE campaign_recipients (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    marketing_email_id INT NOT NULL,
+    customer_id INT NOT NULL,
+    voucher_id INT NULL,
+    delivery_status ENUM('queued', 'sent', 'opened', 'clicked', 'failed') NOT NULL DEFAULT 'queued',
+    sent_at DATETIME NULL,
+    opened_at DATETIME NULL,
+    clicked_at DATETIME NULL,
+    CONSTRAINT uq_campaign_recipients_email_customer UNIQUE (marketing_email_id, customer_id),
+    CONSTRAINT fk_campaign_recipients_email
+        FOREIGN KEY (marketing_email_id) REFERENCES marketing_emails(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_campaign_recipients_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_campaign_recipients_voucher
+        FOREIGN KEY (voucher_id) REFERENCES vouchers(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE invoices (
     id INT AUTO_INCREMENT PRIMARY KEY,
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
+    pos_session_id INT NULL,
     customer_id INT NULL,
     voucher_id INT NULL,
+    sales_channel ENUM('pos', 'website', 'delivery') NOT NULL DEFAULT 'pos',
     invoice_date DATE NOT NULL,
     invoice_time TIME NOT NULL,
     subtotal_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -167,6 +279,10 @@ CREATE TABLE invoices (
         FOREIGN KEY (staff_id) REFERENCES staff(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT,
+    CONSTRAINT fk_invoices_pos_session
+        FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
     CONSTRAINT fk_invoices_customer
         FOREIGN KEY (customer_id) REFERENCES customers(id)
         ON UPDATE CASCADE
@@ -175,6 +291,22 @@ CREATE TABLE invoices (
         FOREIGN KEY (voucher_id) REFERENCES vouchers(id)
         ON UPDATE CASCADE
         ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    payment_method ENUM('cash', 'card', 'e_wallet') NOT NULL,
+    payment_provider VARCHAR(80) NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    paid_at DATETIME NOT NULL,
+    transaction_reference VARCHAR(120) NULL,
+    status ENUM('pending', 'paid', 'failed', 'refunded') NOT NULL DEFAULT 'paid',
+    CONSTRAINT chk_payments_amount CHECK (amount >= 0),
+    CONSTRAINT fk_payments_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE invoice_details (
@@ -196,6 +328,29 @@ CREATE TABLE invoice_details (
         FOREIGN KEY (product_id) REFERENCES products(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_interactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    staff_id INT NULL,
+    invoice_id INT NULL,
+    interaction_type ENUM('pos_visit', 'website_order', 'email_sent', 'voucher_redeemed', 'feedback', 'care_call') NOT NULL,
+    interaction_note VARCHAR(255) NOT NULL,
+    sentiment ENUM('positive', 'neutral', 'negative') NOT NULL DEFAULT 'neutral',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_customer_interactions_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_customer_interactions_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_customer_interactions_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE branch_inventory (
@@ -237,10 +392,17 @@ CREATE TABLE loyalty_point_transactions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE INDEX idx_customers_tier ON customers(membership_tier_id);
+CREATE INDEX idx_customer_segments_segment ON customer_segment_memberships(segment_id);
+CREATE INDEX idx_pos_sessions_branch_date ON pos_sessions(branch_id, opened_at);
 CREATE INDEX idx_vouchers_promotion_status ON vouchers(promotion_id, status);
+CREATE INDEX idx_marketing_emails_promotion_status ON marketing_emails(promotion_id, status);
+CREATE INDEX idx_campaign_recipients_status ON campaign_recipients(delivery_status);
 CREATE INDEX idx_invoices_date_branch ON invoices(invoice_date, branch_id);
 CREATE INDEX idx_invoices_customer_date ON invoices(customer_id, invoice_date);
+CREATE INDEX idx_invoices_channel_date ON invoices(sales_channel, invoice_date);
+CREATE INDEX idx_payments_invoice_method ON payments(invoice_id, payment_method);
 CREATE INDEX idx_invoice_details_product ON invoice_details(product_id);
+CREATE INDEX idx_customer_interactions_customer_date ON customer_interactions(customer_id, created_at);
 CREATE INDEX idx_loyalty_customer_date ON loyalty_point_transactions(customer_id, created_at);
 
 -- =========================================================
@@ -269,6 +431,16 @@ INSERT INTO staff (branch_id, staff_name, staff_role, phone_number, email) VALUE
 (1, 'Mai Marketing', 'marketing', '0911000007', 'marketing@cafeconnect.vn'),
 (2, 'Admin Cafe Connect', 'admin', '0911000008', 'admin@cafeconnect.vn');
 
+INSERT INTO pos_sessions (
+    branch_id, staff_id, opened_at, closed_at,
+    opening_cash_amount, expected_cash_amount, closing_cash_amount, cash_difference_amount,
+    status, notes
+) VALUES
+(1, 1, '2026-05-14 07:00:00', '2026-05-14 15:00:00', 1000000, 1070000, 1070000, 0, 'closed', 'Morning POS session at Cau Giay.'),
+(2, 3, '2026-05-14 07:00:00', '2026-05-14 15:00:00', 800000, 800000, 800000, 0, 'closed', 'No cash variance.'),
+(4, 5, '2026-05-13 07:00:00', '2026-05-13 15:00:00', 900000, 900000, 898000, -2000, 'closed', 'Minor cash variance for manager review.'),
+(5, 6, '2026-05-14 12:00:00', NULL, 700000, 837750, NULL, NULL, 'open', 'Afternoon session still open.');
+
 INSERT INTO products (product_name, category, price, take_note) VALUES
 ('Cafe Sua Da', 'coffee', 35000, 'Best seller, Vietnamese iced milk coffee.'),
 ('Espresso', 'coffee', 45000, 'Single shot espresso.'),
@@ -295,13 +467,47 @@ INSERT INTO customers (
 (1, 'Vu Oanh', '0900000011', 'oanh.vu@email.com', 'female', 'Cau Giay, Hanoi', 60, 180000, 'inactive', '2026-03-01 18:00:00'),
 (3, 'Phan Phuc', '0900000012', 'phuc.phan@email.com', 'male', 'Dong Da, Hanoi', 1320, 4700000, 'active', '2025-05-22 19:00:00');
 
+UPDATE customers SET birth_date = '1996-05-12', preferred_channel = 'website', last_visit_date = '2026-05-09' WHERE id = 1;
+UPDATE customers SET birth_date = '1994-11-03', preferred_channel = 'pos', last_visit_date = '2026-05-13' WHERE id = 2;
+UPDATE customers SET birth_date = '2001-02-18', preferred_channel = 'pos', last_visit_date = '2026-05-08' WHERE id = 3;
+UPDATE customers SET birth_date = '1998-07-09', preferred_channel = 'email', last_visit_date = '2026-05-11' WHERE id = 4;
+UPDATE customers SET birth_date = '1997-05-24', preferred_channel = 'website', last_visit_date = '2026-05-07' WHERE id = 5;
+UPDATE customers SET birth_date = '1995-09-17', preferred_channel = 'email', last_visit_date = '2026-04-02' WHERE id = 6;
+UPDATE customers SET birth_date = '1992-03-21', preferred_channel = 'pos', last_visit_date = '2026-05-10' WHERE id = 7;
+UPDATE customers SET birth_date = '1999-12-05', preferred_channel = 'website', last_visit_date = '2026-05-14' WHERE id = 8;
+UPDATE customers SET birth_date = '2000-06-29', preferred_channel = 'delivery', last_visit_date = '2026-05-08' WHERE id = 9;
+UPDATE customers SET birth_date = '1993-05-30', preferred_channel = 'email', last_visit_date = '2026-05-03' WHERE id = 10;
+UPDATE customers SET birth_date = '1996-10-11', preferred_channel = 'email', last_visit_date = '2026-03-25' WHERE id = 11;
+UPDATE customers SET birth_date = '1991-01-14', preferred_channel = 'pos', last_visit_date = '2026-05-12' WHERE id = 12;
+
+INSERT INTO customer_segments (segment_code, segment_name, rule_description) VALUES
+('GOLD_ACTIVE', 'Gold members active this month', 'Gold tier customers with at least one paid order in the current month.'),
+('BIRTHDAY_MAY', 'May birthday members', 'Members with birthday month in May.'),
+('INACTIVE_30', 'Inactive more than 30 days', 'Customers whose latest purchase is older than 30 days.'),
+('WEBSITE_MEMBER', 'Website member portal users', 'Customers who prefer website as the main CRM channel.');
+
+INSERT INTO customer_segment_memberships (customer_id, segment_id, source) VALUES
+(1, 1, 'auto'),
+(4, 1, 'auto'),
+(7, 1, 'auto'),
+(12, 1, 'auto'),
+(1, 2, 'auto'),
+(5, 2, 'auto'),
+(10, 2, 'auto'),
+(6, 3, 'auto'),
+(11, 3, 'auto'),
+(1, 4, 'auto'),
+(5, 4, 'auto'),
+(8, 4, 'auto');
+
 INSERT INTO promotions (
-    promotion_name, description, start_date, end_date, target_segment, discount_type, discount_value, status
+    promotion_name, description, start_date, end_date, target_segment, campaign_channel,
+    discount_type, discount_value, voucher_quantity, usage_limit_per_customer, status
 ) VALUES
-('Birthday Voucher', 'Birthday discount for members in their birthday month.', '2026-05-01', '2026-05-31', 'birthday', 'fixed', 20000, 'active'),
-('Weekend Combo', 'Weekend combo promotion for returning customers.', '2026-05-10', '2026-05-31', 'all', 'percentage', 15, 'active'),
-('Gold Member Appreciation', 'Special campaign for Gold members.', '2026-05-01', '2026-06-15', 'gold', 'percentage', 20, 'active'),
-('Inactive Customer Reactivation', 'Voucher to bring inactive customers back after 30 days.', '2026-04-01', '2026-05-31', 'inactive', 'fixed', 30000, 'active');
+('Birthday Voucher', 'Birthday discount for members in their birthday month.', '2026-05-01', '2026-05-31', 'birthday', 'email', 'fixed', 20000, 200, 1, 'active'),
+('Weekend Combo', 'Weekend combo promotion for returning customers.', '2026-05-10', '2026-05-31', 'all', 'omnichannel', 'percentage', 15, 500, 1, 'active'),
+('Gold Member Appreciation', 'Special campaign for Gold members.', '2026-05-01', '2026-06-15', 'gold', 'email', 'percentage', 20, 120, 1, 'active'),
+('Inactive Customer Reactivation', 'Voucher to bring inactive customers back after 30 days.', '2026-04-01', '2026-05-31', 'inactive', 'email', 'fixed', 30000, 150, 1, 'active');
 
 INSERT INTO vouchers (voucher_code, customer_id, promotion_id, release_date, expiration_date, status, used_at) VALUES
 ('BDAY-NAN-001', 1, 1, '2026-05-01', '2026-05-30', 'redeemed', '2026-05-01 08:18:00'),
@@ -316,6 +522,25 @@ INSERT INTO vouchers (voucher_code, customer_id, promotion_id, release_date, exp
 ('WEEK-LCH-010', 3, 2, '2026-05-10', '2026-06-15', 'issued', NULL),
 ('WEEK-VMI-011', 9, 2, '2026-05-10', '2026-06-15', 'active', NULL),
 ('BDAY-HGI-012', 5, 1, '2026-05-01', '2026-05-30', 'issued', NULL);
+
+INSERT INTO marketing_emails (
+    promotion_id, created_by_staff_id, email_subject, email_body, scheduled_at, sent_at, status
+) VALUES
+(1, 7, 'Happy birthday from Cafe Connect', 'Send birthday voucher and member point summary.', '2026-05-01 07:00:00', '2026-05-01 07:05:00', 'sent'),
+(3, 7, 'Gold member appreciation week', 'Send Gold tier offer with POS redeemable voucher.', '2026-05-01 08:00:00', '2026-05-01 08:05:00', 'sent'),
+(4, 7, 'We miss your coffee visit', 'Send reactivation voucher to inactive customers.', '2026-05-02 09:00:00', '2026-05-02 09:05:00', 'sent');
+
+INSERT INTO campaign_recipients (
+    marketing_email_id, customer_id, voucher_id, delivery_status, sent_at, opened_at, clicked_at
+) VALUES
+(1, 1, 1, 'clicked', '2026-05-01 07:05:00', '2026-05-01 07:20:00', '2026-05-01 07:22:00'),
+(1, 10, 7, 'clicked', '2026-05-01 07:05:00', '2026-05-01 08:40:00', '2026-05-01 08:42:00'),
+(1, 5, 12, 'opened', '2026-05-01 07:05:00', '2026-05-01 10:15:00', NULL),
+(2, 4, 3, 'clicked', '2026-05-01 08:05:00', '2026-05-01 08:50:00', '2026-05-01 08:53:00'),
+(2, 7, 5, 'clicked', '2026-05-01 08:05:00', '2026-05-01 09:30:00', '2026-05-01 09:32:00'),
+(2, 12, 9, 'clicked', '2026-05-01 08:05:00', '2026-05-01 10:00:00', '2026-05-01 10:03:00'),
+(3, 6, 4, 'opened', '2026-05-02 09:05:00', '2026-05-02 11:10:00', NULL),
+(3, 11, 8, 'sent', '2026-05-02 09:05:00', NULL, NULL);
 
 INSERT INTO invoices (
     branch_id, staff_id, customer_id, voucher_id, invoice_date, invoice_time,
@@ -342,6 +567,49 @@ INSERT INTO invoices (
 (2, 3, 10, NULL, '2026-04-20', '16:45:00', 125000, 6250, 0, 118750, 11, 'card', 'paid'),
 (3, 4, 6, NULL, '2026-04-02', '09:10:00', 45000, 0, 0, 45000, 4, 'cash', 'paid'),
 (4, 5, 11, NULL, '2026-03-25', '18:00:00', 50000, 0, 0, 50000, 5, 'e_wallet', 'paid');
+
+UPDATE invoices SET pos_session_id = 1 WHERE id = 17;
+UPDATE invoices SET pos_session_id = 3 WHERE id = 15;
+UPDATE invoices SET pos_session_id = 4 WHERE id = 16;
+UPDATE invoices SET sales_channel = 'website' WHERE id IN (11, 16);
+UPDATE invoices SET sales_channel = 'delivery' WHERE id = 18;
+
+INSERT INTO payments (
+    invoice_id, payment_method, payment_provider, amount, paid_at, transaction_reference, status
+) VALUES
+(1, 'e_wallet', 'Momo', 88000, '2026-05-01 08:18:00', 'MOMO-000001', 'paid'),
+(2, 'card', 'Visa', 147000, '2026-05-02 18:40:00', 'CARD-000002', 'paid'),
+(3, 'cash', NULL, 70250, '2026-05-03 09:35:00', NULL, 'paid'),
+(4, 'e_wallet', 'ZaloPay', 126000, '2026-05-04 15:12:00', 'ZALO-000004', 'paid'),
+(5, 'card', 'Mastercard', 168000, '2026-05-05 20:10:00', 'CARD-000005', 'paid'),
+(6, 'cash', NULL, 80750, '2026-05-05 07:50:00', NULL, 'paid'),
+(7, 'e_wallet', 'Momo', 147250, '2026-05-06 08:25:00', 'MOMO-000007', 'paid'),
+(8, 'card', 'Visa', 104500, '2026-05-07 14:20:00', 'CARD-000008', 'paid'),
+(9, 'cash', NULL, 75000, '2026-05-08 10:15:00', NULL, 'paid'),
+(10, 'e_wallet', 'ZaloPay', 135000, '2026-05-08 17:30:00', 'ZALO-000010', 'paid'),
+(11, 'card', 'Visa', 157500, '2026-05-09 08:10:00', 'WEB-000011', 'paid'),
+(12, 'e_wallet', 'Momo', 234000, '2026-05-10 19:50:00', 'MOMO-000012', 'paid'),
+(13, 'cash', NULL, 81000, '2026-05-11 08:00:00', NULL, 'paid'),
+(14, 'card', 'Mastercard', 175500, '2026-05-12 18:15:00', 'CARD-000014', 'paid'),
+(15, 'e_wallet', 'Momo', 61750, '2026-05-13 08:40:00', 'MOMO-000015', 'paid'),
+(16, 'cash', NULL, 137750, '2026-05-14 13:25:00', NULL, 'paid'),
+(17, 'cash', NULL, 70000, '2026-05-14 12:08:00', NULL, 'paid'),
+(18, 'card', 'Visa', 118750, '2026-04-20 16:50:00', 'DEL-000018', 'paid'),
+(19, 'cash', NULL, 45000, '2026-04-02 09:15:00', NULL, 'paid'),
+(20, 'e_wallet', 'ZaloPay', 50000, '2026-03-25 18:05:00', 'ZALO-000020', 'paid');
+
+INSERT INTO customer_interactions (
+    customer_id, staff_id, invoice_id, interaction_type, interaction_note, sentiment, created_at
+) VALUES
+(1, 1, 1, 'voucher_redeemed', 'Birthday voucher redeemed at POS; customer earned 8 points.', 'positive', '2026-05-01 08:18:00'),
+(7, 6, 2, 'voucher_redeemed', 'Gold campaign voucher redeemed at Tay Ho branch.', 'positive', '2026-05-02 18:40:00'),
+(10, 3, 3, 'voucher_redeemed', 'Birthday voucher redeemed with cash payment.', 'positive', '2026-05-03 09:35:00'),
+(4, 3, 4, 'voucher_redeemed', 'Gold member used appreciation offer.', 'positive', '2026-05-04 15:12:00'),
+(12, 4, 5, 'voucher_redeemed', 'High-value customer redeemed Gold campaign voucher.', 'positive', '2026-05-05 20:10:00'),
+(1, NULL, 11, 'website_order', 'Customer ordered through website member portal.', 'positive', '2026-05-09 08:10:00'),
+(8, NULL, 16, 'website_order', 'Website order synchronized to CRM purchase history.', 'positive', '2026-05-14 13:25:00'),
+(6, 7, NULL, 'email_sent', 'Reactivation voucher email sent after inactive period.', 'neutral', '2026-05-02 09:05:00'),
+(11, 7, NULL, 'email_sent', 'Reactivation voucher email sent but not opened yet.', 'neutral', '2026-05-02 09:05:00');
 
 INSERT INTO invoice_details (invoice_id, product_id, quantity, unit_price, size, topping, line_total) VALUES
 (1, 1, 2, 35000, 'M', NULL, 70000),
@@ -547,3 +815,126 @@ WHERE c.status IN ('active', 'inactive')
 GROUP BY c.id, c.customer_name, c.phone_number, mt.tier_name
 HAVING last_purchase_date IS NULL OR days_since_last_purchase > 30
 ORDER BY days_since_last_purchase DESC;
+
+-- Query 8: POS customer lookup before checkout by phone/email/QR identity.
+SET @lookup_identity = '0900000001';
+
+SELECT
+    c.id AS customer_id,
+    c.customer_name,
+    c.phone_number,
+    c.email,
+    mt.tier_name,
+    mt.discount_rate,
+    c.current_points,
+    c.total_spending,
+    c.last_visit_date,
+    COUNT(v.id) AS available_voucher_count,
+    GROUP_CONCAT(v.voucher_code ORDER BY v.expiration_date SEPARATOR ', ') AS available_vouchers
+FROM customers c
+JOIN membership_tiers mt ON mt.id = c.membership_tier_id
+LEFT JOIN vouchers v
+    ON v.customer_id = c.id
+    AND v.status IN ('issued', 'active')
+    AND CURRENT_DATE BETWEEN v.release_date AND v.expiration_date
+WHERE c.phone_number = @lookup_identity
+   OR c.email = @lookup_identity
+GROUP BY
+    c.id, c.customer_name, c.phone_number, c.email,
+    mt.tier_name, mt.discount_rate,
+    c.current_points, c.total_spending, c.last_visit_date;
+
+-- Query 9: Website member portal purchase history and points.
+SELECT
+    i.id AS invoice_id,
+    i.invoice_date,
+    i.invoice_time,
+    i.sales_channel,
+    b.branch_name,
+    i.total_amount,
+    i.points_earned,
+    COALESCE(v.voucher_code, 'No voucher') AS voucher_code
+FROM invoices i
+JOIN branches b ON b.id = i.branch_id
+LEFT JOIN vouchers v ON v.id = i.voucher_id
+WHERE i.customer_id = 1
+  AND i.status = 'paid'
+ORDER BY i.invoice_date DESC, i.invoice_time DESC
+LIMIT 5;
+
+-- Query 10: Email campaign delivery, engagement, voucher redemption, and revenue.
+SELECT
+    me.id AS marketing_email_id,
+    me.email_subject,
+    p.promotion_name,
+    p.campaign_channel,
+    COUNT(cr.id) AS recipients,
+    SUM(CASE WHEN cr.delivery_status IN ('sent', 'opened', 'clicked') THEN 1 ELSE 0 END) AS sent_count,
+    SUM(CASE WHEN cr.opened_at IS NOT NULL THEN 1 ELSE 0 END) AS opened_count,
+    SUM(CASE WHEN cr.clicked_at IS NOT NULL THEN 1 ELSE 0 END) AS clicked_count,
+    SUM(CASE WHEN v.status = 'redeemed' THEN 1 ELSE 0 END) AS redeemed_voucher_count,
+    COALESCE(SUM(CASE WHEN i.status = 'paid' THEN i.total_amount ELSE 0 END), 0) AS attributed_revenue
+FROM marketing_emails me
+LEFT JOIN promotions p ON p.id = me.promotion_id
+LEFT JOIN campaign_recipients cr ON cr.marketing_email_id = me.id
+LEFT JOIN vouchers v ON v.id = cr.voucher_id
+LEFT JOIN invoices i ON i.voucher_id = v.id
+GROUP BY me.id, me.email_subject, p.promotion_name, p.campaign_channel
+ORDER BY attributed_revenue DESC, redeemed_voucher_count DESC;
+
+-- Query 11: POS session cash closing control.
+SELECT
+    ps.id AS pos_session_id,
+    b.branch_name,
+    s.staff_name,
+    ps.opened_at,
+    ps.closed_at,
+    ps.status,
+    ps.opening_cash_amount,
+    COALESCE(SUM(CASE WHEN pay.payment_method = 'cash' THEN pay.amount ELSE 0 END), 0) AS cash_sales_amount,
+    ps.opening_cash_amount
+        + COALESCE(SUM(CASE WHEN pay.payment_method = 'cash' THEN pay.amount ELSE 0 END), 0) AS calculated_expected_cash,
+    ps.closing_cash_amount,
+    ps.cash_difference_amount
+FROM pos_sessions ps
+JOIN branches b ON b.id = ps.branch_id
+JOIN staff s ON s.id = ps.staff_id
+LEFT JOIN invoices i ON i.pos_session_id = ps.id AND i.status = 'paid'
+LEFT JOIN payments pay ON pay.invoice_id = i.id AND pay.status = 'paid'
+GROUP BY
+    ps.id, b.branch_name, s.staff_name, ps.opened_at, ps.closed_at,
+    ps.status, ps.opening_cash_amount, ps.closing_cash_amount, ps.cash_difference_amount
+ORDER BY ps.opened_at DESC;
+
+-- Query 12: Customers eligible for automatic membership tier upgrade.
+SELECT
+    c.id AS customer_id,
+    c.customer_name,
+    current_tier.tier_name AS current_tier,
+    earned_tier.tier_name AS earned_tier,
+    c.total_spending,
+    c.current_points
+FROM customers c
+JOIN membership_tiers current_tier ON current_tier.id = c.membership_tier_id
+JOIN membership_tiers earned_tier
+    ON earned_tier.min_total_spending = (
+        SELECT MAX(mt2.min_total_spending)
+        FROM membership_tiers mt2
+        WHERE mt2.min_total_spending <= c.total_spending
+    )
+WHERE earned_tier.id <> c.membership_tier_id
+ORDER BY c.total_spending DESC;
+
+-- Query 13: Omnichannel revenue split proving POS, website, and delivery integration.
+SELECT
+    i.sales_channel,
+    COUNT(i.id) AS paid_invoice_count,
+    COUNT(DISTINCT i.customer_id) AS unique_customers,
+    SUM(i.points_earned) AS points_earned,
+    SUM(i.total_amount) AS net_revenue
+FROM invoices i
+WHERE i.status = 'paid'
+  AND i.invoice_date >= @report_month_start
+  AND i.invoice_date < @report_month_end
+GROUP BY i.sales_channel
+ORDER BY net_revenue DESC;
