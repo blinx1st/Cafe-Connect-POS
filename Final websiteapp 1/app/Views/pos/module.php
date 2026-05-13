@@ -5,5 +5,5 @@
     </div>
   </main>
 <?php else: ?>
-  <div id="pos-app" class="pos-app-shell"></div>
+  <div id="pos-app" class="pos-app-shell" data-pos-module-page="<?= e($posModule ?? 'checkout') ?>"></div>
 <?php endif; ?>

@@ -15,8 +15,8 @@ function money(mixed $amount): string
 function base_url(string $path = ''): string
 {
     $script = str_replace('\\', '/', (string) ($_SERVER['SCRIPT_NAME'] ?? ''));
-    $base = preg_replace('#/(index|pos|api|install)\.php$#', '/', $script);
-    $base = preg_replace('#/public/index\.php$#', '/', (string) $base);
+    $base = preg_replace('#/public/index\.php$#', '/', $script);
+    $base = preg_replace('#/(index|pos|api|install)\.php$#', '/', (string) $base);
     $base = rtrim((string) $base, '/') . '/';
 
     return $base . ltrim($path, '/');

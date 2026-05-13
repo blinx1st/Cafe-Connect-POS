@@ -6,10 +6,11 @@
     <title><?= e($pageTitle ?? 'Cafe Connect') ?></title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Poppins:wght@400;500;600;700;800&family=Reggae+One&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="<?= e(asset_url('css/app.css')) ?>">
   </head>
-  <body class="<?= e(($page ?? 'website') === 'pos' ? 'pos-body' : '') ?>" data-page="<?= e($page ?? 'website') ?>">
+  <body class="<?= e(($section ?? 'website') === 'pos' ? 'pos-body' : '') ?>" data-page="<?= e($page ?? 'website-home') ?>">
+    <script type="application/json" data-cafe-app><?= json_encode($appData ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG) ?></script>
     <script>
       window.CAFE_APP = <?= json_encode($appData ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
       window.CAFE_INSTALLED = <?= !empty($installed) ? 'true' : 'false' ?>;

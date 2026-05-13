@@ -1,8 +1,9 @@
-const cafeApp = window.CAFE_APP || {};
+let cafeApp = window.CAFE_APP || {};
 const cafeInstalled = Boolean(window.CAFE_INSTALLED);
 const apiBase = window.CAFE_API_BASE || "api.php";
 const baseUrl = window.CAFE_BASE_URL || "";
-const pageName = document.body?.dataset?.page || "website";
+let pageName = cafeApp.page || document.body?.dataset?.page || "website-home";
+let section = cafeApp.section || (pageName.startsWith("pos-") ? "pos" : "website");
 
 let products = Array.isArray(cafeApp.products) ? cafeApp.products : [];
 let productMap = new Map(products.map((product) => [Number(product.id), product]));
@@ -21,6 +22,7 @@ const posModules = [
   { id: "checkout", label: "POS bán hàng", roles: ["cashier", "manager", "owner", "admin"] },
   { id: "orders", label: "Bàn & order", roles: ["waiter", "cashier", "manager", "owner", "admin"] },
   { id: "kitchen", label: "Bếp pha chế", roles: ["barista", "manager", "owner", "admin"] },
+  { id: "dashboard", label: "Dashboard", roles: ["manager", "owner", "admin"] },
   { id: "customers", label: "Khách hàng", roles: ["cashier", "marketing", "manager", "owner", "admin"] },
   { id: "campaigns", label: "Campaign", roles: ["marketing", "manager", "owner", "admin"] },
   { id: "inventory", label: "Kho", roles: ["manager", "owner", "admin"] },
@@ -31,7 +33,7 @@ const posModules = [
 ];
 
 const state = {
-  site: { cart: [], customer: cafeApp.member || null, voucherId: "" },
+  site: { cart: loadSiteCart(), customer: cafeApp.member || null, voucherId: "" },
   pos: {
     cart: [],
     customer: null,
@@ -39,10 +41,28 @@ const state = {
     productFilter: "",
     roleFilter: "",
     tableId: "",
-    activeModule: "",
+    activeModule: cafeApp.posModule || "checkout",
     user: loadPosUser(),
   },
 };
+
+function url(path = "") {
+  return baseUrl + String(path).replace(/^\/+/, "");
+}
+
+function loadSiteCart() {
+  try {
+    const raw = localStorage.getItem("cafe_site_cart");
+    const cart = raw ? JSON.parse(raw) : [];
+    return Array.isArray(cart) ? cart : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveSiteCart() {
+  localStorage.setItem("cafe_site_cart", JSON.stringify(state.site.cart));
+}
 
 function loadPosUser() {
   try {
@@ -63,11 +83,7 @@ function savePosUser(user) {
 }
 
 const formatMoney = (value) =>
-  new Intl.NumberFormat("vi-VN", {
-    style: "currency",
-    currency: "VND",
-    maximumFractionDigits: 0,
-  }).format(Number(value || 0));
+  new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(Number(value || 0));
 
 const escapeHtml = (value) =>
   String(value ?? "")
@@ -80,7 +96,7 @@ const escapeHtml = (value) =>
 function asset(path) {
   const value = String(path || "assets/images/coffee-1.png");
   if (/^(https?:)?\/\//.test(value) || value.startsWith("/")) return value;
-  return `${baseUrl}${value}`;
+  return url(value);
 }
 
 function showToast(message) {
@@ -94,6 +110,112 @@ function showToast(message) {
   }, 3200);
 }
 
+function updateHeaderState() {
+  const header = document.querySelector("[data-header]");
+  if (!header) return;
+  header.classList.toggle("is-scrolled", window.scrollY > 12 || !pageName.endsWith("home"));
+}
+
+function parseCafeApp(doc) {
+  const jsonScript = doc.querySelector("script[data-cafe-app]");
+  if (jsonScript?.textContent?.trim()) {
+    return JSON.parse(jsonScript.textContent);
+  }
+
+  const appScript = Array.from(doc.scripts).find((script) => script.textContent.includes("window.CAFE_APP"));
+  const match = appScript?.textContent.match(/window\.CAFE_APP\s*=\s*(\{[\s\S]*?\});/);
+  return match ? JSON.parse(match[1]) : {};
+}
+
+function websiteRouteFromUrl(rawUrl) {
+  const target = new URL(rawUrl, window.location.href);
+  if (target.origin !== window.location.origin) return null;
+
+  const safeDecode = (value) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+  const targetPath = safeDecode(target.pathname);
+  let basePath = baseUrl || "/";
+  if (/^https?:\/\//.test(basePath)) {
+    basePath = safeDecode(new URL(basePath).pathname);
+  }
+  basePath = safeDecode(basePath);
+  if (!basePath.startsWith("/")) basePath = `/${basePath}`;
+  if (!basePath.endsWith("/")) basePath += "/";
+  if (!targetPath.startsWith(basePath)) return null;
+
+  const route = targetPath.slice(basePath.length).replace(/^\/+/, "");
+  if (route.startsWith("pos") || route.startsWith("assets") || route.startsWith("api.php") || route.startsWith("install.php")) {
+    return null;
+  }
+  return route;
+}
+
+function shouldUseWebsitePjax(anchor, event) {
+  if (!anchor || section !== "website") return false;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return false;
+  if (anchor.target && anchor.target !== "_self") return false;
+  if (anchor.hasAttribute("download") || anchor.dataset.noPjax !== undefined) return false;
+
+  const target = new URL(anchor.href, window.location.href);
+  if (target.hash && target.pathname === window.location.pathname && target.search === window.location.search) return false;
+  return websiteRouteFromUrl(target.href) !== null;
+}
+
+function applyPageAppData(nextApp) {
+  cafeApp = nextApp || {};
+  window.CAFE_APP = cafeApp;
+  pageName = cafeApp.page || document.body?.dataset?.page || "website-home";
+  section = cafeApp.section || (pageName.startsWith("pos-") ? "pos" : "website");
+  document.body.dataset.page = pageName;
+  state.site.customer = cafeApp.member || null;
+  syncProducts(Array.isArray(cafeApp.products) ? cafeApp.products : []);
+}
+
+async function navigateWebsite(href, pushState = true) {
+  const route = websiteRouteFromUrl(href);
+  if (route === null) {
+    window.location.href = href;
+    return;
+  }
+
+  const currentMain = document.querySelector("main");
+  if (!currentMain) {
+    window.location.href = href;
+    return;
+  }
+
+  currentMain.setAttribute("aria-busy", "true");
+  try {
+    const response = await fetch(href, {
+      headers: { "X-Requested-With": "CafeConnect-PJAX" },
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const html = await response.text();
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const nextMain = doc.querySelector("main");
+    if (!nextMain) throw new Error("Trang khong co noi dung main.");
+
+    document.title = doc.title || document.title;
+    currentMain.replaceWith(nextMain);
+    applyPageAppData(parseCafeApp(doc));
+    document.querySelector("[data-nav]")?.classList.remove("is-open");
+    updateHeaderState();
+    initialRender();
+    if (pushState) {
+      window.history.pushState({ cafePjax: true }, "", href);
+    }
+    window.scrollTo(0, 0);
+  } catch (error) {
+    window.location.href = href;
+  }
+}
+
 async function api(endpoint, payload = {}) {
   if (!cafeInstalled) {
     throw new Error("Database chưa sẵn sàng. Hãy chạy install.php trước.");
@@ -101,7 +223,7 @@ async function api(endpoint, payload = {}) {
 
   const clean = String(endpoint).replace(/^\/?api\/?/, "");
   const requestPayload = { ...payload };
-  if (pageName === "pos" && state.pos.user && !Object.prototype.hasOwnProperty.call(requestPayload, "staff_id")) {
+  if (section === "pos" && state.pos.user && !Object.prototype.hasOwnProperty.call(requestPayload, "staff_id")) {
     requestPayload.staff_id = state.pos.user.id;
   }
 
@@ -128,9 +250,7 @@ function tableHtml(rows, headers, mapper, emptyText = "Chưa có dữ liệu.") 
     <div class="table-wrap">
       <table class="data-table">
         <thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join("")}</tr></thead>
-        <tbody>
-          ${rows && rows.length ? rows.map(mapper).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(emptyText)}</td></tr>`}
-        </tbody>
+        <tbody>${rows && rows.length ? rows.map(mapper).join("") : `<tr><td colspan="${headers.length}">${escapeHtml(emptyText)}</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -138,6 +258,10 @@ function tableHtml(rows, headers, mapper, emptyText = "Chưa có dữ liệu.") 
 
 function cartFor(scope) {
   return state[scope].cart;
+}
+
+function persistCart(scope) {
+  if (scope === "site") saveSiteCart();
 }
 
 function addToCart(scope, productId) {
@@ -151,7 +275,7 @@ function addToCart(scope, productId) {
   } else {
     cart.push({ product_id: Number(productId), quantity: 1, size: "M", topping: "" });
   }
-
+  persistCart(scope);
   renderCart(scope);
 }
 
@@ -164,12 +288,13 @@ function updateQuantity(scope, productId, delta) {
   if (item.quantity <= 0) {
     state[scope].cart = cart.filter((entry) => entry.product_id !== Number(productId));
   }
-
+  persistCart(scope);
   renderCart(scope);
 }
 
 function removeItem(scope, productId) {
   state[scope].cart = cartFor(scope).filter((entry) => entry.product_id !== Number(productId));
+  persistCart(scope);
   renderCart(scope);
 }
 
@@ -181,10 +306,9 @@ function selectedVoucher(scope) {
 }
 
 function totalsFor(scope) {
-  const cart = cartFor(scope);
-  const subtotal = cart.reduce((sum, item) => {
+  const subtotal = cartFor(scope).reduce((sum, item) => {
     const product = productMap.get(Number(item.product_id));
-    return sum + Number(product?.price || 0) * Number(item.quantity || 0);
+    return sum + Number(product?.price || item.unit_price || 0) * Number(item.quantity || 0);
   }, 0);
   const rate = Number(state[scope].customer?.discount_rate || 0);
   const membershipDiscount = Math.round((subtotal * rate) / 100);
@@ -197,7 +321,6 @@ function totalsFor(scope) {
     : 0;
   const total = Math.max(0, subtotal - membershipDiscount - voucherDiscount);
   const points = state[scope].customer ? Math.floor(total / 10000) : 0;
-
   return { subtotal, membershipDiscount, voucherDiscount, total, points };
 }
 
@@ -255,15 +378,11 @@ function renderVoucherOptions(scope) {
   const select = document.querySelector(scope === "site" ? "[data-site-voucher]" : "[data-pos-voucher]");
   if (!select) return;
 
-  const customer = state[scope].customer;
-  const usable = customer?.vouchers?.filter((voucher) => voucher.usable) || [];
+  const usable = state[scope].customer?.vouchers?.filter((voucher) => voucher.usable) || [];
   select.innerHTML = '<option value="">Không dùng voucher</option>' + usable.map((voucher) => {
-    const value = voucher.discount_type === "percentage"
-      ? `${Number(voucher.discount_value)}%`
-      : formatMoney(voucher.discount_value);
+    const value = voucher.discount_type === "percentage" ? `${Number(voucher.discount_value)}%` : formatMoney(voucher.discount_value);
     return `<option value="${voucher.id}">${escapeHtml(voucher.voucher_code)} · ${value}</option>`;
   }).join("");
-
   if (!usable.some((voucher) => String(voucher.id) === String(state[scope].voucherId))) {
     state[scope].voucherId = "";
   }
@@ -341,7 +460,7 @@ function renderMemberAccount() {
       <div class="metric"><strong>${usableCount}</strong><small>Voucher khả dụng</small></div>
     </div>
     <div class="account-actions">
-      <a class="secondary-link" href="#member">Xem hồ sơ</a>
+      <a class="secondary-link" href="${url("member")}">Xem hồ sơ</a>
       <button class="secondary-btn" type="button" data-member-logout>Đăng xuất</button>
     </div>
   `;
@@ -362,10 +481,7 @@ function renderProfile(targetName, customer) {
     return;
   }
 
-  const favoriteNames = (customer.favorites || [])
-    .map((id) => productMap.get(Number(id))?.product_name)
-    .filter(Boolean);
-
+  const favoriteNames = (customer.favorites || []).map((id) => productMap.get(Number(id))?.product_name).filter(Boolean);
   const voucherRows = (customer.vouchers || []).map((voucher) => `
     <tr>
       <td>${escapeHtml(voucher.voucher_code)}</td>
@@ -375,7 +491,6 @@ function renderProfile(targetName, customer) {
       <td><span class="status ${voucherStatusClass(voucher)}">${voucher.usable ? "Khả dụng" : escapeHtml(voucher.status)}</span></td>
     </tr>
   `).join("");
-
   const historyRows = (customer.history || []).map((invoice) => `
     <tr>
       <td>#${invoice.id}</td>
@@ -417,11 +532,13 @@ function renderProfile(targetName, customer) {
   `;
 }
 
-function renderSiteProducts() {
+function legacyRenderSiteProducts() {
   const target = document.querySelector("[data-site-products]");
   if (!target) return;
 
-  target.innerHTML = products.map((product) => {
+  const limit = Number(target.dataset.productLimit || 0);
+  const rows = limit > 0 ? products.slice(0, limit) : products;
+  target.innerHTML = rows.map((product) => {
     const isFavorite = state.site.customer?.favorites?.includes(Number(product.id));
     return `
       <article class="product-card">
@@ -443,7 +560,7 @@ function renderSiteProducts() {
   }).join("") || '<div class="empty-state">Chưa có sản phẩm. Hãy chạy install.php.</div>';
 }
 
-function renderReviews() {
+function legacyRenderReviews() {
   const target = document.querySelector("[data-reviews]");
   if (!target) return;
 
@@ -475,22 +592,19 @@ async function lookupMember(scope, identity) {
     return null;
   }
 
-  if (scope === "site" || scope === "pos") {
-    if (scope === "site") {
-      setSiteMember(customer);
-    } else {
-      state[scope].customer = customer;
-      state[scope].voucherId = "";
-      renderMiniMember(scope);
-      renderVoucherOptions(scope);
-    }
+  if (scope === "site") {
+    setSiteMember(customer);
+  } else if (scope === "pos") {
+    state.pos.customer = customer;
+    state.pos.voucherId = "";
+    renderMiniMember("pos");
+    renderVoucherOptions("pos");
   } else if (scope === "crm") {
     state.pos.customer = customer;
-    renderProfile(scope, customer);
+    renderProfile("crm", customer);
   } else {
     renderProfile(scope, customer);
   }
-
   return customer;
 }
 
@@ -502,7 +616,7 @@ async function checkoutScope(scope, extraPayload = {}) {
   }
   if (scope === "site" && !state.site.customer) {
     showToast("Vui lòng đăng nhập hoặc đăng ký thành viên trước khi đặt hàng.");
-    document.querySelector("#account")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    await navigateWebsite(url("account"));
     return;
   }
 
@@ -522,23 +636,19 @@ async function checkoutScope(scope, extraPayload = {}) {
   const result = await api(extraPayload.order_id ? "checkout-order" : "checkout", payload);
   if (!extraPayload.order_id) {
     state[scope].cart = [];
+    persistCart(scope);
   }
   state[scope].voucherId = "";
-  if (result.customer && (scope === "site" || scope === "pos")) {
-    if (scope === "site") {
-      setSiteMember(result.customer);
-    } else {
-      state[scope].customer = result.customer;
-    }
+  if (result.customer && scope === "site") {
+    setSiteMember(result.customer);
+  } else if (result.customer && scope === "pos") {
+    state.pos.customer = result.customer;
   }
   renderCart(scope);
   renderVoucherOptions(scope);
   renderMiniMember(scope);
   showToast(`Thanh toán thành công hóa đơn #${result.invoice_id}, tổng ${formatMoney(result.total_amount)}.`);
-
-  if (pageName === "pos") {
-    await refreshPosData(false);
-  }
+  if (section === "pos") await refreshPosData(false);
 }
 
 function allowedModules(user = state.pos.user) {
@@ -547,12 +657,7 @@ function allowedModules(user = state.pos.user) {
 }
 
 function currentModule() {
-  const allowed = allowedModules();
-  if (!allowed.length) return null;
-  if (!allowed.some((module) => module.id === state.pos.activeModule)) {
-    state.pos.activeModule = allowed[0].id;
-  }
-  return allowed.find((module) => module.id === state.pos.activeModule) || allowed[0];
+  return posModules.find((module) => module.id === state.pos.activeModule) || posModules[0];
 }
 
 function branchOptions(selected = "") {
@@ -567,16 +672,13 @@ function categoryOptions(selected = "") {
   ).join("");
 }
 
-function renderPosLogin() {
+function legacyRenderPosLogin() {
   const root = document.querySelector("#pos-app");
   if (!root) return;
 
   const roles = cafeApp.roles || Object.keys(roleLabels);
   const staff = cafeApp.staff || [];
-  const filteredStaff = state.pos.roleFilter
-    ? staff.filter((member) => member.staff_role === state.pos.roleFilter)
-    : staff;
-
+  const filteredStaff = state.pos.roleFilter ? staff.filter((member) => member.staff_role === state.pos.roleFilter) : staff;
   root.innerHTML = `
     <main class="pos-login">
       <section class="login-card">
@@ -606,20 +708,12 @@ function renderPosLogin() {
   `;
 }
 
-function renderPosApp() {
-  const root = document.querySelector("#pos-app");
-  if (!root) return;
-
-  if (!state.pos.user) {
-    renderPosLogin();
-    return;
-  }
-
+function legacyRenderPosShell(contentHtml) {
   const module = currentModule();
   const allowed = allowedModules();
-  root.innerHTML = `
+  return `
     <aside class="pos-sidebar">
-      <a class="brand small" href="${escapeHtml(baseUrl)}pos.php">Cafe Connect</a>
+      <a class="brand small" href="${url("pos/checkout")}">Cafe Connect</a>
       <div class="operator-card">
         <span class="avatar">${escapeHtml((state.pos.user.staff_name || "?").slice(0, 1))}</span>
         <div>
@@ -628,9 +722,7 @@ function renderPosApp() {
         </div>
       </div>
       <nav>
-        ${allowed.map((item) => `
-          <button type="button" class="${item.id === module.id ? "is-active" : ""}" data-pos-module="${item.id}">${escapeHtml(item.label)}</button>
-        `).join("")}
+        ${allowed.map((item) => `<a class="${item.id === module.id ? "is-active" : ""}" href="${url(`pos/${item.id}`)}">${escapeHtml(item.label)}</a>`).join("")}
       </nav>
       <button type="button" class="secondary-btn sidebar-btn" data-pos-refresh>Làm mới dữ liệu</button>
       <button type="button" class="ghost-btn sidebar-btn" data-pos-logout>Đăng xuất</button>
@@ -646,10 +738,46 @@ function renderPosApp() {
           <label>Nhân viên <input value="${escapeHtml(state.pos.user.staff_name)}" disabled></label>
         </div>
       </div>
-      <section data-pos-module-content>${renderModule(module.id)}</section>
+      ${contentHtml}
     </main>
   `;
+}
 
+function renderPosApp() {
+  const root = document.querySelector("#pos-app");
+  if (!root) return;
+
+  if (pageName === "pos-login") {
+    renderPosLogin();
+    return;
+  }
+
+  if (!state.pos.user) {
+    root.innerHTML = `
+      <main class="pos-login">
+        <section class="login-card">
+          <p class="eyebrow">Cafe Connect POS</p>
+          <h1>Cần đăng nhập POS</h1>
+          <p class="login-note">Chọn nhân viên trước khi mở module nội bộ.</p>
+          <a class="primary-btn" href="${url("pos/login")}">Đăng nhập POS</a>
+        </section>
+      </main>
+    `;
+    return;
+  }
+
+  const module = currentModule();
+  if (!module.roles.includes(state.pos.user.staff_role)) {
+    root.innerHTML = renderPosShell(`
+      <section class="panel">
+        <h2>Không có quyền truy cập</h2>
+        <p>Role ${escapeHtml(roleLabels[state.pos.user.staff_role] || state.pos.user.staff_role)} không được mở module ${escapeHtml(module.label)}.</p>
+      </section>
+    `);
+    return;
+  }
+
+  root.innerHTML = renderPosShell(renderModule(module.id));
   afterModuleRender(module.id);
 }
 
@@ -658,6 +786,7 @@ function renderModule(moduleId) {
     checkout: renderCheckoutModule,
     orders: renderOrdersModule,
     kitchen: renderKitchenModule,
+    dashboard: renderDashboardModule,
     customers: renderCustomersModule,
     campaigns: renderCampaignsModule,
     inventory: renderInventoryModule,
@@ -680,7 +809,7 @@ function afterModuleRender(moduleId) {
   }
 }
 
-function productPickerHtml(title = "Menu POS") {
+function legacyProductPickerHtml(title = "Menu POS") {
   return `
     <section class="panel">
       <div class="panel-head">
@@ -724,9 +853,7 @@ function renderCheckoutModule() {
 function renderOrdersModule() {
   const tables = cafeApp.tables || [];
   const orders = cafeApp.orders || [];
-  if (!state.pos.tableId && tables.length) {
-    state.pos.tableId = String(tables[0].id);
-  }
+  if (!state.pos.tableId && tables.length) state.pos.tableId = String(tables[0].id);
 
   const tableCards = tables.map((table) => `
     <button type="button" class="table-card ${String(state.pos.tableId) === String(table.id) ? "is-active" : ""} ${table.status}" data-select-table="${table.id}">
@@ -739,10 +866,7 @@ function renderOrdersModule() {
   const orderCards = orders.map((order) => `
     <article class="order-card">
       <header>
-        <div>
-          <strong>${escapeHtml(order.order_code)}</strong>
-          <small>${escapeHtml(order.table_name)} · ${escapeHtml(order.customer_name)}</small>
-        </div>
+        <div><strong>${escapeHtml(order.order_code)}</strong><small>${escapeHtml(order.table_name)} · ${escapeHtml(order.customer_name)}</small></div>
         <span class="status ${order.status === "ready" || order.status === "served" ? "good" : ""}">${escapeHtml(order.status)}</span>
       </header>
       <div class="order-items">
@@ -751,9 +875,7 @@ function renderOrdersModule() {
             <span>${Number(item.quantity)}× ${escapeHtml(item.product_name)}</span>
             <small>${escapeHtml(item.kitchen_status)}</small>
             <div class="mini-actions">
-              ${["preparing", "ready", "served"].map((status) => `
-                <button type="button" data-update-item="${item.id}" data-status="${status}">${escapeHtml(status)}</button>
-              `).join("")}
+              ${["preparing", "ready", "served"].map((status) => `<button type="button" data-update-item="${item.id}" data-status="${status}">${escapeHtml(status)}</button>`).join("")}
             </div>
           </div>
         `).join("")}
@@ -820,13 +942,7 @@ function renderKitchenModule() {
       </div>
     </article>
   `).join("");
-
-  return `
-    <section class="panel">
-      <div class="panel-head"><h2>Kitchen queue</h2><p>Barista cập nhật trạng thái từng món.</p></div>
-      <div class="kitchen-board">${cards || '<div class="empty-state">Không có món chờ pha chế.</div>'}</div>
-    </section>
-  `;
+  return `<section class="panel"><div class="panel-head"><h2>Kitchen queue</h2><p>Barista cập nhật trạng thái từng món.</p></div><div class="kitchen-board">${cards || '<div class="empty-state">Không có món chờ pha chế.</div>'}</div></section>`;
 }
 
 function renderDashboardModule() {
@@ -837,10 +953,7 @@ function dashboardHtml(data) {
   if (!data) return '<div class="empty-state">Chưa có dữ liệu dashboard.</div>';
   const summary = data.summary || {};
   const month = data.month || {};
-  const voucherRate = Number(summary.orders || 0) > 0
-    ? Math.round((Number(summary.voucher_orders || 0) / Number(summary.orders)) * 100)
-    : 0;
-
+  const voucherRate = Number(summary.orders || 0) > 0 ? Math.round((Number(summary.voucher_orders || 0) / Number(summary.orders)) * 100) : 0;
   return `
     <div class="dashboard-grid">
       <div class="metric"><strong>${formatMoney(summary.revenue)}</strong><small>Doanh thu ngày ${escapeHtml(data.business_date)}</small></div>
@@ -849,30 +962,10 @@ function dashboardHtml(data) {
       <div class="metric"><strong>${voucherRate}%</strong><small>Tỷ lệ dùng voucher</small></div>
     </div>
     <div class="dashboard-columns">
-      <section>
-        <h3>Sản phẩm bán chạy</h3>
-        ${tableHtml(data.top_products || [], ["Sản phẩm", "SL", "Doanh thu"], (row) => `
-          <tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity_sold || 0)}</td><td>${formatMoney(row.product_revenue)}</td></tr>
-        `)}
-      </section>
-      <section>
-        <h3>Tồn kho thấp</h3>
-        ${tableHtml(data.low_inventory || [], ["Chi nhánh", "Sản phẩm", "Tồn", "Tối thiểu"], (row) => `
-          <tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.product_name)}</td><td>${Number(row.stock_quantity || 0)}</td><td>${Number(row.min_stock_level || 0)}</td></tr>
-        `)}
-      </section>
-      <section>
-        <h3>Doanh thu chi nhánh</h3>
-        ${tableHtml(data.branch_revenue || [], ["Chi nhánh", "Đơn", "Doanh thu"], (row) => `
-          <tr><td>${escapeHtml(row.branch_name)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>
-        `)}
-      </section>
-      <section>
-        <h3>Hóa đơn mới</h3>
-        ${tableHtml(data.recent_invoices || [], ["HĐ", "Khách", "Kênh", "Tổng"], (row) => `
-          <tr><td>#${row.id}</td><td>${escapeHtml(row.customer_name)}</td><td>${escapeHtml(row.sales_channel)}</td><td>${formatMoney(row.total_amount)}</td></tr>
-        `)}
-      </section>
+      <section><h3>Sản phẩm bán chạy</h3>${tableHtml(data.top_products || [], ["Sản phẩm", "SL", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity_sold || 0)}</td><td>${formatMoney(row.product_revenue)}</td></tr>`)}</section>
+      <section><h3>Tồn kho thấp</h3>${tableHtml(data.low_inventory || [], ["Chi nhánh", "Sản phẩm", "Tồn", "Tối thiểu"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.product_name)}</td><td>${Number(row.stock_quantity || 0)}</td><td>${Number(row.min_stock_level || 0)}</td></tr>`)}</section>
+      <section><h3>Doanh thu chi nhánh</h3>${tableHtml(data.branch_revenue || [], ["Chi nhánh", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
+      <section><h3>Hóa đơn mới</h3>${tableHtml(data.recent_invoices || [], ["HĐ", "Khách", "Kênh", "Tổng"], (row) => `<tr><td>#${row.id}</td><td>${escapeHtml(row.customer_name)}</td><td>${escapeHtml(row.sales_channel)}</td><td>${formatMoney(row.total_amount)}</td></tr>`)}</section>
     </div>
   `;
 }
@@ -891,19 +984,12 @@ function renderCustomersModule() {
           <label>Số điện thoại <input name="phone_number" required></label>
           <label>Email <input type="email" name="email"></label>
           <label>Kênh ưa thích
-            <select name="preferred_channel">
-              <option value="pos">POS</option>
-              <option value="website">Website</option>
-              <option value="email">Email</option>
-              <option value="zalo">Zalo</option>
-            </select>
+            <select name="preferred_channel"><option value="pos">POS</option><option value="website">Website</option><option value="email">Email</option><option value="zalo">Zalo</option></select>
           </label>
           <button type="submit" class="secondary-btn">Tạo khách hàng</button>
         </form>
       </section>
-      <section class="panel profile-dashboard compact" data-member-result="crm">
-        <div class="empty-state">Chưa mở hồ sơ khách hàng.</div>
-      </section>
+      <section class="panel profile-dashboard compact" data-member-result="crm"><div class="empty-state">Chưa mở hồ sơ khách hàng.</div></section>
     </div>
   `;
 }
@@ -913,19 +999,8 @@ function campaignsTable(rows = cafeApp.campaigns || cafeApp.dashboard?.campaigns
     const issued = Number(campaign.issued_vouchers || 0);
     const redeemed = Number(campaign.redeemed_vouchers || 0);
     const rate = issued > 0 ? Math.round((redeemed / issued) * 100) : 0;
-    const discount = campaign.discount_type === "percentage"
-      ? `${Number(campaign.discount_value)}%`
-      : formatMoney(campaign.discount_value);
-    return `
-      <tr>
-        <td>${escapeHtml(campaign.promotion_name)}</td>
-        <td>${escapeHtml(campaign.target_segment)}</td>
-        <td>${discount}</td>
-        <td>${redeemed}/${issued} (${rate}%)</td>
-        <td>${formatMoney(campaign.attributed_revenue)}</td>
-        <td><span class="status good">${escapeHtml(campaign.status)}</span></td>
-      </tr>
-    `;
+    const discount = campaign.discount_type === "percentage" ? `${Number(campaign.discount_value)}%` : formatMoney(campaign.discount_value);
+    return `<tr><td>${escapeHtml(campaign.promotion_name)}</td><td>${escapeHtml(campaign.target_segment)}</td><td>${discount}</td><td>${redeemed}/${issued} (${rate}%)</td><td>${formatMoney(campaign.attributed_revenue)}</td><td><span class="status good">${escapeHtml(campaign.status)}</span></td></tr>`;
   });
 }
 
@@ -938,30 +1013,13 @@ function renderCampaignsModule() {
         <label>Mô tả <textarea name="description"></textarea></label>
         <label>Ngày bắt đầu <input type="date" name="start_date" value="2026-05-13" required></label>
         <label>Ngày kết thúc <input type="date" name="end_date" value="2026-06-15" required></label>
-        <label>Nhóm khách
-          <select name="target_segment">
-            <option value="all">Tất cả</option>
-            <option value="bronze">Bronze</option>
-            <option value="silver">Silver</option>
-            <option value="gold">Gold</option>
-            <option value="birthday">Sinh nhật</option>
-            <option value="inactive">Khách ngủ đông</option>
-          </select>
-        </label>
-        <label>Loại giảm
-          <select name="discount_type">
-            <option value="fixed">Số tiền</option>
-            <option value="percentage">Phần trăm</option>
-          </select>
-        </label>
+        <label>Nhóm khách <select name="target_segment"><option value="all">Tất cả</option><option value="bronze">Bronze</option><option value="silver">Silver</option><option value="gold">Gold</option><option value="birthday">Sinh nhật</option><option value="inactive">Khách ngủ đông</option></select></label>
+        <label>Loại giảm <select name="discount_type"><option value="fixed">Số tiền</option><option value="percentage">Phần trăm</option></select></label>
         <label>Giá trị <input type="number" name="discount_value" value="20000" min="0"></label>
         <label>Số voucher <input type="number" name="voucher_quantity" value="5" min="0"></label>
         <button class="primary-btn" type="submit">Tạo và phát voucher</button>
       </form>
-      <section class="panel">
-        <div class="panel-head"><h2>Hiệu quả campaign</h2><p>Voucher redeemed và doanh thu quy đổi.</p></div>
-        ${campaignsTable()}
-      </section>
+      <section class="panel"><div class="panel-head"><h2>Hiệu quả campaign</h2><p>Voucher redeemed và doanh thu quy đổi.</p></div>${campaignsTable()}</section>
     </div>
   `;
 }
@@ -972,67 +1030,36 @@ function renderInventoryModule() {
     <div class="admin-grid">
       <form class="create-form" data-stock-movement>
         <h2>Nhập/xuất kho</h2>
-        <label>Nguyên vật liệu
-          <select name="material_id">
-            ${(inventory.materials || []).map((item) => `<option value="${item.id}">${escapeHtml(item.material_name)} (${escapeHtml(item.unit)})</option>`).join("")}
-          </select>
-        </label>
-        <label>Loại
-          <select name="movement_type">
-            <option value="import">Nhập kho</option>
-            <option value="sales_export">Xuất bán</option>
-            <option value="waste_export">Hủy hao hụt</option>
-          </select>
-        </label>
+        <label>Nguyên vật liệu <select name="material_id">${(inventory.materials || []).map((item) => `<option value="${item.id}">${escapeHtml(item.material_name)} (${escapeHtml(item.unit)})</option>`).join("")}</select></label>
+        <label>Loại <select name="movement_type"><option value="import">Nhập kho</option><option value="sales_export">Xuất bán</option><option value="waste_export">Hủy hao hụt</option></select></label>
         <label>Số lượng <input type="number" name="quantity" value="1" min="1"></label>
         <label>Giá trị <input type="number" name="total_amount" value="0" min="0"></label>
         <label>Ghi chú <textarea name="note"></textarea></label>
         <button class="primary-btn" type="submit">Ghi nhận</button>
       </form>
-      <section class="panel">
-        <h2>Tồn kho sản phẩm</h2>
-        ${tableHtml(inventory.product_inventory || [], ["Chi nhánh", "Sản phẩm", "Tồn", "Tối thiểu", "Trạng thái"], (row) => `
-          <tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.product_name)}</td><td>${Number(row.stock_quantity)}</td><td>${Number(row.min_stock_level)}</td><td><span class="status ${row.stock_status === "low" ? "bad" : "good"}">${escapeHtml(row.stock_status)}</span></td></tr>
-        `)}
-      </section>
+      <section class="panel"><h2>Tồn kho sản phẩm</h2>${tableHtml(inventory.product_inventory || [], ["Chi nhánh", "Sản phẩm", "Tồn", "Tối thiểu", "Trạng thái"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.product_name)}</td><td>${Number(row.stock_quantity)}</td><td>${Number(row.min_stock_level)}</td><td><span class="status ${row.stock_status === "low" ? "bad" : "good"}">${escapeHtml(row.stock_status)}</span></td></tr>`)}</section>
     </div>
     <div class="dashboard-columns">
-      <section class="panel">
-        <h2>Nguyên vật liệu</h2>
-        ${tableHtml(inventory.materials || [], ["Tên", "ĐVT", "Tồn", "Tối thiểu", "Nhà cung cấp"], (row) => `
-          <tr><td>${escapeHtml(row.material_name)}</td><td>${escapeHtml(row.unit)}</td><td>${Number(row.stock_quantity)}</td><td>${Number(row.min_stock_level)}</td><td>${escapeHtml(row.supplier_name)}</td></tr>
-        `)}
-      </section>
-      <section class="panel">
-        <h2>Lịch sử kho</h2>
-        ${tableHtml(inventory.movements || [], ["Mã", "Loại", "NVL", "SL", "Nhân viên"], (row) => `
-          <tr><td>${escapeHtml(row.movement_code)}</td><td>${escapeHtml(row.movement_type)}</td><td>${escapeHtml(row.material_name)}</td><td>${Number(row.quantity)}</td><td>${escapeHtml(row.staff_name)}</td></tr>
-        `)}
-      </section>
+      <section class="panel"><h2>Nguyên vật liệu</h2>${tableHtml(inventory.materials || [], ["Tên", "ĐVT", "Tồn", "Tối thiểu", "Nhà cung cấp"], (row) => `<tr><td>${escapeHtml(row.material_name)}</td><td>${escapeHtml(row.unit)}</td><td>${Number(row.stock_quantity)}</td><td>${Number(row.min_stock_level)}</td><td>${escapeHtml(row.supplier_name)}</td></tr>`)}</section>
+      <section class="panel"><h2>Lịch sử kho</h2>${tableHtml(inventory.movements || [], ["Mã", "Loại", "NVL", "SL", "Nhân viên"], (row) => `<tr><td>${escapeHtml(row.movement_code)}</td><td>${escapeHtml(row.movement_type)}</td><td>${escapeHtml(row.material_name)}</td><td>${Number(row.quantity)}</td><td>${escapeHtml(row.staff_name)}</td></tr>`)}</section>
     </div>
   `;
+}
+
+function cashTable() {
+  const rows = cafeApp.reports?.cash_transactions || [];
+  return tableHtml(rows, ["Loại", "Lý do", "Số tiền", "Nhân viên", "Thời gian"], (row) => `
+    <tr><td><span class="status ${row.transaction_type === "in" ? "good" : "bad"}">${escapeHtml(row.transaction_type)}</span></td><td>${escapeHtml(row.reason)}</td><td>${formatMoney(row.amount)}</td><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(row.created_at)}</td></tr>
+  `);
 }
 
 function renderReportsModule() {
   const reports = cafeApp.reports || {};
   return `
     <div class="dashboard-columns">
-      <section class="panel">
-        <h2>Doanh thu theo kênh</h2>
-        ${tableHtml(reports.revenue_by_channel || [], ["Kênh", "Đơn", "Doanh thu"], (row) => `
-          <tr><td>${escapeHtml(row.sales_channel)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>
-        `)}
-      </section>
-      <section class="panel">
-        <h2>Hiệu suất nhân viên</h2>
-        ${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `
-          <tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>
-        `)}
-      </section>
-      <section class="panel span-2">
-        <h2>Thu chi gần nhất</h2>
-        ${cashTable()}
-      </section>
+      <section class="panel"><h2>Doanh thu theo kênh</h2>${tableHtml(reports.revenue_by_channel || [], ["Kênh", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.sales_channel)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
+      <section class="panel"><h2>Hiệu suất nhân viên</h2>${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>`)}</section>
+      <section class="panel span-2"><h2>Thu chi gần nhất</h2>${cashTable()}</section>
     </div>
   `;
 }
@@ -1047,23 +1074,10 @@ function renderProductsModule() {
         <label>Danh mục <select name="category">${categoryOptions("coffee")}</select></label>
         <label>Giá <input type="number" name="price" min="0" value="45000"></label>
         <label>Ghi chú <textarea name="take_note"></textarea></label>
-        <label>Trạng thái
-          <select name="status"><option value="active">Active</option><option value="inactive">Inactive</option></select>
-        </label>
+        <label>Trạng thái <select name="status"><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
         <button class="primary-btn" type="submit">Lưu sản phẩm</button>
       </form>
-      <section class="panel">
-        <h2>Danh sách sản phẩm</h2>
-        ${tableHtml(products, ["Tên", "Danh mục", "Giá", "Trạng thái", ""], (row) => `
-          <tr>
-            <td>${escapeHtml(row.product_name)}</td>
-            <td>${escapeHtml(row.category_name || row.category)}</td>
-            <td>${formatMoney(row.price)}</td>
-            <td><span class="status good">${escapeHtml(row.status)}</span></td>
-            <td><button type="button" data-edit-product="${row.id}">Sửa</button></td>
-          </tr>
-        `)}
-      </section>
+      <section class="panel"><h2>Danh sách sản phẩm</h2>${tableHtml(products, ["Tên", "Danh mục", "Giá", "Trạng thái", ""], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${escapeHtml(row.category_name || row.category)}</td><td>${formatMoney(row.price)}</td><td><span class="status good">${escapeHtml(row.status)}</span></td><td><button type="button" data-edit-product="${row.id}">Sửa</button></td></tr>`)}</section>
     </div>
   `;
 }
@@ -1077,42 +1091,14 @@ function renderStaffModule() {
         <input type="hidden" name="id">
         <label>Tên nhân viên <input name="staff_name" required></label>
         <label>Chi nhánh <select name="branch_id">${branchOptions(state.pos.user?.branch_id || 1)}</select></label>
-        <label>Role
-          <select name="staff_role">
-            ${(cafeApp.roles || Object.keys(roleLabels)).map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabels[role] || role)}</option>`).join("")}
-          </select>
-        </label>
+        <label>Role <select name="staff_role">${(cafeApp.roles || Object.keys(roleLabels)).map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabels[role] || role)}</option>`).join("")}</select></label>
         <label>Số điện thoại <input name="phone_number"></label>
         <label>Email <input type="email" name="email"></label>
         <button class="primary-btn" type="submit">Lưu nhân viên</button>
       </form>
-      <section class="panel">
-        <h2>Danh sách nhân viên</h2>
-        ${tableHtml(staff, ["Tên", "Role", "Chi nhánh", "Email", ""], (row) => `
-          <tr>
-            <td>${escapeHtml(row.staff_name)}</td>
-            <td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td>
-            <td>${escapeHtml(row.branch_name)}</td>
-            <td>${escapeHtml(row.email || "")}</td>
-            <td><button type="button" data-edit-staff="${row.id}">Sửa</button></td>
-          </tr>
-        `)}
-      </section>
+      <section class="panel"><h2>Danh sách nhân viên</h2>${tableHtml(staff, ["Tên", "Role", "Chi nhánh", "Email", ""], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.email || "")}</td><td><button type="button" data-edit-staff="${row.id}">Sửa</button></td></tr>`)}</section>
     </div>
   `;
-}
-
-function cashTable() {
-  const rows = cafeApp.reports?.cash_transactions || [];
-  return tableHtml(rows, ["Loại", "Lý do", "Số tiền", "Nhân viên", "Thời gian"], (row) => `
-    <tr>
-      <td><span class="status ${row.transaction_type === "in" ? "good" : "bad"}">${escapeHtml(row.transaction_type)}</span></td>
-      <td>${escapeHtml(row.reason)}</td>
-      <td>${formatMoney(row.amount)}</td>
-      <td>${escapeHtml(row.staff_name)}</td>
-      <td>${escapeHtml(row.created_at)}</td>
-    </tr>
-  `);
 }
 
 function renderCashModule() {
@@ -1120,31 +1106,22 @@ function renderCashModule() {
     <div class="campaign-layout">
       <form class="create-form" data-cash-transaction>
         <h2>Thu chi quầy</h2>
-        <label>Loại
-          <select name="transaction_type"><option value="in">Thu</option><option value="out">Chi</option></select>
-        </label>
+        <label>Loại <select name="transaction_type"><option value="in">Thu</option><option value="out">Chi</option></select></label>
         <label>Lý do <input name="reason" value="Điều chỉnh quỹ POS" required></label>
         <label>Số tiền <input type="number" name="amount" value="50000" min="0"></label>
         <button class="primary-btn" type="submit">Ghi nhận</button>
       </form>
-      <section class="panel">
-        <h2>Lịch sử thu chi</h2>
-        ${cashTable()}
-      </section>
+      <section class="panel"><h2>Lịch sử thu chi</h2>${cashTable()}</section>
     </div>
   `;
 }
 
-function renderPosProducts() {
+function legacyRenderPosProducts() {
   const target = document.querySelector("[data-pos-products]");
   if (!target) return;
 
   const keyword = state.pos.productFilter.trim().toLowerCase();
-  const filtered = products.filter((product) => {
-    const text = `${product.product_name} ${product.category} ${product.category_name || ""}`.toLowerCase();
-    return text.includes(keyword);
-  });
-
+  const filtered = products.filter((product) => `${product.product_name} ${product.category} ${product.category_name || ""}`.toLowerCase().includes(keyword));
   target.innerHTML = filtered.map((product) => `
     <article class="pos-product-card">
       <img src="${escapeHtml(asset(product.image))}" alt="${escapeHtml(product.product_name)}">
@@ -1176,6 +1153,182 @@ function updatePosCollections(result = {}) {
   if (result.product_inventory || result.materials || result.movements) cafeApp.inventory = result;
 }
 
+function renderSiteProducts() {
+  const target = document.querySelector("[data-site-products]");
+  if (!target) return;
+
+  const limit = Number(target.dataset.productLimit || 0);
+  const rows = limit > 0 ? products.slice(0, limit) : products;
+  target.innerHTML = rows.map((product) => {
+    const isFavorite = state.site.customer?.favorites?.includes(Number(product.id));
+    return `
+      <article class="product-card">
+        <div class="product-media">
+          <img src="${escapeHtml(asset(product.image))}" alt="${escapeHtml(product.product_name)}">
+          <button type="button" class="favorite-button ${isFavorite ? "is-active" : ""}" data-favorite-product="${product.id}" title="Yêu thích" aria-label="Yêu thích">
+            <img src="${escapeHtml(asset("assets/images/heart.svg"))}" alt="">
+          </button>
+        </div>
+        <div class="product-body">
+          <h3>${escapeHtml(product.product_name)}</h3>
+          <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
+          <div class="product-actions">
+            <strong>${formatMoney(product.price)}</strong>
+            <button type="button" data-site-add="${product.id}">Order Now</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("") || '<div class="empty-state">Chưa có sản phẩm. Hãy chạy install.php.</div>';
+}
+
+function renderReviews() {
+  const target = document.querySelector("[data-reviews]");
+  if (!target) return;
+
+  const reviews = Array.isArray(cafeApp.reviews) ? cafeApp.reviews : [];
+  target.innerHTML = reviews.map((review, index) => `
+    <article class="testimonial-card ${index === 1 ? "featured-card" : "side-card"}">
+      <div class="testimonial-head">
+        <img src="${escapeHtml(asset(review.avatar_path || (index === 1 ? "assets/images/avatar-1.png" : "assets/images/avatar-2.png")))}" alt="${escapeHtml(review.customer_name)}">
+        <div>
+          <h3>${escapeHtml(review.customer_name)}</h3>
+          <p>${escapeHtml(review.customer_title || "Cafe Connect member")}</p>
+        </div>
+        <span class="stars">${"*".repeat(Math.max(1, Math.min(5, Number(review.rating || 5))))}</span>
+      </div>
+      <p>${escapeHtml(review.review_text)}</p>
+    </article>
+  `).join("") || '<div class="empty-state">Chưa có đánh giá.</div>';
+}
+
+function renderPosLogin() {
+  const root = document.querySelector("#pos-app");
+  if (!root) return;
+
+  const roles = cafeApp.roles || Object.keys(roleLabels);
+  const staff = cafeApp.staff || [];
+  const filteredStaff = state.pos.roleFilter ? staff.filter((member) => member.staff_role === state.pos.roleFilter) : staff;
+  root.innerHTML = `
+    <main class="pos-login login-page">
+      <section class="login-card">
+        <div class="logo-lockup">
+          <span class="logo-mark">C</span>
+          <div>
+            <p>Cafe Connect</p>
+            <strong>POS Manager</strong>
+          </div>
+        </div>
+        <h1>Chọn vai trò đăng nhập</h1>
+        <p>Đăng nhập demo bằng nhân viên trong database. Mỗi role chỉ thấy module phù hợp.</p>
+        <div class="role-grid">
+          <button type="button" class="role-card ${state.pos.roleFilter === "" ? "active" : ""}" data-login-role="">
+            <strong>Tất cả</strong>
+            <span>${staff.length} nhân viên đang có</span>
+          </button>
+          ${roles.map((role) => `
+            <button type="button" class="role-card ${state.pos.roleFilter === role ? "active" : ""}" data-login-role="${escapeHtml(role)}">
+              <strong>${escapeHtml(roleLabels[role] || role)}</strong>
+              <span>${staff.filter((member) => member.staff_role === role).length} nhân viên</span>
+            </button>
+          `).join("")}
+        </div>
+        <div class="staff-grid">
+          ${filteredStaff.map((member) => `
+            <button type="button" class="staff-card" data-login-staff="${member.id}">
+              <span class="avatar">${escapeHtml((member.staff_name || "?").slice(0, 1))}</span>
+              <strong>${escapeHtml(member.staff_name)}</strong>
+              <small>${escapeHtml(roleLabels[member.staff_role] || member.staff_role)} · ${escapeHtml(member.branch_name)}</small>
+            </button>
+          `).join("") || '<div class="empty-state">Không có nhân viên phù hợp.</div>'}
+        </div>
+      </section>
+      <aside class="login-aside">
+        <div class="login-preview">
+          <div class="preview-bar"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span></div>
+          <div class="preview-body">
+            <div class="preview-grid"><span class="preview-tile"></span><span class="preview-tile"></span><span class="preview-tile"></span><span class="preview-tile"></span></div>
+            <span class="preview-side"></span>
+          </div>
+        </div>
+      </aside>
+    </main>
+  `;
+}
+
+function renderPosShell(contentHtml) {
+  const module = currentModule();
+  const allowed = allowedModules();
+  return `
+    <header class="pos-topbar topbar">
+      <a class="brand" href="${url("pos/checkout")}">
+        <span class="logo-mark">${escapeHtml((state.pos.user.staff_role || "P").slice(0, 1).toUpperCase())}</span>
+        <span><p>Cafe Connect</p><strong>${escapeHtml(roleLabels[state.pos.user.staff_role] || state.pos.user.staff_role)}</strong></span>
+      </a>
+      <nav class="topnav">
+        ${allowed.map((item) => `<a class="nav-item ${item.id === module.id ? "active" : ""}" href="${url(`pos/${item.id}`)}">${escapeHtml(item.label)}</a>`).join("")}
+      </nav>
+      <div class="top-actions">
+        <button type="button" class="icon-btn" data-pos-refresh title="Làm mới">↻</button>
+        <span class="user-chip"><span class="avatar">${escapeHtml((state.pos.user.staff_name || "?").slice(0, 1))}</span>${escapeHtml(state.pos.user.staff_name)}</span>
+        <button type="button" class="icon-btn" data-pos-logout title="Đăng xuất">↗</button>
+      </div>
+    </header>
+    <main class="pos-main page">
+      <div class="page-heading">
+        <div>
+          <span class="eyebrow">MVC POS</span>
+          <h1>${escapeHtml(module.label)}</h1>
+        </div>
+        <div class="operator-panel compact">
+          <label>Chi nhánh <select disabled>${branchOptions(state.pos.user.branch_id)}</select></label>
+          <label>Nhân viên <input value="${escapeHtml(state.pos.user.staff_name)}" disabled></label>
+        </div>
+      </div>
+      ${contentHtml}
+    </main>
+  `;
+}
+
+function productPickerHtml(title = "Menu POS") {
+  return `
+    <section class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>${escapeHtml(title)}</h2>
+          <p>Danh sách lấy trực tiếp từ products.</p>
+        </div>
+        <label class="search-box">
+          <span>⌕</span>
+          <input type="search" data-product-search placeholder="Tìm món" value="${escapeHtml(state.pos.productFilter)}">
+        </label>
+      </div>
+      <div class="pos-product-grid" data-pos-products></div>
+    </section>
+  `;
+}
+
+function renderPosProducts() {
+  const target = document.querySelector("[data-pos-products]");
+  if (!target) return;
+
+  const keyword = state.pos.productFilter.trim().toLowerCase();
+  const filtered = products.filter((product) => `${product.product_name} ${product.category} ${product.category_name || ""}`.toLowerCase().includes(keyword));
+  target.innerHTML = filtered.map((product) => `
+    <article class="pos-product-card">
+      <img src="${escapeHtml(asset(product.image))}" alt="${escapeHtml(product.product_name)}">
+      <div class="pos-product-body">
+        <strong class="product-title">${escapeHtml(product.product_name)}</strong>
+        <small>${escapeHtml(product.category_name || product.category)}</small>
+        <div class="product-foot">
+          <span class="price">${formatMoney(product.price)}</span>
+          <button type="button" class="add-btn" data-pos-add="${product.id}">+</button>
+        </div>
+      </div>
+    </article>
+  `).join("") || '<div class="empty-state">Không có sản phẩm phù hợp.</div>';
+}
+
 function wireEvents() {
   document.querySelector("[data-nav-toggle]")?.addEventListener("click", () => {
     document.querySelector("[data-nav]")?.classList.toggle("is-open");
@@ -1183,15 +1336,26 @@ function wireEvents() {
 
   const header = document.querySelector("[data-header]");
   if (header) {
-    const setHeader = () => header.classList.toggle("is-scrolled", window.scrollY > 12);
-    setHeader();
-    window.addEventListener("scroll", setHeader, { passive: true });
+    updateHeaderState();
+    window.addEventListener("scroll", updateHeaderState, { passive: true });
   }
 
+  window.addEventListener("popstate", () => {
+    if (section === "website") {
+      navigateWebsite(window.location.href, false);
+    }
+  });
+
   document.addEventListener("click", async (event) => {
+    const navLink = event.target.closest("a[href]");
+    if (shouldUseWebsitePjax(navLink, event)) {
+      event.preventDefault();
+      await navigateWebsite(navLink.href);
+      return;
+    }
+
     const roleButton = event.target.closest("[data-login-role]");
     const loginStaff = event.target.closest("[data-login-staff]");
-    const moduleButton = event.target.closest("[data-pos-module]");
     const siteAdd = event.target.closest("[data-site-add]");
     const posAdd = event.target.closest("[data-pos-add]");
     const quantity = event.target.closest("[data-cart-scope][data-delta]");
@@ -1208,24 +1372,19 @@ function wireEvents() {
       renderPosLogin();
       return;
     }
-
     if (loginStaff) {
       const staff = (cafeApp.staff || []).find((member) => String(member.id) === String(loginStaff.dataset.loginStaff));
       if (staff) {
         savePosUser(staff);
-        state.pos.activeModule = "";
-        renderPosApp();
+        window.location.href = url("pos/checkout");
       }
       return;
     }
-
     if (event.target.closest("[data-pos-logout]")) {
       savePosUser(null);
-      state.pos.activeModule = "";
-      renderPosApp();
+      window.location.href = url("pos/login");
       return;
     }
-
     if (event.target.closest("[data-member-logout]")) {
       try {
         await api("member-logout");
@@ -1236,7 +1395,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (event.target.closest("[data-pos-refresh]")) {
       try {
         await refreshPosData();
@@ -1245,48 +1403,31 @@ function wireEvents() {
       }
       return;
     }
-
-    if (moduleButton) {
-      state.pos.activeModule = moduleButton.dataset.posModule;
-      renderPosApp();
-      return;
-    }
-
     if (siteAdd) {
       addToCart("site", siteAdd.dataset.siteAdd);
       showToast("Đã thêm món vào giỏ website.");
       return;
     }
-
     if (posAdd) {
       addToCart("pos", posAdd.dataset.posAdd);
       return;
     }
-
     if (quantity) {
       updateQuantity(quantity.dataset.cartScope, quantity.dataset.productId, quantity.dataset.delta);
       return;
     }
-
     if (remove) {
       removeItem(remove.dataset.cartScope, remove.dataset.productId);
       return;
     }
-
     if (tableCard) {
       state.pos.tableId = tableCard.dataset.selectTable;
-      const select = document.querySelector("[data-table-select]");
-      if (select) select.value = state.pos.tableId;
       renderPosApp();
       return;
     }
-
     if (updateItem) {
       try {
-        const result = await api("update-order-item", {
-          item_id: updateItem.dataset.updateItem,
-          status: updateItem.dataset.status,
-        });
+        const result = await api("update-order-item", { item_id: updateItem.dataset.updateItem, status: updateItem.dataset.status });
         updatePosCollections(result);
         renderPosApp();
         showToast("Đã cập nhật trạng thái món.");
@@ -1295,30 +1436,21 @@ function wireEvents() {
       }
       return;
     }
-
     if (orderCheckout) {
       try {
-        await checkoutScope("pos", {
-          order_id: Number(orderCheckout.dataset.orderCheckout),
-          items: [],
-          payment_method: document.querySelector("[data-pos-payment]")?.value || "cash",
-        });
+        await checkoutScope("pos", { order_id: Number(orderCheckout.dataset.orderCheckout), items: [], payment_method: document.querySelector("[data-pos-payment]")?.value || "cash" });
       } catch (error) {
         showToast(error.message);
       }
       return;
     }
-
     if (favorite) {
       try {
         if (!state.site.customer) {
-          showToast("Tra cứu thành viên trước khi đánh dấu yêu thích.");
+          showToast("Đăng nhập thành viên trước khi đánh dấu yêu thích.");
           return;
         }
-        const result = await api("favorite-toggle", {
-          customer_id: state.site.customer.id,
-          product_id: favorite.dataset.favoriteProduct,
-        });
+        const result = await api("favorite-toggle", { customer_id: state.site.customer.id, product_id: favorite.dataset.favoriteProduct });
         state.site.customer.favorites = result.favorites || [];
         renderSiteProducts();
         showToast(result.favorited ? "Đã thêm vào yêu thích." : "Đã bỏ yêu thích.");
@@ -1327,7 +1459,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (event.target.closest("[data-site-checkout]")) {
       try {
         await checkoutScope("site");
@@ -1336,7 +1467,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (event.target.closest("[data-pos-checkout]")) {
       try {
         await checkoutScope("pos");
@@ -1345,7 +1475,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (editProduct) {
       const product = products.find((item) => String(item.id) === String(editProduct.dataset.editProduct));
       const form = document.querySelector("[data-product-save]");
@@ -1359,7 +1488,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (editStaff) {
       const staff = (cafeApp.staff || []).find((item) => String(item.id) === String(editStaff.dataset.editStaff));
       const form = document.querySelector("[data-staff-save]");
@@ -1398,7 +1526,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (memberRegisterForm) {
       event.preventDefault();
       try {
@@ -1411,20 +1538,16 @@ function wireEvents() {
       }
       return;
     }
-
     if (lookupForm) {
       event.preventDefault();
-      const scope = lookupForm.dataset.memberLookup;
-      const identity = new FormData(lookupForm).get("identity");
       try {
-        const customer = await lookupMember(scope, identity);
+        const customer = await lookupMember(lookupForm.dataset.memberLookup, new FormData(lookupForm).get("identity"));
         if (customer) showToast("Đã mở hồ sơ thành viên.");
       } catch (error) {
         showToast(error.message);
       }
       return;
     }
-
     if (createForm) {
       event.preventDefault();
       try {
@@ -1437,7 +1560,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (newsletterForm) {
       event.preventDefault();
       try {
@@ -1449,7 +1571,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (serviceOrderForm) {
       event.preventDefault();
       try {
@@ -1468,7 +1589,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (campaignForm) {
       event.preventDefault();
       try {
@@ -1482,7 +1602,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (stockForm) {
       event.preventDefault();
       try {
@@ -1497,7 +1616,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (cashForm) {
       event.preventDefault();
       try {
@@ -1512,7 +1630,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (productForm) {
       event.preventDefault();
       try {
@@ -1526,7 +1643,6 @@ function wireEvents() {
       }
       return;
     }
-
     if (staffForm) {
       event.preventDefault();
       try {
@@ -1545,19 +1661,16 @@ function wireEvents() {
     const siteVoucher = event.target.closest("[data-site-voucher]");
     const posVoucher = event.target.closest("[data-pos-voucher]");
     const tableSelect = event.target.closest("[data-table-select]");
-
     if (siteVoucher) {
       state.site.voucherId = siteVoucher.value;
       renderTotals("site");
       return;
     }
-
     if (posVoucher) {
       state.pos.voucherId = posVoucher.value;
       renderTotals("pos");
       return;
     }
-
     if (tableSelect) {
       state.pos.tableId = tableSelect.value;
       renderPosApp();
@@ -1583,8 +1696,7 @@ function initialRender() {
     renderVoucherOptions("site");
     renderProfile("portal", state.site.customer);
   }
-
-  if (pageName === "pos") {
+  if (section === "pos") {
     renderPosApp();
   }
 }

@@ -16,10 +16,109 @@ use App\Models\Staff;
 
 final class PosController extends Controller
 {
+    private const MODULE_TITLES = [
+        'checkout' => 'POS bán hàng',
+        'orders' => 'Bàn & order',
+        'kitchen' => 'Bếp pha chế',
+        'dashboard' => 'Dashboard',
+        'customers' => 'CRM khách hàng',
+        'campaigns' => 'Campaign',
+        'inventory' => 'Kho',
+        'reports' => 'Báo cáo',
+        'products' => 'Sản phẩm',
+        'staff' => 'Nhân viên',
+        'cash' => 'Thu chi',
+    ];
+
     public function index(): void
     {
-        $installed = Database::ready();
-        $appData = [
+        $this->module('checkout');
+    }
+
+    public function login(): void
+    {
+        $this->view('pos/login', [
+            'pageTitle' => 'Cafe Connect POS | Login',
+            'page' => 'pos-login',
+            'section' => 'pos',
+            'installed' => Database::ready(),
+            'appData' => $this->appData('login'),
+        ]);
+    }
+
+    public function checkout(): void
+    {
+        $this->module('checkout');
+    }
+
+    public function orders(): void
+    {
+        $this->module('orders');
+    }
+
+    public function kitchen(): void
+    {
+        $this->module('kitchen');
+    }
+
+    public function dashboard(): void
+    {
+        $this->module('dashboard');
+    }
+
+    public function customers(): void
+    {
+        $this->module('customers');
+    }
+
+    public function campaigns(): void
+    {
+        $this->module('campaigns');
+    }
+
+    public function inventory(): void
+    {
+        $this->module('inventory');
+    }
+
+    public function reports(): void
+    {
+        $this->module('reports');
+    }
+
+    public function products(): void
+    {
+        $this->module('products');
+    }
+
+    public function staff(): void
+    {
+        $this->module('staff');
+    }
+
+    public function cash(): void
+    {
+        $this->module('cash');
+    }
+
+    private function module(string $module): void
+    {
+        $this->view('pos/module', [
+            'pageTitle' => 'Cafe Connect POS | ' . (self::MODULE_TITLES[$module] ?? $module),
+            'page' => 'pos-' . $module,
+            'section' => 'pos',
+            'posModule' => $module,
+            'installed' => Database::ready(),
+            'appData' => $this->appData($module),
+        ]);
+    }
+
+    private function appData(string $module): array
+    {
+        $data = [
+            'page' => 'pos-' . $module,
+            'section' => 'pos',
+            'posModule' => $module,
             'products' => [],
             'categories' => [],
             'staff' => [],
@@ -34,28 +133,25 @@ final class PosController extends Controller
             'roles' => Staff::ROLES,
         ];
 
-        if ($installed) {
-            $product = new Product();
-            $staff = new Staff();
-            $order = new Order();
-            $appData['products'] = $product->active();
-            $appData['categories'] = $product->categories();
-            $appData['staff'] = $staff->all();
-            $appData['branches'] = $staff->branches();
-            $appData['tables'] = $order->tables();
-            $appData['orders'] = $order->activeOrders();
-            $appData['kitchen'] = $order->kitchenQueue();
-            $appData['dashboard'] = (new Dashboard())->data();
-            $appData['campaigns'] = (new Campaign())->performance();
-            $appData['inventory'] = (new Inventory())->overview();
-            $appData['reports'] = (new Report())->data();
+        if (!Database::ready()) {
+            return $data;
         }
 
-        $this->view('pos/index', [
-            'pageTitle' => 'Cafe Connect POS',
-            'page' => 'pos',
-            'installed' => $installed,
-            'appData' => $appData,
-        ]);
+        $product = new Product();
+        $staff = new Staff();
+        $order = new Order();
+        $data['products'] = $product->active();
+        $data['categories'] = $product->categories();
+        $data['staff'] = $staff->all();
+        $data['branches'] = $staff->branches();
+        $data['tables'] = $order->tables();
+        $data['orders'] = $order->activeOrders();
+        $data['kitchen'] = $order->kitchenQueue();
+        $data['dashboard'] = (new Dashboard())->data();
+        $data['campaigns'] = (new Campaign())->performance();
+        $data['inventory'] = (new Inventory())->overview();
+        $data['reports'] = (new Report())->data();
+
+        return $data;
     }
 }
