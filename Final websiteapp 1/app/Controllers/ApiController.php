@@ -16,6 +16,7 @@ use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\Report;
 use App\Models\Staff;
+use App\Models\StaffAuthSession;
 use Throwable;
 
 final class ApiController extends Controller
@@ -39,6 +40,10 @@ final class ApiController extends Controller
                 '/api/member-register' => $auth->memberRegister($payload),
                 '/api/member-logout' => $auth->memberLogout(),
                 '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
+                '/api/pos-auth-login' => (new StaffAuthSession())->login($payload),
+                '/api/pos-auth-current' => (new StaffAuthSession())->current($payload),
+                '/api/pos-auth-heartbeat' => (new StaffAuthSession())->heartbeat($payload),
+                '/api/pos-auth-logout' => (new StaffAuthSession())->logout($payload),
                 '/api/pos-session-login' => (new PosSession())->login($payload),
                 '/api/pos-session-current' => (new PosSession())->current($payload),
                 '/api/pos-session-heartbeat' => (new PosSession())->heartbeat($payload),
@@ -92,6 +97,10 @@ final class ApiController extends Controller
                 'dashboard' => '/api/dashboard',
                 'campaigns' => '/api/campaigns',
                 'create_campaign' => '/api/create-campaign',
+                'pos_auth_login' => '/api/pos-auth-login',
+                'pos_auth_current' => '/api/pos-auth-current',
+                'pos_auth_heartbeat' => '/api/pos-auth-heartbeat',
+                'pos_auth_logout' => '/api/pos-auth-logout',
                 'pos_session_login' => '/api/pos-session-login',
                 'pos_session_current' => '/api/pos-session-current',
                 'pos_session_heartbeat' => '/api/pos-session-heartbeat',
@@ -122,7 +131,9 @@ final class ApiController extends Controller
         $staff = new Staff();
         $order = new Order();
         $posSession = new PosSession();
+        $staffAuthSession = new StaffAuthSession();
         $currentSession = null;
+        $currentAuthSession = null;
         $sessionReports = $posSession->report($payload);
         $reports = (new Report())->data();
         $reports['session_reports'] = $sessionReports;
@@ -132,6 +143,13 @@ final class ApiController extends Controller
                 $currentSession = $posSession->current($payload)['current_session'] ?? null;
             } catch (Throwable) {
                 $currentSession = null;
+            }
+        }
+        if (!empty($payload['auth_session_id']) && !empty($payload['auth_token'])) {
+            try {
+                $currentAuthSession = $staffAuthSession->current($payload);
+            } catch (Throwable) {
+                $currentAuthSession = null;
             }
         }
 
@@ -148,6 +166,7 @@ final class ApiController extends Controller
             'inventory' => (new Inventory())->overview(),
             'reports' => $reports,
             'current_session' => $currentSession,
+            'current_auth_session' => $currentAuthSession,
             'session_reports' => $sessionReports,
             'roles' => Staff::ROLES,
         ];

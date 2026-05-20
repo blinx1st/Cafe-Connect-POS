@@ -28,6 +28,7 @@ DROP TABLE IF EXISTS product_images;
 DROP TABLE IF EXISTS products;
 DROP TABLE IF EXISTS product_categories;
 DROP TABLE IF EXISTS pos_sessions;
+DROP TABLE IF EXISTS staff_login_sessions;
 DROP TABLE IF EXISTS staff_shifts;
 DROP TABLE IF EXISTS staff;
 DROP TABLE IF EXISTS branches;
@@ -60,7 +61,9 @@ CREATE TABLE customers (
     birth_date DATE NULL,
     address VARCHAR(255) NULL,
     preferred_channel ENUM('pos', 'website', 'delivery', 'email', 'zalo', 'sms') NOT NULL DEFAULT 'pos',
+    password_hash VARCHAR(255) NULL,
     last_visit_date DATE NULL,
+    last_login_at DATETIME NULL,
     current_points INT NOT NULL DEFAULT 0,
     total_spending DECIMAL(12,2) NOT NULL DEFAULT 0,
     status ENUM('active', 'inactive', 'blocked') NOT NULL DEFAULT 'active',
@@ -114,12 +117,17 @@ CREATE TABLE branches (
 CREATE TABLE staff (
     id INT AUTO_INCREMENT PRIMARY KEY,
     branch_id INT NOT NULL,
+    staff_code VARCHAR(30) NULL,
     staff_name VARCHAR(150) NOT NULL,
     staff_role ENUM('waiter', 'cashier', 'barista', 'owner', 'manager', 'marketing', 'admin') NOT NULL,
     phone_number VARCHAR(20) NULL,
     email VARCHAR(150) NULL,
+    password_hash VARCHAR(255) NULL,
+    pin_hash VARCHAR(255) NULL,
+    last_login_at DATETIME NULL,
     status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_code (staff_code),
     UNIQUE KEY uq_staff_email (email),
     KEY idx_staff_branch_role (branch_id, staff_role),
     CONSTRAINT fk_staff_branch
@@ -144,10 +152,29 @@ CREATE TABLE staff_shifts (
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE staff_login_sessions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    auth_token VARCHAR(80) NOT NULL,
+    logged_in_at DATETIME NOT NULL,
+    last_seen_at DATETIME NULL,
+    logged_out_at DATETIME NULL,
+    status ENUM('active', 'logged_out', 'expired') NOT NULL DEFAULT 'active',
+    login_ip VARCHAR(64) NULL,
+    user_agent VARCHAR(255) NULL,
+    UNIQUE KEY uq_staff_login_sessions_token (auth_token),
+    KEY idx_staff_login_sessions_staff_status (staff_id, status),
+    CONSTRAINT fk_staff_login_sessions_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE pos_sessions (
     id INT AUTO_INCREMENT PRIMARY KEY,
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
+    staff_login_session_id INT NULL,
     shift_id INT NULL,
     session_token VARCHAR(80) NOT NULL,
     staff_role ENUM('waiter', 'cashier', 'barista', 'owner', 'manager', 'marketing', 'admin') NOT NULL,
@@ -166,6 +193,11 @@ CREATE TABLE pos_sessions (
     UNIQUE KEY uq_pos_sessions_token (session_token),
     KEY idx_pos_sessions_staff_status (staff_id, status),
     KEY idx_pos_sessions_branch_date (branch_id, opened_at),
+    KEY idx_pos_sessions_auth_session (staff_login_session_id),
+    CONSTRAINT fk_pos_sessions_staff_login_session
+        FOREIGN KEY (staff_login_session_id) REFERENCES staff_login_sessions(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
     CONSTRAINT fk_pos_sessions_shift
         FOREIGN KEY (shift_id) REFERENCES staff_shifts(id)
         ON UPDATE CASCADE
@@ -691,15 +723,15 @@ INSERT INTO branches (branch_name, address, district) VALUES
 ('Hoan Kiem', '25 Hang Bai, Hoan Kiem, Hanoi', 'Hoan Kiem'),
 ('Tay Ho', '45 Xuan Dieu, Tay Ho, Hanoi', 'Tay Ho');
 
-INSERT INTO staff (branch_id, staff_name, staff_role, phone_number, email) VALUES
-(1, 'Lan Waiter', 'waiter', '0911000001', 'waiter.cg@cafeconnect.test'),
-(1, 'Thu Cashier', 'cashier', '0911000002', 'cashier.cg@cafeconnect.test'),
-(1, 'Nam Barista', 'barista', '0911000003', 'barista.cg@cafeconnect.test'),
-(1, 'Quan Owner', 'owner', '0911000004', 'owner@cafeconnect.test'),
-(1, 'Mai Marketing', 'marketing', '0911000005', 'marketing@cafeconnect.test'),
-(2, 'Admin Cafe Connect', 'admin', '0911000006', 'admin@cafeconnect.test'),
-(2, 'Minh Manager', 'manager', '0911000007', 'manager.hk@cafeconnect.test'),
-(3, 'Chau Cashier', 'cashier', '0911000008', 'cashier.th@cafeconnect.test');
+INSERT INTO staff (branch_id, staff_code, staff_name, staff_role, phone_number, email) VALUES
+(1, 'WAIT001', 'Lan Waiter', 'waiter', '0911000001', 'waiter.cg@cafeconnect.test'),
+(1, 'CASH001', 'Thu Cashier', 'cashier', '0911000002', 'cashier.cg@cafeconnect.test'),
+(1, 'BAR001', 'Nam Barista', 'barista', '0911000003', 'barista.cg@cafeconnect.test'),
+(1, 'OWNER001', 'Quan Owner', 'owner', '0911000004', 'owner@cafeconnect.test'),
+(1, 'MKT001', 'Mai Marketing', 'marketing', '0911000005', 'marketing@cafeconnect.test'),
+(2, 'ADMIN001', 'Admin Cafe Connect', 'admin', '0911000006', 'admin@cafeconnect.test'),
+(2, 'MGR001', 'Minh Manager', 'manager', '0911000007', 'manager.hk@cafeconnect.test'),
+(3, 'CASH002', 'Chau Cashier', 'cashier', '0911000008', 'cashier.th@cafeconnect.test');
 
 INSERT INTO staff_shifts (staff_id, shift_name, starts_at, ends_at, work_date) VALUES
 (1, 'Morning floor', '07:00:00', '15:00:00', '2026-05-13'),

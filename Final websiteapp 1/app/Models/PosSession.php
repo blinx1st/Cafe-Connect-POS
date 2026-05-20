@@ -17,11 +17,22 @@ final class PosSession extends Model
         if ($staffId <= 0) {
             throw new InvalidArgumentException('POS login requires staff_id.');
         }
+        $pin = trim((string) ($data['pin'] ?? ''));
+        if ($pin === '') {
+            throw new InvalidArgumentException('Vui lòng nhập PIN.');
+        }
 
-        $staff = (new Staff())->find($staffId);
+        $staffModel = new Staff();
+        $staff = $staffModel->find($staffId);
         if (!$staff) {
             throw new InvalidArgumentException('Staff account not found.');
         }
+        $authSession = (new StaffAuthSession())->requireActive($data, $staffId);
+        $verifiedStaff = $staffModel->verifyPin($staffId, $pin);
+        if (!$verifiedStaff) {
+            throw new InvalidArgumentException('PIN không đúng.');
+        }
+        $staff = $verifiedStaff;
 
         $this->closeStaleSessions();
         $this->closeOpenSessionsForStaff($staffId);
@@ -35,16 +46,17 @@ final class PosSession extends Model
 
         $stmt = $this->db->prepare(
             "INSERT INTO pos_sessions (
-                branch_id, staff_id, shift_id, session_token, staff_role, opened_at, last_seen_at,
+                branch_id, staff_id, staff_login_session_id, shift_id, session_token, staff_role, opened_at, last_seen_at,
                 login_ip, user_agent, opening_cash_amount, expected_cash_amount, status, notes
              ) VALUES (
-                :branch_id, :staff_id, :shift_id, :session_token, :staff_role, NOW(), NOW(),
+                :branch_id, :staff_id, :staff_login_session_id, :shift_id, :session_token, :staff_role, NOW(), NOW(),
                 :login_ip, :user_agent, :opening_cash_amount, :expected_cash_amount, 'open', :notes
              )"
         );
         $stmt->execute([
             'branch_id' => $branchId,
             'staff_id' => $staffId,
+            'staff_login_session_id' => (int) $authSession['id'],
             'shift_id' => $shiftId,
             'session_token' => $token,
             'staff_role' => $staff['staff_role'],
@@ -59,6 +71,7 @@ final class PosSession extends Model
         if (!$session) {
             throw new InvalidArgumentException('Could not create POS session.');
         }
+        $staffModel->touchLogin($staffId);
 
         $this->logActivity($session, 'session_login', [
             'entity_type' => 'pos_session',
@@ -149,7 +162,7 @@ final class PosSession extends Model
         }
 
         $stmt = $this->db->prepare(
-            "SELECT ps.*, s.staff_name, s.phone_number, s.email, b.branch_name,
+            "SELECT ps.*, s.staff_code, s.staff_name, s.phone_number, s.email, b.branch_name,
                     TIMESTAMPDIFF(MINUTE, COALESCE(ps.last_seen_at, ps.opened_at), NOW()) AS idle_minutes
              FROM pos_sessions ps
              JOIN staff s ON s.id = ps.staff_id
@@ -311,7 +324,7 @@ final class PosSession extends Model
     private function findById(int $id): ?array
     {
         $stmt = $this->db->prepare(
-            "SELECT ps.*, s.staff_name, s.phone_number, s.email, b.branch_name,
+            "SELECT ps.*, s.staff_code, s.staff_name, s.phone_number, s.email, b.branch_name,
                     TIMESTAMPDIFF(MINUTE, ps.opened_at, COALESCE(ps.closed_at, NOW())) AS duration_minutes
              FROM pos_sessions ps
              JOIN staff s ON s.id = ps.staff_id
@@ -329,6 +342,7 @@ final class PosSession extends Model
     {
         return [
             'id' => (int) $session['staff_id'],
+            'staff_code' => $session['staff_code'] ?? '',
             'staff_name' => $session['staff_name'],
             'staff_role' => $session['staff_role'],
             'phone_number' => $session['phone_number'],

@@ -22,16 +22,29 @@ function Invoke-CafeApi {
 
 function New-PosSession {
   param(
-    [int]$StaffId,
+    [string]$Identity,
+    [string]$Password,
+    [string]$Pin,
     [int]$OpeningCash = 0
   )
 
+  $auth = Invoke-CafeApi "pos-auth-login" @{
+    identity = $Identity
+    password = $Password
+  }
+
   $session = Invoke-CafeApi "pos-session-login" @{
-    staff_id = $StaffId
+    staff_id = $auth.staff.id
+    auth_session_id = $auth.auth_session.id
+    auth_token = $auth.auth_session.auth_token
+    pin = $Pin
     opening_cash_amount = $OpeningCash
   }
 
-  return $session.staff
+  $staff = $session.staff
+  $staff | Add-Member -NotePropertyName auth_session_id -NotePropertyValue $auth.auth_session.id -Force
+  $staff | Add-Member -NotePropertyName auth_token -NotePropertyValue $auth.auth_session.auth_token -Force
+  return $staff
 }
 
 function Add-Session {
@@ -47,6 +60,18 @@ function Add-Session {
   return $Body
 }
 
+function Add-Auth {
+  param(
+    [hashtable]$Body,
+    $Staff
+  )
+
+  $Body.staff_id = $Staff.id
+  $Body.auth_session_id = $Staff.auth_session_id
+  $Body.auth_token = $Staff.auth_token
+  return $Body
+}
+
 $suffix = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 $phone = "098$suffix".Substring(0, 10)
 
@@ -54,14 +79,16 @@ $member = Invoke-CafeApi "member-register" @{
   customer_name = "Smoke Test Member"
   phone_number = $phone
   email = "smoke$suffix@example.test"
+  password = "123456"
+  password_confirm = "123456"
 }
 
 Invoke-CafeApi "member-lookup" @{ identity = $phone } | Out-Null
 
-$cashier = New-PosSession -StaffId 2 -OpeningCash 1000000
-$waiter = New-PosSession -StaffId 1
-$barista = New-PosSession -StaffId 3
-$manager = New-PosSession -StaffId 7
+$cashier = New-PosSession -Identity "CASH001" -Password "cashier123" -Pin "2222" -OpeningCash 1000000
+$waiter = New-PosSession -Identity "WAIT001" -Password "waiter123" -Pin "1111"
+$barista = New-PosSession -Identity "BAR001" -Password "barista123" -Pin "3333"
+$manager = New-PosSession -Identity "MGR001" -Password "manager123" -Pin "7777"
 
 $checkoutBody = Add-Session @{
   staff_id = 2
@@ -107,5 +134,9 @@ Invoke-CafeApi "pos-session-logout" (Add-Session @{} $cashier) | Out-Null
 Invoke-CafeApi "pos-session-logout" (Add-Session @{} $waiter) | Out-Null
 Invoke-CafeApi "pos-session-logout" (Add-Session @{} $barista) | Out-Null
 Invoke-CafeApi "pos-session-logout" (Add-Session @{} $manager) | Out-Null
+Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $cashier) | Out-Null
+Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $waiter) | Out-Null
+Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $barista) | Out-Null
+Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $manager) | Out-Null
 
 Write-Host "Smoke API test completed. Reset install.php afterward if you want clean sample data."

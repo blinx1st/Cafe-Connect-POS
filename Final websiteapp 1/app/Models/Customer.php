@@ -47,6 +47,34 @@ final class Customer extends Model
         return $customer;
     }
 
+    public function authByIdentity(string $identity): ?array
+    {
+        $identity = trim($identity);
+        if ($identity === '') {
+            throw new InvalidArgumentException('Phone or email is required.');
+        }
+
+        $stmt = $this->db->prepare(
+            "SELECT id, customer_name, phone_number, email, password_hash, status
+             FROM customers
+             WHERE phone_number = :phone_identity OR email = :email_identity
+             LIMIT 1"
+        );
+        $stmt->execute([
+            'phone_identity' => $identity,
+            'email_identity' => $identity,
+        ]);
+        $customer = $stmt->fetch();
+
+        return $customer ?: null;
+    }
+
+    public function touchLogin(int $customerId): void
+    {
+        $this->db->prepare("UPDATE customers SET last_login_at = NOW() WHERE id = :id")
+            ->execute(['id' => $customerId]);
+    }
+
     public function vouchers(int $customerId): array
     {
         $stmt = $this->db->prepare(
@@ -107,6 +135,7 @@ final class Customer extends Model
         $name = require_field($data, 'customer_name', 'Customer name');
         $phone = require_field($data, 'phone_number', 'Phone number');
         $email = trim((string) ($data['email'] ?? '')) ?: null;
+        $passwordHash = trim((string) ($data['password_hash'] ?? '')) ?: null;
 
         $existing = $this->lookup($phone);
         if ($existing) {
@@ -122,10 +151,10 @@ final class Customer extends Model
             $this->db->prepare(
                 "INSERT INTO customers (
                     membership_tier_id, customer_name, phone_number, email, gender,
-                    birth_date, address, preferred_channel, current_points, total_spending, status
+                    birth_date, address, preferred_channel, password_hash, current_points, total_spending, status
                  ) VALUES (
                     :tier_id, :customer_name, :phone_number, :email, :gender,
-                    :birth_date, :address, :preferred_channel, 0, 0, 'active'
+                    :birth_date, :address, :preferred_channel, :password_hash, 0, 0, 'active'
                  )"
             )->execute([
                 'tier_id' => $tierId,
@@ -138,6 +167,7 @@ final class Customer extends Model
                 'preferred_channel' => in_array(($data['preferred_channel'] ?? 'pos'), ['pos', 'website', 'delivery', 'email', 'zalo', 'sms'], true)
                     ? $data['preferred_channel']
                     : 'pos',
+                'password_hash' => $passwordHash,
             ]);
         } catch (PDOException $exception) {
             if ($exception->getCode() === '23000') {

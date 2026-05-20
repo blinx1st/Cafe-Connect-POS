@@ -90,6 +90,51 @@ function installed_table_count(): int
     )->fetchColumn();
 }
 
+function seed_demo_credentials(): void
+{
+    $pdo = Database::pdo();
+
+    $memberPasswordHash = password_hash('123456', PASSWORD_DEFAULT);
+    $memberPhones = ['0900000001', '0900000002', '0900000003', '0900000004', '0900000005', '0900000006'];
+    $memberStmt = $pdo->prepare(
+        "UPDATE customers
+         SET password_hash = :password_hash
+         WHERE phone_number = :phone_number"
+    );
+    foreach ($memberPhones as $phone) {
+        $memberStmt->execute([
+            'password_hash' => $memberPasswordHash,
+            'phone_number' => $phone,
+        ]);
+    }
+
+    $staffCredentials = [
+        'waiter.cg@cafeconnect.test' => ['code' => 'WAIT001', 'password' => 'waiter123', 'pin' => '1111'],
+        'cashier.cg@cafeconnect.test' => ['code' => 'CASH001', 'password' => 'cashier123', 'pin' => '2222'],
+        'barista.cg@cafeconnect.test' => ['code' => 'BAR001', 'password' => 'barista123', 'pin' => '3333'],
+        'owner@cafeconnect.test' => ['code' => 'OWNER001', 'password' => 'owner123', 'pin' => '4444'],
+        'marketing@cafeconnect.test' => ['code' => 'MKT001', 'password' => 'marketing123', 'pin' => '5555'],
+        'admin@cafeconnect.test' => ['code' => 'ADMIN001', 'password' => 'admin123', 'pin' => '6666'],
+        'manager.hk@cafeconnect.test' => ['code' => 'MGR001', 'password' => 'manager123', 'pin' => '7777'],
+        'cashier.th@cafeconnect.test' => ['code' => 'CASH002', 'password' => 'cashier123', 'pin' => '2222'],
+    ];
+    $staffStmt = $pdo->prepare(
+        "UPDATE staff
+         SET staff_code = :staff_code,
+             password_hash = :password_hash,
+             pin_hash = :pin_hash
+         WHERE email = :email"
+    );
+    foreach ($staffCredentials as $email => $credential) {
+        $staffStmt->execute([
+            'staff_code' => $credential['code'],
+            'password_hash' => password_hash($credential['password'], PASSWORD_DEFAULT),
+            'pin_hash' => password_hash($credential['pin'], PASSWORD_DEFAULT),
+            'email' => $email,
+        ]);
+    }
+}
+
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     try {
         $pdo = Database::pdo(false);
@@ -98,6 +143,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         foreach (split_sql_statements(install_sql_body($schemaPath)) as $statement) {
             $pdo->exec($statement);
         }
+        seed_demo_credentials();
 
         $tableCount = installed_table_count();
         $status = 'Database cafe_connect_crm has been reset with the MVC POS and website sample data.';

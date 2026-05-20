@@ -40,7 +40,12 @@ final class Database
                 "SELECT
                     (SELECT COUNT(*) FROM product_categories) AS product_categories_count,
                     (SELECT COUNT(*) FROM staff_shifts) AS staff_shifts_count,
+                    (SELECT COUNT(*) FROM staff_login_sessions) AS staff_login_sessions_count,
                     (SELECT COUNT(*) FROM pos_activity_logs) AS pos_activity_logs_count,
+                    (SELECT COUNT(password_hash) FROM customers) AS customer_password_count,
+                    (SELECT COUNT(password_hash) FROM staff) AS staff_password_count,
+                    (SELECT COUNT(staff_code) FROM staff) AS staff_code_count,
+                    (SELECT COUNT(pin_hash) FROM staff) AS staff_pin_count,
                     (SELECT COUNT(*) FROM service_orders) AS service_orders_count,
                     (SELECT COUNT(*) FROM newsletter_subscribers) AS newsletter_count"
             );

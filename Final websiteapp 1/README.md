@@ -44,9 +44,26 @@ Nếu Apache chưa bật rewrite, dùng fallback dạng `index.php?route=/menu` 
 - `/pos/staff`: quản lý nhân viên.
 - `/pos/cash`: thu chi.
 
-## Role POS demo
+## Tài khoản demo
 
-POS đăng nhập bằng cách chọn nhân viên từ database, không dùng mật khẩu trong bản demo.
+Website member đăng nhập bằng số điện thoại hoặc email kèm mật khẩu:
+
+- Khách mẫu `0900000001` đến `0900000006`: mật khẩu `123456`.
+- Ví dụ nhanh: `0900000001 / 123456`.
+- Member đăng ký mới cần nhập mật khẩu tối thiểu 6 ký tự; đăng ký trùng SĐT/email sẽ yêu cầu đăng nhập.
+
+POS đăng nhập bằng tài khoản nhân viên riêng, sau đó nhập PIN riêng để mở ca làm:
+
+- Cap nhat: POS co 2 lop xac thuc. Dang nhap bang tai khoan nhan vien, sau do nhap PIN rieng de mo ca.
+- `WAIT001 / waiter123`, PIN `1111`.
+- `CASH001 / cashier123`, PIN `2222`.
+- `BAR001 / barista123`, PIN `3333`.
+- `OWNER001 / owner123`, PIN `4444`.
+- `MKT001 / marketing123`, PIN `5555`.
+- `ADMIN001 / admin123`, PIN `6666`.
+- `MGR001 / manager123`, PIN `7777`.
+
+## Role POS demo
 
 - `waiter`: bàn và order phục vụ.
 - `barista`: kitchen queue.
@@ -58,8 +75,9 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 
 ## Phiên làm việc POS
 
-- Khi chọn nhân viên ở `/pos/login`, API `pos-session-login` tạo một dòng `pos_sessions` trạng thái `open`.
-- POS frontend lưu `pos_session_id` và `session_token` trong `localStorage`, tự gửi kèm mọi request POS và heartbeat mỗi 60 giây.
+- Khi đăng nhập đúng tài khoản ở `/pos/login`, API `pos-auth-login` tạo một dòng `staff_login_sessions` trạng thái `active`.
+- Khi nhập đúng PIN mở ca, API `pos-session-login` tạo một dòng `pos_sessions` trạng thái `open`.
+- POS frontend lưu `auth_session_id/auth_token` và `pos_session_id/session_token` riêng trong `localStorage`, tự gửi kèm request POS và heartbeat mỗi 60 giây.
 - Logout gọi `pos-session-logout` để đóng ca, lưu `closed_at`, `closed_reason`, tiền dự kiến, tiền chốt ca và chênh lệch.
 - Session không heartbeat quá 30 phút sẽ bị đóng với `closed_reason = timeout`.
 - Invoice POS lưu `bill_started_at`, `paid_at`, `pos_session_id`; service order dùng `created_at` làm thời điểm bắt đầu bill khi cashier checkout.
@@ -70,7 +88,7 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 
 - Tra thành viên `0900000001`: Nguyen An, Gold member, có voucher khả dụng và lịch sử website order.
 - Website checkout lưu `sales_channel = website`.
-- POS tạo khách bằng SĐT thì website đăng nhập được ngay bằng SĐT đó.
+- POS tạo khách bằng SĐT để tra cứu/checkout tại quầy; khách cần đăng ký mật khẩu trên `/account` để đăng nhập website.
 - Waiter tạo service order, barista cập nhật trạng thái món, cashier checkout thành invoice.
 - Dashboard, campaign, inventory và report đều lấy dữ liệu thật qua Models.
 
@@ -84,7 +102,12 @@ Gọi `POST api.php?endpoint=...` với JSON body. Response thống nhất:
 
 Endpoint chính: `member-login`, `member-register`, `member-logout`, `member-lookup`, `customer-create`, `checkout`, `create-order`, `update-order-item`, `dashboard`, `create-campaign`, `stock-movement`.
 
-Endpoint POS session: `pos-session-login`, `pos-session-current`, `pos-session-heartbeat`, `pos-session-logout`, `pos-session-report`.
+- `member-login`: `{ "identity": "0900000001", "password": "123456" }`.
+- `member-register`: `{ "customer_name": "...", "phone_number": "...", "email": "...", "password": "123456", "password_confirm": "123456" }`.
+- `pos-auth-login`: `{ "identity": "CASH001", "password": "cashier123" }`.
+- `pos-session-login`: `{ "staff_id": 2, "auth_session_id": 1, "auth_token": "...", "pin": "2222", "opening_cash_amount": 1000000 }`.
+
+Endpoint POS auth/session: `pos-auth-login`, `pos-auth-current`, `pos-auth-heartbeat`, `pos-auth-logout`, `pos-session-login`, `pos-session-current`, `pos-session-heartbeat`, `pos-session-logout`, `pos-session-report`.
 
 ## Kiểm thử nhanh
 

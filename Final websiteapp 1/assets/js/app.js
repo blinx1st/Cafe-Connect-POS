@@ -41,6 +41,9 @@ const state = {
     voucherId: "",
     productFilter: "",
     roleFilter: "",
+    loginStaffId: "",
+    loginPin: "",
+    auth: loadPosAuth(),
     tableId: "",
     billStartedAt: "",
     activeModule: cafeApp.posModule || "checkout",
@@ -86,6 +89,36 @@ function savePosUser(user) {
   }
 }
 
+function loadPosAuth() {
+  try {
+    const raw = localStorage.getItem("cafe_pos_auth");
+    const auth = raw ? JSON.parse(raw) : null;
+    if (!auth || !auth.auth_session_id || !auth.auth_token || !auth.id) return null;
+    return auth;
+  } catch {
+    return null;
+  }
+}
+
+function savePosAuth(auth) {
+  let normalized = auth;
+  if (auth?.staff && auth?.auth_session) {
+    normalized = {
+      ...auth.staff,
+      auth_session_id: auth.auth_session.id,
+      auth_token: auth.auth_session.auth_token,
+      auth_logged_in_at: auth.auth_session.logged_in_at,
+      auth_last_seen_at: auth.auth_session.last_seen_at,
+    };
+  }
+  state.pos.auth = normalized;
+  if (normalized) {
+    localStorage.setItem("cafe_pos_auth", JSON.stringify(normalized));
+  } else {
+    localStorage.removeItem("cafe_pos_auth");
+  }
+}
+
 const formatMoney = (value) =>
   new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(Number(value || 0));
 
@@ -107,7 +140,7 @@ function durationSince(value, closedAt = "") {
   if (!value) return "0 phut";
   const start = new Date(String(value).replace(" ", "T"));
   const end = closedAt ? new Date(String(closedAt).replace(" ", "T")) : new Date();
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "0 phÃºt";
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "0 phut";
   const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
@@ -252,6 +285,17 @@ async function api(endpoint, payload = {}) {
 
   const clean = String(endpoint).replace(/^\/?api\/?/, "");
   const requestPayload = { ...payload };
+  if (section === "pos" && state.pos.auth) {
+    if (!Object.prototype.hasOwnProperty.call(requestPayload, "staff_id") && !state.pos.user) {
+      requestPayload.staff_id = state.pos.auth.id;
+    }
+    if (!Object.prototype.hasOwnProperty.call(requestPayload, "auth_session_id")) {
+      requestPayload.auth_session_id = state.pos.auth.auth_session_id;
+    }
+    if (!Object.prototype.hasOwnProperty.call(requestPayload, "auth_token")) {
+      requestPayload.auth_token = state.pos.auth.auth_token;
+    }
+  }
   if (section === "pos" && state.pos.user && !Object.prototype.hasOwnProperty.call(requestPayload, "staff_id")) {
     requestPayload.staff_id = state.pos.user.id;
   }
@@ -1168,9 +1212,32 @@ function renderStaffModule() {
         <label>Role <select name="staff_role">${(cafeApp.roles || Object.keys(roleLabels)).map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabels[role] || role)}</option>`).join("")}</select></label>
         <label>Số điện thoại <input name="phone_number"></label>
         <label>Email <input type="email" name="email"></label>
+        <label>PIN POS <input name="pin" type="password" inputmode="numeric" minlength="4" placeholder="Để trống nếu không đổi"></label>
         <button class="primary-btn" type="submit">Lưu nhân viên</button>
       </form>
       <section class="panel"><h2>Danh sách nhân viên</h2>${tableHtml(staff, ["Tên", "Role", "Chi nhánh", "Email", ""], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.email || "")}</td><td><button type="button" data-edit-staff="${row.id}">Sửa</button></td></tr>`)}</section>
+    </div>
+  `;
+}
+
+function renderStaffModule() {
+  const staff = cafeApp.staff || [];
+  return `
+    <div class="admin-grid">
+      <form class="create-form" data-staff-save>
+        <h2>Nhan vien</h2>
+        <input type="hidden" name="id">
+        <label>Ma nhan vien <input name="staff_code" placeholder="CASH003"></label>
+        <label>Ten nhan vien <input name="staff_name" required></label>
+        <label>Chi nhanh <select name="branch_id">${branchOptions(state.pos.user?.branch_id || 1)}</select></label>
+        <label>Role <select name="staff_role">${(cafeApp.roles || Object.keys(roleLabels)).map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabels[role] || role)}</option>`).join("")}</select></label>
+        <label>So dien thoai <input name="phone_number"></label>
+        <label>Email <input type="email" name="email"></label>
+        <label>Mat khau POS <input name="password" type="password" minlength="6" placeholder="De trong neu khong doi"></label>
+        <label>PIN mo ca <input name="pin" type="password" inputmode="numeric" minlength="4" placeholder="De trong neu khong doi"></label>
+        <button class="primary-btn" type="submit">Luu nhan vien</button>
+      </form>
+      <section class="panel"><h2>Danh sach nhan vien</h2>${tableHtml(staff, ["Ma", "Ten", "Role", "Chi nhanh", "Email", ""], (row) => `<tr><td>${escapeHtml(row.staff_code || "")}</td><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.email || "")}</td><td><button type="button" data-edit-staff="${row.id}">Sua</button></td></tr>`)}</section>
     </div>
   `;
 }
@@ -1225,6 +1292,9 @@ async function refreshPosData(showMessage = true) {
   if (Array.isArray(data.session_reports)) {
     cafeApp.reports = { ...(cafeApp.reports || {}), session_reports: data.session_reports };
   }
+  if (data.current_auth_session?.auth_session) {
+    savePosAuth(data.current_auth_session);
+  }
   syncProducts(data.products || []);
   if (showMessage) showToast("Đã làm mới dữ liệu POS.");
   renderPosApp();
@@ -1240,6 +1310,12 @@ function stopPosHeartbeat() {
 async function heartbeatPosSession() {
   if (section !== "pos" || pageName === "pos-login" || !state.pos.user?.session_token) return;
   try {
+    if (state.pos.auth?.auth_token) {
+      const authResult = await api("pos-auth-heartbeat");
+      if (authResult.auth_session) {
+        savePosAuth(authResult);
+      }
+    }
     const result = await api("pos-session-heartbeat");
     if (result.current_session) {
       cafeApp.current_session = result.current_session;
@@ -1252,6 +1328,7 @@ async function heartbeatPosSession() {
   } catch (error) {
     stopPosHeartbeat();
     savePosUser(null);
+    savePosAuth(null);
     showToast(error.message || "POS session da het han.");
     window.setTimeout(() => {
       window.location.href = url("pos/login");
@@ -1322,13 +1399,15 @@ function renderReviews() {
   `).join("") || '<div class="empty-state">Chưa có đánh giá.</div>';
 }
 
-function renderPosLogin() {
+function legacyRenderPosLoginWithPin() {
   const root = document.querySelector("#pos-app");
   if (!root) return;
 
   const roles = cafeApp.roles || Object.keys(roleLabels);
   const staff = cafeApp.staff || [];
   const filteredStaff = state.pos.roleFilter ? staff.filter((member) => member.staff_role === state.pos.roleFilter) : staff;
+  const selectedStaff = staff.find((member) => String(member.id) === String(state.pos.loginStaffId)) || null;
+  const pinDots = state.pos.loginPin.padEnd(4, " ").slice(0, 4).split("").map((char) => `<span class="${char.trim() ? "filled" : ""}"></span>`).join("");
   root.innerHTML = `
     <main class="pos-login login-page">
       <section class="login-card">
@@ -1339,8 +1418,8 @@ function renderPosLogin() {
             <strong>POS Manager</strong>
           </div>
         </div>
-        <h1>Chọn vai trò đăng nhập</h1>
-        <p>Đăng nhập demo bằng nhân viên trong database. Mỗi role chỉ thấy module phù hợp.</p>
+        <h1>Chọn nhân viên và nhập PIN</h1>
+        <p>Mỗi nhân viên phải nhập PIN trước khi hệ thống mở phiên làm việc POS và tạo session token.</p>
         <div class="role-grid">
           <button type="button" class="role-card ${state.pos.roleFilter === "" ? "active" : ""}" data-login-role="">
             <strong>Tất cả</strong>
@@ -1355,7 +1434,7 @@ function renderPosLogin() {
         </div>
         <div class="staff-grid">
           ${filteredStaff.map((member) => `
-            <button type="button" class="staff-card" data-login-staff="${member.id}">
+            <button type="button" class="staff-card ${String(state.pos.loginStaffId) === String(member.id) ? "active" : ""}" data-login-staff="${member.id}">
               <span class="avatar">${escapeHtml((member.staff_name || "?").slice(0, 1))}</span>
               <strong>${escapeHtml(member.staff_name)}</strong>
               <small>${escapeHtml(roleLabels[member.staff_role] || member.staff_role)} · ${escapeHtml(member.branch_name)}</small>
@@ -1364,10 +1443,170 @@ function renderPosLogin() {
         </div>
       </section>
       <aside class="login-aside">
+        <div class="pin-panel">
+          <p class="eyebrow">Mở ca POS</p>
+          <h2>${selectedStaff ? escapeHtml(selectedStaff.staff_name) : "Chưa chọn nhân viên"}</h2>
+          <p>${selectedStaff ? `${escapeHtml(roleLabels[selectedStaff.staff_role] || selectedStaff.staff_role)} · ${escapeHtml(selectedStaff.branch_name)}` : "Chọn role và nhân viên bên trái trước khi nhập PIN."}</p>
+          <div class="pin-dots" aria-label="PIN">${pinDots}</div>
+          <div class="pin-keypad">
+            ${["1","2","3","4","5","6","7","8","9"].map((digit) => `<button type="button" data-pin-digit="${digit}">${digit}</button>`).join("")}
+            <button type="button" data-pin-clear>Clear</button>
+            <button type="button" data-pin-digit="0">0</button>
+            <button type="button" data-pin-backspace>⌫</button>
+          </div>
+          <button type="button" class="primary-btn full" data-pin-submit ${selectedStaff && state.pos.loginPin.length >= 4 ? "" : "disabled"}>Đăng nhập POS</button>
+          <small class="login-hint">PIN demo: waiter 1111, cashier 2222, barista 3333, owner 4444, marketing 5555, admin 6666, manager 7777.</small>
+        </div>
+      </aside>
+    </main>
+  `;
+}
+
+function renderPosLogin() {
+  const root = document.querySelector("#pos-app");
+  if (!root) return;
+
+  const roles = cafeApp.roles || Object.keys(roleLabels);
+  const staff = cafeApp.staff || [];
+  const filteredStaff = state.pos.roleFilter ? staff.filter((member) => member.staff_role === state.pos.roleFilter) : staff;
+  const auth = state.pos.auth;
+  const pinDots = state.pos.loginPin.padEnd(4, " ").slice(0, 4).split("").map((char) => `<span class="${char.trim() ? "filled" : ""}"></span>`).join("");
+  const authIdentity = auth?.staff_code || auth?.email || auth?.phone_number || "";
+  const demoByRole = {
+    waiter: "WAIT001 / waiter123 / PIN 1111",
+    cashier: "CASH001 / cashier123 / PIN 2222",
+    barista: "BAR001 / barista123 / PIN 3333",
+    owner: "OWNER001 / owner123 / PIN 4444",
+    marketing: "MKT001 / marketing123 / PIN 5555",
+    admin: "ADMIN001 / admin123 / PIN 6666",
+    manager: "MGR001 / manager123 / PIN 7777",
+  };
+
+  if (state.pos.user?.session_token) {
+    root.innerHTML = `
+      <main class="pos-login login-page">
+        <section class="login-card session-open-card">
+          <div class="logo-lockup">
+            <span class="logo-mark">C</span>
+            <div>
+              <p>Cafe Connect</p>
+              <strong>POS Manager</strong>
+            </div>
+          </div>
+          <div class="session-open-panel">
+            <span class="step-badge">Ca dang mo</span>
+            <h1>San sang lam viec</h1>
+            <p>${escapeHtml(state.pos.user.staff_name)} dang co phien lam viec tu ${escapeHtml(formatDateTime(state.pos.user.session_opened_at))}.</p>
+            <div class="account-actions">
+              <a class="primary-btn" href="${url("pos/checkout")}">Vao POS</a>
+              <button class="secondary-btn" type="button" data-pos-logout>Dong ca va dang xuat</button>
+            </div>
+          </div>
+        </section>
+      </main>
+    `;
+    return;
+  }
+
+  root.innerHTML = `
+    <main class="pos-login login-page">
+      <section class="login-card">
+        <div class="logo-lockup">
+          <span class="logo-mark">C</span>
+          <div>
+            <p>Cafe Connect</p>
+            <strong>POS Manager</strong>
+          </div>
+        </div>
+        <div class="login-workspace">
+          <div class="login-step auth-step ${auth ? "is-complete" : ""}">
+            <div class="step-head">
+              <span class="step-badge">Buoc 1</span>
+              <div>
+                <h1>Đăng nhập POS</h1>
+                <p>Su dung ma nhan vien, email hoac so dien thoai va mat khau rieng.</p>
+              </div>
+            </div>
+            ${auth ? `
+              <div class="auth-summary">
+                <span class="avatar">${escapeHtml((auth.staff_name || "?").slice(0, 1))}</span>
+                <div>
+                  <strong>${escapeHtml(auth.staff_name)}</strong>
+                  <small>${escapeHtml(auth.staff_code || "")} - ${escapeHtml(roleLabels[auth.staff_role] || auth.staff_role)} - ${escapeHtml(auth.branch_name || "")}</small>
+                  <em>Dang nhap luc ${escapeHtml(formatDateTime(auth.auth_logged_in_at))}</em>
+                </div>
+                <button type="button" class="secondary-btn" data-pos-auth-logout>Doi tai khoan</button>
+              </div>
+            ` : `
+              <form class="pos-auth-form" data-pos-auth-login>
+                <label><span>Ma NV / email / so dien thoai</span><input name="identity" value="${escapeHtml(authIdentity || "CASH001")}" autocomplete="username" required></label>
+                <label><span>Mat khau</span><input name="password" type="password" value="cashier123" autocomplete="current-password" required></label>
+                <button class="primary-btn full" type="submit">Dang nhap</button>
+              </form>
+            `}
+            <div class="role-grid demo-role-grid">
+              <button type="button" class="role-card ${state.pos.roleFilter === "" ? "active" : ""}" data-login-role="">
+                <strong>Tat ca</strong>
+                <span>${staff.length} nhan vien</span>
+              </button>
+              ${roles.map((role) => `
+                <button type="button" class="role-card ${state.pos.roleFilter === role ? "active" : ""}" data-login-role="${escapeHtml(role)}">
+                  <strong>${escapeHtml(roleLabels[role] || role)}</strong>
+                  <span>${escapeHtml(demoByRole[role] || `${staff.filter((member) => member.staff_role === role).length} nhan vien`)}</span>
+                </button>
+              `).join("")}
+            </div>
+            <div class="staff-grid staff-preview-list">
+              ${filteredStaff.map((member) => `
+                <article class="staff-card">
+                  <span class="avatar">${escapeHtml((member.staff_name || "?").slice(0, 1))}</span>
+                  <div>
+                    <strong>${escapeHtml(member.staff_name)}</strong>
+                    <small>${escapeHtml(member.staff_code || "")} - ${escapeHtml(roleLabels[member.staff_role] || member.staff_role)} - ${escapeHtml(member.branch_name)}</small>
+                  </div>
+                </article>
+              `).join("") || '<div class="empty-state">Khong co nhan vien phu hop.</div>'}
+            </div>
+          </div>
+
+          <aside class="login-step pin-step ${auth ? "is-ready" : "is-locked"}">
+            <div class="step-head">
+              <span class="step-badge">Buoc 2</span>
+              <div>
+                <h2>Nhập PIN mở ca</h2>
+                <p>${auth ? `${escapeHtml(auth.staff_code || "")} - ${escapeHtml(roleLabels[auth.staff_role] || auth.staff_role)} - ${escapeHtml(auth.branch_name)}` : "Dang nhap tai khoan nhan vien truoc khi Mở ca POS."}</p>
+              </div>
+            </div>
+            <div class="pin-panel">
+              <div class="pin-lock ${auth ? "is-unlocked" : ""}">${auth ? "OK" : "LOCK"}</div>
+              <h3>${auth ? escapeHtml(auth.staff_name) : "Dang khoa"}</h3>
+              <div class="pin-dots" aria-label="PIN">${pinDots}</div>
+              <div class="pin-keypad">
+                ${["1","2","3","4","5","6","7","8","9"].map((digit) => `<button type="button" data-pin-digit="${digit}" ${auth ? "" : "disabled"}>${digit}</button>`).join("")}
+                <button type="button" data-pin-clear ${auth ? "" : "disabled"}>Clear</button>
+                <button type="button" data-pin-digit="0" ${auth ? "" : "disabled"}>0</button>
+                <button type="button" data-pin-backspace ${auth ? "" : "disabled"}>Back</button>
+              </div>
+              <button type="button" class="primary-btn full" data-pin-submit ${auth && state.pos.loginPin.length >= 4 ? "" : "disabled"}>Mở ca POS</button>
+              <small class="login-hint">PIN chi xac nhan mo ca lam, khong thay the mat khau dang nhap.</small>
+            </div>
+          </aside>
+        </div>
+      </section>
+      <aside class="login-aside">
         <div class="login-preview">
           <div class="preview-bar"><span class="preview-dot"></span><span class="preview-dot"></span><span class="preview-dot"></span></div>
           <div class="preview-body">
-            <div class="preview-grid"><span class="preview-tile"></span><span class="preview-tile"></span><span class="preview-tile"></span><span class="preview-tile"></span></div>
+            <div>
+              <span class="preview-kpi"></span>
+              <span class="preview-kpi short"></span>
+            </div>
+            <div class="preview-grid">
+              <span class="preview-tile"></span>
+              <span class="preview-tile"></span>
+              <span class="preview-tile"></span>
+              <span class="preview-tile"></span>
+            </div>
             <span class="preview-side"></span>
           </div>
         </div>
@@ -1479,6 +1718,10 @@ function wireEvents() {
 
     const roleButton = event.target.closest("[data-login-role]");
     const loginStaff = event.target.closest("[data-login-staff]");
+    const pinDigit = event.target.closest("[data-pin-digit]");
+    const pinClear = event.target.closest("[data-pin-clear]");
+    const pinBackspace = event.target.closest("[data-pin-backspace]");
+    const pinSubmit = event.target.closest("[data-pin-submit]");
     const siteAdd = event.target.closest("[data-site-add]");
     const posAdd = event.target.closest("[data-pos-add]");
     const quantity = event.target.closest("[data-cart-scope][data-delta]");
@@ -1492,41 +1735,97 @@ function wireEvents() {
 
     if (roleButton) {
       state.pos.roleFilter = roleButton.dataset.loginRole || "";
+      state.pos.loginStaffId = "";
+      state.pos.loginPin = "";
       renderPosLogin();
       return;
     }
     if (loginStaff) {
-      const staff = (cafeApp.staff || []).find((member) => String(member.id) === String(loginStaff.dataset.loginStaff));
-      if (staff) {
+      state.pos.loginStaffId = loginStaff.dataset.loginStaff || "";
+      state.pos.loginPin = "";
+      renderPosLogin();
+      return;
+    }
+    if (pinDigit) {
+      if (state.pos.loginPin.length < 6) {
+        state.pos.loginPin += pinDigit.dataset.pinDigit || "";
+      }
+      renderPosLogin();
+      return;
+    }
+    if (pinClear) {
+      state.pos.loginPin = "";
+      renderPosLogin();
+      return;
+    }
+    if (pinBackspace) {
+      state.pos.loginPin = state.pos.loginPin.slice(0, -1);
+      renderPosLogin();
+      return;
+    }
+    if (pinSubmit) {
+      const auth = state.pos.auth;
+      if (auth) {
         try {
           const result = await api("pos-session-login", {
-            staff_id: staff.id,
-            branch_id: staff.branch_id,
-            opening_cash_amount: staff.staff_role === "cashier" ? 1000000 : 0,
+            staff_id: auth.id,
+            branch_id: auth.branch_id,
+            pin: state.pos.loginPin,
+            opening_cash_amount: auth.staff_role === "cashier" ? 1000000 : 0,
           });
           cafeApp.current_session = result.session || null;
-          savePosUser(result.staff || staff);
+          savePosUser(result.staff || auth);
+          state.pos.loginPin = "";
+          state.pos.loginStaffId = "";
           startPosHeartbeat();
-          showToast("ÄÃ£ má»Ÿ phiÃªn lÃ m viá»‡c POS.");
+          showToast("Đã mở phiên làm việc POS.");
         } catch (error) {
+          state.pos.loginPin = "";
+          renderPosLogin();
           showToast(error.message);
           return;
         }
         window.location.href = url("pos/checkout");
+      } else {
+        showToast("Dang nhap tai khoan POS truoc khi mo ca.");
       }
       return;
     }
     if (event.target.closest("[data-pos-logout]")) {
+      let logoutMessage = "";
       try {
         if (state.pos.user?.session_token) {
           await api("pos-session-logout");
         }
       } catch (error) {
-        showToast(error.message);
+        logoutMessage = error.message;
       }
+      try {
+        if (state.pos.auth?.auth_token) {
+          await api("pos-auth-logout");
+        }
+      } catch (error) {
+        logoutMessage = logoutMessage || error.message;
+      }
+      if (logoutMessage) showToast(logoutMessage);
       stopPosHeartbeat();
       savePosUser(null);
+      savePosAuth(null);
       window.location.href = url("pos/login");
+      return;
+    }
+    if (event.target.closest("[data-pos-auth-logout]")) {
+      try {
+        if (state.pos.auth?.auth_token) {
+          await api("pos-auth-logout");
+        }
+      } catch (error) {
+        showToast(error.message);
+      }
+      state.pos.loginPin = "";
+      savePosUser(null);
+      savePosAuth(null);
+      renderPosLogin();
       return;
     }
     if (event.target.closest("[data-member-logout]")) {
@@ -1637,17 +1936,21 @@ function wireEvents() {
       const form = document.querySelector("[data-staff-save]");
       if (staff && form) {
         form.elements.id.value = staff.id;
+        if (form.elements.staff_code) form.elements.staff_code.value = staff.staff_code || "";
         form.elements.staff_name.value = staff.staff_name;
         form.elements.branch_id.value = staff.branch_id;
         form.elements.staff_role.value = staff.staff_role;
         form.elements.phone_number.value = staff.phone_number || "";
         form.elements.email.value = staff.email || "";
+        if (form.elements.password) form.elements.password.value = "";
+        if (form.elements.pin) form.elements.pin.value = "";
       }
     }
   });
 
   document.addEventListener("submit", async (event) => {
     const lookupForm = event.target.closest("[data-member-lookup]");
+    const posAuthForm = event.target.closest("[data-pos-auth-login]");
     const memberLoginForm = event.target.closest("[data-member-login]");
     const memberRegisterForm = event.target.closest("[data-member-register]");
     const createForm = event.target.closest("[data-customer-create]");
@@ -1659,6 +1962,20 @@ function wireEvents() {
     const productForm = event.target.closest("[data-product-save]");
     const staffForm = event.target.closest("[data-staff-save]");
 
+    if (posAuthForm) {
+      event.preventDefault();
+      try {
+        const result = await api("pos-auth-login", Object.fromEntries(new FormData(posAuthForm)));
+        savePosAuth(result);
+        savePosUser(null);
+        state.pos.loginPin = "";
+        renderPosLogin();
+        showToast("Da dang nhap tai khoan POS. Nhap PIN de mo ca.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
     if (memberLoginForm) {
       event.preventDefault();
       try {
@@ -1676,7 +1993,7 @@ function wireEvents() {
         const result = await api("member-register", Object.fromEntries(new FormData(memberRegisterForm)));
         setSiteMember(result.member);
         memberRegisterForm.reset();
-        showToast(result.member?.was_existing ? "Số điện thoại đã tồn tại, đã đăng nhập hồ sơ." : "Đã tạo tài khoản thành viên.");
+        showToast("Đã tạo tài khoản thành viên.");
       } catch (error) {
         showToast(error.message);
       }

@@ -35,23 +35,56 @@ final class AuthController extends Controller
 
     public function memberLogin(array $payload): array
     {
-        $member = (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email'));
-        if (!$member) {
+        $identity = require_field($payload, 'identity', 'Phone or email');
+        $password = require_field($payload, 'password', 'Password');
+        $customerModel = new Customer();
+        $account = $customerModel->authByIdentity($identity);
+        if (!$account) {
             throw new InvalidArgumentException('Không tìm thấy thành viên với số điện thoại hoặc email này.');
         }
+        if (($account['status'] ?? '') !== 'active') {
+            throw new InvalidArgumentException('Tài khoản thành viên không hoạt động.');
+        }
+        if (empty($account['password_hash']) || !password_verify($password, (string) $account['password_hash'])) {
+            throw new InvalidArgumentException('Mật khẩu không đúng.');
+        }
 
+        $customerModel->touchLogin((int) $account['id']);
+        $member = $customerModel->lookup((string) $account['id']);
         Session::put('member_customer_id', (int) $member['id']);
         return ['member' => $member];
     }
 
     public function memberRegister(array $payload): array
     {
+        $password = require_field($payload, 'password', 'Password');
+        $confirm = require_field($payload, 'password_confirm', 'Password confirmation');
+        if (strlen($password) < 6) {
+            throw new InvalidArgumentException('Mật khẩu phải có ít nhất 6 ký tự.');
+        }
+        if ($password !== $confirm) {
+            throw new InvalidArgumentException('Mật khẩu xác nhận không khớp.');
+        }
+
+        $phone = require_field($payload, 'phone_number', 'Phone number');
+        $email = trim((string) ($payload['email'] ?? ''));
+        $customerModel = new Customer();
+        if ($customerModel->lookup($phone)) {
+            throw new InvalidArgumentException('Số điện thoại đã tồn tại. Vui lòng đăng nhập bằng mật khẩu.');
+        }
+        if ($email !== '' && $customerModel->authByIdentity($email)) {
+            throw new InvalidArgumentException('Email đã tồn tại. Vui lòng đăng nhập bằng mật khẩu.');
+        }
+
         $payload['preferred_channel'] = 'website';
-        $member = (new Customer())->create($payload);
+        $payload['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+        $member = $customerModel->create($payload);
         if (!$member) {
             throw new InvalidArgumentException('Không thể tạo thành viên mới.');
         }
 
+        $customerModel->touchLogin((int) $member['id']);
+        $member = $customerModel->lookup((string) $member['id']) ?: $member;
         Session::put('member_customer_id', (int) $member['id']);
         return ['member' => $member];
     }
