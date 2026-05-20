@@ -1,0 +1,126 @@
+stateDiagram-v2
+    title Cafe Connect CRM + POS + Website - State Machine Diagram
+
+    state "Voucher Lifecycle\n(vouchers.status)" as Voucher {
+        [*] --> V_Issued
+        state "Issued\nĐã phát hành" as V_Issued
+        state "Active\nCó thể sử dụng" as V_Active
+        state "Reserved\nĐang giữ cho checkout" as V_Reserved
+        state "Redeemed\nĐã dùng" as V_Redeemed
+        state "Expired\nHết hạn" as V_Expired
+        state "Cancelled\nBị hủy" as V_Cancelled
+
+        V_Issued --> V_Active: release_date reached\nand not expired
+        V_Issued --> V_Expired: expiration_date passed
+        V_Issued --> V_Cancelled: admin/marketing cancels
+        V_Active --> V_Reserved: customer selects voucher\nat checkout
+        V_Reserved --> V_Active: checkout cancelled\nor payment failed
+        V_Reserved --> V_Redeemed: checkout paid\n/ set used_at, status=redeemed
+        V_Active --> V_Redeemed: valid checkout paid\n/ redeem()
+        V_Active --> V_Expired: expiration_date passed
+        V_Active --> V_Cancelled: campaign cancelled
+        V_Redeemed --> [*]
+        V_Expired --> [*]
+        V_Cancelled --> [*]
+    }
+
+    state "Service Order & Kitchen Lifecycle\n(service_orders.status + service_order_items.kitchen_status)" as OrderKitchen {
+        [*] --> O_Draft
+        state "Draft\nOrder mới" as O_Draft
+        state "Preparing\nBếp đang xử lý" as O_Preparing
+        state "Ready\nMón sẵn sàng" as O_Ready
+        state "Served\nĐã phục vụ" as O_Served
+        state "Paid\nĐã thanh toán" as O_Paid
+        state "Cancelled\nĐã hủy" as O_Cancelled
+
+        O_Draft --> O_Preparing: waiter creates order\n/ table=occupied, item=waiting
+        O_Preparing --> O_Preparing: barista clicks "Đang làm"\n/ set preparing_started_at
+        O_Preparing --> O_Ready: all items ready\n/ set ready_at, prepared_by_session_id
+        O_Ready --> O_Served: waiter/barista marks served\n/ set served_at
+        O_Served --> O_Paid: cashier checkout order\n/ create invoice, payment
+        O_Preparing --> O_Cancelled: order cancelled
+        O_Ready --> O_Cancelled: order cancelled before payment
+        O_Paid --> [*]
+        O_Cancelled --> [*]
+    }
+
+    state "Invoice / Bill Lifecycle\n(invoices.status + payments.status)" as InvoiceBill {
+        [*] --> B_CartStarted
+        state "Cart Started\nbill_started_at" as B_CartStarted
+        state "Pending Payment\ninvoice/payment pending" as B_Pending
+        state "Paid\npaid_at, payment paid" as B_Paid
+        state "Cancelled\ncheckout cancelled" as B_Cancelled
+        state "Refunded\npayment refunded" as B_Refunded
+
+        B_CartStarted --> B_Pending: checkout submitted\n/ validate customer, voucher, cart
+        B_CartStarted --> B_Cancelled: cart cleared
+        B_Pending --> B_Paid: payment success\n/ create invoice_details, payment, loyalty points
+        B_Pending --> B_Cancelled: payment failed or staff cancels
+        B_Paid --> B_Refunded: refund approved\n/ status=refunded
+        B_Paid --> [*]
+        B_Cancelled --> [*]
+        B_Refunded --> [*]
+    }
+
+    state "POS Session Lifecycle\n(pos_sessions.status + closed_reason)" as PosSession {
+        [*] --> S_LoginSelected
+        state "Login Selected\nstaff + role chosen" as S_LoginSelected
+        state "Open\nsession_token issued" as S_Open
+        state "Active\nheartbeat every 60s" as S_Active
+        state "Closed Manual\nclosed_reason=manual" as S_ClosedManual
+        state "Closed Timeout\nclosed_reason=timeout" as S_ClosedTimeout
+        state "Closed System\nclosed_reason=system" as S_ClosedSystem
+
+        S_LoginSelected --> S_Open: pos-session-login\n/ insert pos_sessions
+        S_Open --> S_Active: first heartbeat\n/ update last_seen_at
+        S_Active --> S_Active: POS action\n/ write pos_activity_logs
+        S_Active --> S_Active: heartbeat\n/ update last_seen_at
+        S_Active --> S_ClosedManual: logout\n/ set closed_at, closing_cash_amount
+        S_Active --> S_ClosedTimeout: no heartbeat > 30 minutes\n/ auto close
+        S_Open --> S_ClosedSystem: same staff logs in again\n/ close old session
+        S_ClosedManual --> [*]
+        S_ClosedTimeout --> [*]
+        S_ClosedSystem --> [*]
+    }
+
+    state "Customer Membership Lifecycle\n(customers.status + membership_tiers)" as CustomerMember {
+        [*] --> C_Guest
+        state "Guest\nChưa có hồ sơ" as C_Guest
+        state "Bronze Member\nHạng Đồng" as C_Bronze
+        state "Silver Member\nHạng Bạc" as C_Silver
+        state "Gold Member\nHạng Vàng" as C_Gold
+        state "Inactive\nKhông quay lại lâu" as C_Inactive
+        state "Blocked\nBị khóa" as C_Blocked
+
+        C_Guest --> C_Bronze: member-register or POS customer-create\n/ create customers
+        C_Bronze --> C_Silver: total_spending reaches Silver threshold\n/ update membership_tier_id
+        C_Silver --> C_Gold: total_spending reaches Gold threshold\n/ update membership_tier_id
+        C_Bronze --> C_Inactive: no visit over inactive period
+        C_Silver --> C_Inactive: no visit over inactive period
+        C_Gold --> C_Inactive: no visit over inactive period
+        C_Inactive --> C_Bronze: returns and spends\n/ last_visit_date updated
+        C_Inactive --> C_Silver: returns and spending qualifies
+        C_Inactive --> C_Gold: returns and spending qualifies
+        C_Bronze --> C_Blocked: admin blocks account
+        C_Silver --> C_Blocked: admin blocks account
+        C_Gold --> C_Blocked: admin blocks account
+        C_Blocked --> C_Bronze: admin reactivates
+        C_Blocked --> C_Silver: admin reactivates with spending tier
+        C_Blocked --> C_Gold: admin reactivates with spending tier
+    }
+
+    note right of V_Redeemed
+        Redeem happens in Voucher::redeem()
+        after Invoice::checkout() succeeds.
+    end note
+
+    note right of S_Active
+        Every write API in POS requires
+        staff_id + pos_session_id + session_token.
+    end note
+
+    note right of B_Paid
+        Payment success creates:
+        invoices, invoice_details, payments,
+        loyalty_point_transactions.
+    end note
