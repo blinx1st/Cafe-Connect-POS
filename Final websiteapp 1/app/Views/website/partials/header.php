@@ -10,19 +10,24 @@
     <a href="<?= e(base_url('menu')) ?>">Menu</a>
     <a href="<?= e(base_url('checkout')) ?>">Đặt hàng</a>
     <a href="<?= e(base_url('member')) ?>">Thành viên</a>
-    <span class="member-nav" data-member-nav>
-      <?php if ($member): ?>
-        <a class="member-greeting" href="<?= e(base_url('account')) ?>">Chào, <?= e($member['customer_name'] ?? 'thành viên') ?></a>
-        <a href="<?= e(base_url('account')) ?>">Hồ sơ</a>
-        <button class="nav-link-button" type="button" data-member-logout>Đăng xuất</button>
-      <?php else: ?>
-        <a href="<?= e(base_url('login')) ?>">Đăng nhập</a>
-        <a href="<?= e(base_url('register')) ?>">Đăng ký</a>
-        <a href="<?= e(base_url('account')) ?>">Hồ sơ</a>
-      <?php endif; ?>
-    </span>
     <a class="nav-pill" href="<?= e(base_url('pos/login')) ?>">POS</a>
   </nav>
+  <div class="site-actions member-nav" data-member-nav>
+    <?php if ($member): ?>
+      <button class="member-menu-toggle" type="button" data-member-menu-toggle aria-expanded="false">
+        Chào, <?= e($member['customer_name'] ?? 'thành viên') ?>
+        <span>▾</span>
+      </button>
+      <div class="member-dropdown" data-member-menu hidden>
+        <a href="<?= e(base_url('account')) ?>">Thông tin cá nhân</a>
+        <a href="<?= e(base_url('account#change-password')) ?>">Thay đổi password</a>
+        <button type="button" data-member-logout>Đăng xuất</button>
+      </div>
+    <?php else: ?>
+      <a href="<?= e(base_url('login')) ?>">Đăng nhập</a>
+      <a class="nav-pill" href="<?= e(base_url('register')) ?>">Đăng ký</a>
+    <?php endif; ?>
+  </div>
 </header>
 
 <?php if (!$installed): ?>

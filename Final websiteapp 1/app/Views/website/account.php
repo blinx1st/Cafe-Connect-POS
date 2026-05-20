@@ -24,7 +24,7 @@ require VIEW_PATH . '/website/partials/header.php';
     <div class="account-profile-layout" data-account-member <?= !$member ? 'hidden' : '' ?>>
       <aside class="account-sidebar">
         <section class="auth-card member-auth-status" data-member-auth-status></section>
-        <section class="auth-card">
+        <section class="auth-card" id="change-password">
           <h3>Đổi mật khẩu</h3>
           <form class="create-form compact" data-member-change-password>
             <label>Mật khẩu hiện tại <input type="password" name="current_password" required autocomplete="current-password"></label>

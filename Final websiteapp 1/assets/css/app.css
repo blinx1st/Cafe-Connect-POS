@@ -117,14 +117,20 @@ p {
   display: flex;
   align-items: center;
   gap: 24px;
+  margin-left: auto;
   font-size: 14px;
   font-weight: 800;
 }
 
 .member-nav {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
+}
+
+.site-actions {
+  margin-left: 18px;
 }
 
 .member-greeting {
@@ -142,6 +148,69 @@ p {
   font: inherit;
   text-transform: inherit;
   cursor: pointer;
+}
+
+.member-menu-toggle {
+  min-height: 42px;
+  max-width: 230px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 999px;
+  padding: 0 16px;
+  color: var(--white);
+  background: rgba(255, 255, 255, 0.12);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.member-menu-toggle span {
+  font-size: 12px;
+}
+
+.member-dropdown {
+  position: absolute;
+  top: calc(100% + 12px);
+  right: 0;
+  width: 230px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 10px;
+  color: var(--ink);
+  background: var(--white);
+  box-shadow: var(--shadow);
+}
+
+.member-dropdown a,
+.member-dropdown button {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  border: 0;
+  border-radius: 10px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.member-dropdown a:hover,
+.member-dropdown button:hover {
+  background: var(--cream);
+}
+
+#change-password {
+  scroll-margin-top: 112px;
 }
 
 .nav-pill {
@@ -3197,9 +3266,35 @@ body {
     padding: 14px 16px;
   }
 
+  .site-actions {
+    order: 2;
+    margin-left: auto;
+  }
+
+  .site-actions.member-nav {
+    display: inline-flex;
+  }
+
+  .icon-menu {
+    order: 3;
+    margin-left: 10px;
+  }
+
   .site-nav {
+    order: 4;
     right: 16px;
     background: rgba(48, 38, 28, 0.98);
+  }
+
+  .member-menu-toggle {
+    max-width: min(210px, 42vw);
+    min-height: 40px;
+    padding: 0 12px;
+  }
+
+  .member-dropdown {
+    right: 0;
+    width: min(230px, calc(100vw - 32px));
   }
 
   .hero-section {

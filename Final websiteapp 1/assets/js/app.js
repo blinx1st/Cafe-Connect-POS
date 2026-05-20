@@ -184,14 +184,26 @@ function renderMemberNav() {
 
   const member = state.site.customer;
   target.innerHTML = member ? `
-    <a class="member-greeting" href="${url("account")}">Chào, ${escapeHtml(member.customer_name || "thành viên")}</a>
-    <a href="${url("account")}">Hồ sơ</a>
-    <button class="nav-link-button" type="button" data-member-logout>Đăng xuất</button>
+    <button class="member-menu-toggle" type="button" data-member-menu-toggle aria-expanded="false">
+      Chào, ${escapeHtml(member.customer_name || "thành viên")}
+      <span>▾</span>
+    </button>
+    <div class="member-dropdown" data-member-menu hidden>
+      <a href="${url("account")}">Thông tin cá nhân</a>
+      <a href="${url("account#change-password")}">Thay đổi password</a>
+      <button type="button" data-member-logout>Đăng xuất</button>
+    </div>
   ` : `
     <a href="${url("login")}">Đăng nhập</a>
-    <a href="${url("register")}">Đăng ký</a>
-    <a href="${url("account")}">Hồ sơ</a>
+    <a class="nav-pill" href="${url("register")}">Đăng ký</a>
   `;
+}
+
+function closeMemberMenu() {
+  const menu = document.querySelector("[data-member-menu]");
+  const toggle = document.querySelector("[data-member-menu-toggle]");
+  if (menu) menu.hidden = true;
+  if (toggle) toggle.setAttribute("aria-expanded", "false");
 }
 
 function setMessage(selector, message, danger = false) {
@@ -286,6 +298,7 @@ function applyPageAppData(nextApp) {
 }
 
 async function navigateWebsite(href, pushState = true) {
+  const targetUrl = new URL(href, window.location.href);
   const route = websiteRouteFromUrl(href);
   if (route === null) {
     window.location.href = href;
@@ -319,7 +332,11 @@ async function navigateWebsite(href, pushState = true) {
     if (pushState) {
       window.history.pushState({ cafePjax: true }, "", href);
     }
-    window.scrollTo(0, 0);
+    if (targetUrl.hash) {
+      document.querySelector(targetUrl.hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } else {
+      window.scrollTo(0, 0);
+    }
   } catch (error) {
     window.location.href = href;
   }
@@ -1783,6 +1800,19 @@ function wireEvents() {
     const favorite = event.target.closest("[data-favorite-product]");
     const editProduct = event.target.closest("[data-edit-product]");
     const editStaff = event.target.closest("[data-edit-staff]");
+    const memberMenuToggle = event.target.closest("[data-member-menu-toggle]");
+    const memberNav = event.target.closest("[data-member-nav]");
+
+    if (memberMenuToggle) {
+      const menu = document.querySelector("[data-member-menu]");
+      const isOpen = menu && !menu.hidden;
+      if (menu) menu.hidden = isOpen;
+      memberMenuToggle.setAttribute("aria-expanded", isOpen ? "false" : "true");
+      return;
+    }
+    if (!memberNav) {
+      closeMemberMenu();
+    }
 
     if (roleButton) {
       state.pos.roleFilter = roleButton.dataset.loginRole || "";
@@ -1882,6 +1912,7 @@ function wireEvents() {
     if (event.target.closest("[data-member-logout]")) {
       try {
         await api("member-logout");
+        closeMemberMenu();
         setSiteMember(null);
         showToast("Đã đăng xuất tài khoản thành viên.");
       } catch (error) {
