@@ -36,6 +36,7 @@ DROP TABLE IF EXISTS vouchers;
 DROP TABLE IF EXISTS promotions;
 DROP TABLE IF EXISTS customer_segment_memberships;
 DROP TABLE IF EXISTS customer_segments;
+DROP TABLE IF EXISTS customer_password_resets;
 DROP TABLE IF EXISTS customers;
 DROP TABLE IF EXISTS membership_tiers;
 
@@ -76,6 +77,23 @@ CREATE TABLE customers (
         FOREIGN KEY (membership_tier_id) REFERENCES membership_tiers(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE customer_password_resets (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    customer_id INT NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    request_ip VARCHAR(45) NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_customer_password_resets_token (token_hash),
+    KEY idx_customer_password_resets_customer (customer_id),
+    KEY idx_customer_password_resets_expires (expires_at),
+    CONSTRAINT fk_customer_password_resets_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE customer_segments (

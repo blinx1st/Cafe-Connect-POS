@@ -8,7 +8,7 @@
       <p>Website khách hàng kết nối trực tiếp với POS: đơn hàng, điểm thành viên, voucher và lịch sử mua đều dùng chung một database.</p>
       <div class="hero-actions">
         <a class="primary-btn" href="<?= e(base_url('menu')) ?>">Xem menu</a>
-        <a class="ghost-btn" href="<?= e(base_url('account')) ?>">Đăng nhập thành viên</a>
+        <a class="ghost-btn" href="<?= e(base_url('login')) ?>">Đăng nhập thành viên</a>
       </div>
     </div>
   </section>

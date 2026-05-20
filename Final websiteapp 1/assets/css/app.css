@@ -20,6 +20,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -115,6 +119,29 @@ p {
   gap: 24px;
   font-size: 14px;
   font-weight: 800;
+}
+
+.member-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 18px;
+}
+
+.member-greeting {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-link-button {
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-transform: inherit;
+  cursor: pointer;
 }
 
 .nav-pill {
@@ -456,6 +483,19 @@ p {
   line-height: 1.6;
 }
 
+.profile-empty {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.member-profile-shell {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.85fr) minmax(0, 1.4fr);
+  gap: 24px;
+  align-items: start;
+}
+
 .create-form.compact {
   padding: 0;
   border: 0;
@@ -470,6 +510,37 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.auth-page-shell {
+  display: grid;
+  place-items: center;
+}
+
+.auth-page-card {
+  width: min(100%, 620px);
+}
+
+.account-profile-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.45fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.account-sidebar,
+.account-main {
+  display: grid;
+  gap: 18px;
+}
+
+.profile-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.profile-form .full-span,
+.profile-form button {
+  grid-column: 1 / -1;
 }
 
 .order-layout {
@@ -1366,6 +1437,8 @@ textarea {
   .order-layout,
   .pos-grid,
   .dashboard-columns,
+  .account-profile-layout,
+  .member-profile-shell,
   .member-account-grid,
   .admin-grid {
     grid-template-columns: 1fr;
@@ -1400,6 +1473,11 @@ textarea {
 
   .site-nav.is-open {
     display: grid;
+  }
+
+  .member-nav {
+    display: grid;
+    gap: 12px;
   }
 
   .hero-section {
@@ -3190,6 +3268,7 @@ body {
 @media (max-width: 640px) {
   .product-grid,
   .category-strip,
+  .profile-form,
   .pos-body .pos-product-grid,
   .pos-body .role-grid,
   .pos-body .staff-grid,

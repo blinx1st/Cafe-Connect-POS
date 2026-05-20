@@ -13,6 +13,10 @@ $router = new Router();
 
 $router->get('/', [WebsiteController::class, 'home']);
 $router->get('/menu', [WebsiteController::class, 'menu']);
+$router->get('/login', [WebsiteController::class, 'login']);
+$router->get('/register', [WebsiteController::class, 'register']);
+$router->get('/forgot-password', [WebsiteController::class, 'forgotPassword']);
+$router->get('/reset-password', [WebsiteController::class, 'resetPassword']);
 $router->get('/account', [WebsiteController::class, 'account']);
 $router->get('/member', [WebsiteController::class, 'member']);
 $router->get('/checkout', [WebsiteController::class, 'checkout']);
@@ -39,6 +43,10 @@ $apiRoutes = [
     '/api/member-login',
     '/api/member-register',
     '/api/member-logout',
+    '/api/member-profile-update',
+    '/api/member-change-password',
+    '/api/member-forgot-password',
+    '/api/member-reset-password',
     '/api/member-lookup',
     '/api/pos-auth-login',
     '/api/pos-auth-current',

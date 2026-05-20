@@ -178,6 +178,53 @@ function updateHeaderState() {
   header.classList.toggle("is-scrolled", window.scrollY > 12 || !pageName.endsWith("home"));
 }
 
+function renderMemberNav() {
+  const target = document.querySelector("[data-member-nav]");
+  if (!target) return;
+
+  const member = state.site.customer;
+  target.innerHTML = member ? `
+    <a class="member-greeting" href="${url("account")}">Chào, ${escapeHtml(member.customer_name || "thành viên")}</a>
+    <a href="${url("account")}">Hồ sơ</a>
+    <button class="nav-link-button" type="button" data-member-logout>Đăng xuất</button>
+  ` : `
+    <a href="${url("login")}">Đăng nhập</a>
+    <a href="${url("register")}">Đăng ký</a>
+    <a href="${url("account")}">Hồ sơ</a>
+  `;
+}
+
+function setMessage(selector, message, danger = false) {
+  const target = document.querySelector(selector);
+  if (!target) return;
+  target.textContent = message;
+  target.hidden = false;
+  target.classList.toggle("danger", danger);
+}
+
+function renderAccountState() {
+  const guest = document.querySelector("[data-account-guest]");
+  const memberPanel = document.querySelector("[data-account-member]");
+  if (!guest && !memberPanel) return;
+
+  const hasMember = Boolean(state.site.customer);
+  if (guest) guest.hidden = hasMember;
+  if (memberPanel) memberPanel.hidden = !hasMember;
+}
+
+function renderAccountForm() {
+  const form = document.querySelector("[data-member-profile-update]");
+  const member = state.site.customer;
+  if (!form || !member) return;
+
+  form.elements.customer_name.value = member.customer_name || "";
+  if (form.elements.phone_number) form.elements.phone_number.value = member.phone_number || "";
+  form.elements.email.value = member.email || "";
+  form.elements.birth_date.value = member.birth_date || "";
+  form.elements.gender.value = member.gender || "";
+  form.elements.address.value = member.address || "";
+}
+
 function parseCafeApp(doc) {
   const jsonScript = doc.querySelector("script[data-cafe-app]");
   if (jsonScript?.textContent?.trim()) {
@@ -516,11 +563,15 @@ function renderMiniMember(scope) {
 function setSiteMember(member) {
   state.site.customer = member || null;
   state.site.voucherId = "";
+  renderMemberNav();
+  renderAccountState();
+  renderAccountForm();
   renderMemberAccount();
   renderMiniMember("site");
   renderVoucherOptions("site");
   renderSiteProducts();
   renderProfile("portal", state.site.customer);
+  renderProfile("account", state.site.customer);
 }
 
 function renderMemberAccount() {
@@ -554,7 +605,7 @@ function renderMemberAccount() {
       <div class="metric"><strong>${usableCount}</strong><small>Voucher khả dụng</small></div>
     </div>
     <div class="account-actions">
-      <a class="secondary-link" href="${url("member")}">Xem hồ sơ</a>
+      <a class="secondary-link" href="${url("account")}">Xem hồ sơ</a>
       <button class="secondary-btn" type="button" data-member-logout>Đăng xuất</button>
     </div>
   `;
@@ -710,7 +761,7 @@ async function checkoutScope(scope, extraPayload = {}) {
   }
   if (scope === "site" && !state.site.customer) {
     showToast("Vui lòng đăng nhập hoặc đăng ký thành viên trước khi đặt hàng.");
-    await navigateWebsite(url("account"));
+    await navigateWebsite(url("login"));
     return;
   }
 
@@ -1953,6 +2004,10 @@ function wireEvents() {
     const posAuthForm = event.target.closest("[data-pos-auth-login]");
     const memberLoginForm = event.target.closest("[data-member-login]");
     const memberRegisterForm = event.target.closest("[data-member-register]");
+    const memberProfileForm = event.target.closest("[data-member-profile-update]");
+    const memberPasswordForm = event.target.closest("[data-member-change-password]");
+    const memberForgotForm = event.target.closest("[data-member-forgot-password]");
+    const memberResetForm = event.target.closest("[data-member-reset-password]");
     const createForm = event.target.closest("[data-customer-create]");
     const newsletterForm = event.target.closest("[data-newsletter-form]");
     const serviceOrderForm = event.target.closest("[data-service-order-create]");
@@ -1982,6 +2037,9 @@ function wireEvents() {
         const result = await api("member-login", Object.fromEntries(new FormData(memberLoginForm)));
         setSiteMember(result.member);
         showToast("Đăng nhập thành viên thành công.");
+        if (pageName === "website-login") {
+          await navigateWebsite(url("account"));
+        }
       } catch (error) {
         showToast(error.message);
       }
@@ -1994,7 +2052,60 @@ function wireEvents() {
         setSiteMember(result.member);
         memberRegisterForm.reset();
         showToast("Đã tạo tài khoản thành viên.");
+        if (pageName === "website-register") {
+          await navigateWebsite(url(""));
+        }
       } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (memberProfileForm) {
+      event.preventDefault();
+      try {
+        const result = await api("member-profile-update", Object.fromEntries(new FormData(memberProfileForm)));
+        setSiteMember(result.member);
+        showToast("Đã cập nhật hồ sơ.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (memberPasswordForm) {
+      event.preventDefault();
+      try {
+        await api("member-change-password", Object.fromEntries(new FormData(memberPasswordForm)));
+        memberPasswordForm.reset();
+        showToast("Đã đổi mật khẩu.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (memberForgotForm) {
+      event.preventDefault();
+      try {
+        const result = await api("member-forgot-password", Object.fromEntries(new FormData(memberForgotForm)));
+        memberForgotForm.reset();
+        setMessage("[data-auth-message]", `Đã gửi link đặt lại mật khẩu tới ${result.email}.`);
+        showToast("Đã gửi email đặt lại mật khẩu.");
+      } catch (error) {
+        setMessage("[data-auth-message]", error.message, true);
+        showToast(error.message);
+      }
+      return;
+    }
+    if (memberResetForm) {
+      event.preventDefault();
+      try {
+        await api("member-reset-password", Object.fromEntries(new FormData(memberResetForm)));
+        memberResetForm.reset();
+        setSiteMember(null);
+        setMessage("[data-auth-message]", "Đã đặt lại mật khẩu. Vui lòng đăng nhập bằng mật khẩu mới.");
+        showToast("Đã đặt lại mật khẩu.");
+        window.setTimeout(() => navigateWebsite(url("login")), 900);
+      } catch (error) {
+        setMessage("[data-auth-message]", error.message, true);
         showToast(error.message);
       }
       return;
@@ -2149,6 +2260,9 @@ function wireEvents() {
 }
 
 function initialRender() {
+  renderMemberNav();
+  renderAccountState();
+  renderAccountForm();
   renderMemberAccount();
   renderSiteProducts();
   renderReviews();
@@ -2157,6 +2271,7 @@ function initialRender() {
     renderMiniMember("site");
     renderVoucherOptions("site");
     renderProfile("portal", state.site.customer);
+    renderProfile("account", state.site.customer);
   }
   if (section === "pos") {
     renderPosApp();

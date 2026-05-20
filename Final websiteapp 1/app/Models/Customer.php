@@ -75,6 +75,130 @@ final class Customer extends Model
             ->execute(['id' => $customerId]);
     }
 
+    public function passwordHash(int $customerId): ?string
+    {
+        $stmt = $this->db->prepare("SELECT password_hash FROM customers WHERE id = :id LIMIT 1");
+        $stmt->execute(['id' => $customerId]);
+        $hash = $stmt->fetchColumn();
+
+        return $hash ? (string) $hash : null;
+    }
+
+    public function updatePassword(int $customerId, string $passwordHash): void
+    {
+        $this->db->prepare(
+            "UPDATE customers
+             SET password_hash = :password_hash, updated_at = NOW()
+             WHERE id = :id"
+        )->execute(['id' => $customerId, 'password_hash' => $passwordHash]);
+    }
+
+    public function updateProfile(int $customerId, array $data): array
+    {
+        $name = require_field($data, 'customer_name', 'Customer name');
+        $email = trim((string) ($data['email'] ?? '')) ?: null;
+        $gender = in_array(($data['gender'] ?? ''), ['male', 'female', 'other'], true) ? $data['gender'] : null;
+        $birthDate = trim((string) ($data['birth_date'] ?? '')) ?: null;
+        $address = trim((string) ($data['address'] ?? '')) ?: null;
+
+        if ($email !== null) {
+            $existing = $this->authByIdentity($email);
+            if ($existing && (int) $existing['id'] !== $customerId) {
+                throw new InvalidArgumentException('Email này đã được dùng bởi tài khoản khác.');
+            }
+        }
+
+        $this->db->prepare(
+            "UPDATE customers
+             SET customer_name = :customer_name,
+                 email = :email,
+                 gender = :gender,
+                 birth_date = :birth_date,
+                 address = :address,
+                 updated_at = NOW()
+             WHERE id = :id"
+        )->execute([
+            'id' => $customerId,
+            'customer_name' => $name,
+            'email' => $email,
+            'gender' => $gender,
+            'birth_date' => $birthDate,
+            'address' => $address,
+        ]);
+
+        return $this->lookup((string) $customerId) ?: [];
+    }
+
+    public function createPasswordReset(int $customerId, string $token, string $requestIp = ''): array
+    {
+        $this->ensurePasswordResetTable();
+        $tokenHash = hash('sha256', $token);
+        $this->db->prepare(
+            "UPDATE customer_password_resets
+             SET used_at = NOW()
+             WHERE customer_id = :customer_id AND used_at IS NULL"
+        )->execute(['customer_id' => $customerId]);
+
+        $this->db->prepare(
+            "INSERT INTO customer_password_resets (customer_id, token_hash, expires_at, request_ip)
+             VALUES (:customer_id, :token_hash, DATE_ADD(NOW(), INTERVAL 30 MINUTE), :request_ip)"
+        )->execute([
+            'customer_id' => $customerId,
+            'token_hash' => $tokenHash,
+            'request_ip' => $requestIp !== '' ? $requestIp : null,
+        ]);
+
+        return ['token_hash' => $tokenHash];
+    }
+
+    public function findPasswordReset(string $token): ?array
+    {
+        $this->ensurePasswordResetTable();
+        $stmt = $this->db->prepare(
+            "SELECT pr.id, pr.customer_id, pr.expires_at, c.customer_name, c.email, c.status
+             FROM customer_password_resets pr
+             JOIN customers c ON c.id = pr.customer_id
+             WHERE pr.token_hash = :token_hash
+               AND pr.used_at IS NULL
+               AND pr.expires_at >= NOW()
+             LIMIT 1"
+        );
+        $stmt->execute(['token_hash' => hash('sha256', $token)]);
+        $reset = $stmt->fetch();
+
+        return $reset ?: null;
+    }
+
+    public function markPasswordResetUsed(int $resetId): void
+    {
+        $this->ensurePasswordResetTable();
+        $this->db->prepare(
+            "UPDATE customer_password_resets SET used_at = NOW() WHERE id = :id"
+        )->execute(['id' => $resetId]);
+    }
+
+    private function ensurePasswordResetTable(): void
+    {
+        $this->db->exec(
+            "CREATE TABLE IF NOT EXISTS customer_password_resets (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                customer_id INT NOT NULL,
+                token_hash CHAR(64) NOT NULL,
+                expires_at DATETIME NOT NULL,
+                used_at DATETIME NULL,
+                request_ip VARCHAR(45) NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_customer_password_resets_token (token_hash),
+                KEY idx_customer_password_resets_customer (customer_id),
+                KEY idx_customer_password_resets_expires (expires_at),
+                CONSTRAINT fk_customer_password_resets_customer
+                    FOREIGN KEY (customer_id) REFERENCES customers(id)
+                    ON UPDATE CASCADE
+                    ON DELETE CASCADE
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    }
+
     public function vouchers(int $customerId): array
     {
         $stmt = $this->db->prepare(

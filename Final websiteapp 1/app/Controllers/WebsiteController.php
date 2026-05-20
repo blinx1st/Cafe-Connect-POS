@@ -22,9 +22,29 @@ final class WebsiteController extends Controller
         $this->renderWebsite('website/menu', 'Cafe Connect | Menu', 'website-menu');
     }
 
+    public function login(): void
+    {
+        $this->renderWebsite('website/login', 'Cafe Connect | Member Login', 'website-login');
+    }
+
+    public function register(): void
+    {
+        $this->renderWebsite('website/register', 'Cafe Connect | Member Register', 'website-register');
+    }
+
+    public function forgotPassword(): void
+    {
+        $this->renderWebsite('website/forgot-password', 'Cafe Connect | Forgot Password', 'website-forgot-password');
+    }
+
+    public function resetPassword(): void
+    {
+        $this->renderWebsite('website/reset-password', 'Cafe Connect | Reset Password', 'website-reset-password');
+    }
+
     public function account(): void
     {
-        $this->renderWebsite('website/account', 'Cafe Connect | Member Account', 'website-account');
+        $this->renderWebsite('website/account', 'Cafe Connect | Ho so thanh vien', 'website-account');
     }
 
     public function checkout(): void

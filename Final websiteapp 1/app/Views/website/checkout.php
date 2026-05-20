@@ -15,7 +15,7 @@
         <p>Giỏ hàng lấy từ trình duyệt. Sau thanh toán, invoice được ghi vào MySQL với sales_channel = website.</p>
         <div class="section-actions">
           <a class="secondary-link" href="<?= e(base_url('menu')) ?>">Tiếp tục chọn món</a>
-          <a class="secondary-link" href="<?= e(base_url('account')) ?>">Đăng nhập</a>
+          <a class="secondary-link" href="<?= e(base_url('login')) ?>">Đăng nhập</a>
         </div>
       </div>
 

@@ -2,7 +2,10 @@
   <a class="footer-brand" href="<?= e(base_url()) ?>">Coffee</a>
   <div class="footer-column">
     <h2>Privacy</h2>
-    <a href="<?= e(base_url('account')) ?>">Member account</a>
+    <a href="<?= e(base_url('login')) ?>">Member login</a>
+    <a href="<?= e(base_url('register')) ?>">Member register</a>
+    <a href="<?= e(base_url('account')) ?>">Member profile</a>
+    <a href="<?= e(base_url('forgot-password')) ?>">Forgot password</a>
     <a href="<?= e(base_url('member')) ?>">Member portal</a>
     <a href="<?= e(base_url('checkout')) ?>">Checkout</a>
   </div>
