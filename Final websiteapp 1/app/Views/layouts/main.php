@@ -17,6 +17,7 @@
       window.CAFE_INSTALLED = <?= !empty($installed) ? 'true' : 'false' ?>;
       window.CAFE_API_BASE = "<?= e(base_url('api.php')) ?>";
       window.CAFE_BASE_URL = "<?= e(base_url()) ?>";
+      window.CAFE_CSRF_TOKEN = "<?= e(\App\Core\Session::csrfToken()) ?>";
     </script>
     <?= $content ?>
     <div class="toast" data-toast hidden></div>

@@ -3,6 +3,32 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:CafeSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$script:CsrfToken = $null
+
+function Set-CsrfToken {
+  $response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php?endpoint=csrf-refresh" -ContentType "application/json; charset=utf-8" -Body "{}" -WebSession $script:CafeSession -TimeoutSec 10
+  if (-not $response.ok) {
+    throw "csrf-refresh failed: $($response.message)"
+  }
+  $script:CsrfToken = $response.data.csrf_token
+}
+
+function Invoke-CafeRaw {
+  param(
+    [string]$Endpoint,
+    [hashtable]$Body = @{},
+    [switch]$WithoutCsrf
+  )
+
+  $json = $Body | ConvertTo-Json -Depth 10
+  $headers = @{}
+  if ($script:CsrfToken -and -not $WithoutCsrf) {
+    $headers["X-CSRF-Token"] = $script:CsrfToken
+  }
+
+  return Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php?endpoint=$Endpoint" -ContentType "application/json; charset=utf-8" -Body $json -WebSession $script:CafeSession -Headers $headers -TimeoutSec 10
+}
 
 function Invoke-CafeApi {
   param(
@@ -10,14 +36,31 @@ function Invoke-CafeApi {
     [hashtable]$Body = @{}
   )
 
-  $json = $Body | ConvertTo-Json -Depth 10
-  $response = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php?endpoint=$Endpoint" -ContentType "application/json; charset=utf-8" -Body $json -TimeoutSec 10
+  $response = Invoke-CafeRaw $Endpoint $Body
   if (-not $response.ok) {
     throw "$Endpoint failed: $($response.message)"
   }
 
   Write-Host "OK $Endpoint"
   return $response.data
+}
+
+function Expect-CafeApiFailure {
+  param(
+    [string]$Endpoint,
+    [hashtable]$Body = @{},
+    [string]$MessageLike = ""
+  )
+
+  $response = Invoke-CafeRaw $Endpoint $Body
+  if ($response.ok) {
+    throw "$Endpoint should have failed but returned ok."
+  }
+  if ($MessageLike -and $response.message -notlike "*$MessageLike*") {
+    throw "$Endpoint failed with unexpected message: $($response.message)"
+  }
+
+  Write-Host "OK blocked $Endpoint"
 }
 
 function New-PosSession {
@@ -72,8 +115,18 @@ function Add-Auth {
   return $Body
 }
 
-$suffix = [DateTimeOffset]::Now.ToUnixTimeSeconds()
-$phone = "098$suffix".Substring(0, 10)
+Set-CsrfToken
+
+$blocked = Invoke-CafeRaw "member-register" @{} -WithoutCsrf
+if ($blocked.ok -or $blocked.message -notlike "*CSRF*") {
+  throw "CSRF negative test failed."
+}
+Write-Host "OK csrf write protection"
+
+Expect-CafeApiFailure "dashboard" @{} "staff_id"
+
+$suffix = Get-Random -Minimum 1000000 -Maximum 9999999
+$phone = "098$suffix"
 
 $member = Invoke-CafeApi "member-register" @{
   customer_name = "Smoke Test Member"
@@ -85,13 +138,24 @@ $member = Invoke-CafeApi "member-register" @{
 
 Invoke-CafeApi "member-lookup" @{ identity = $phone } | Out-Null
 
+Invoke-CafeApi "checkout" @{
+  customer_id = $member.member.id
+  payment_method = "e_wallet"
+  sales_channel = "website"
+  fulfillment_type = "pickup"
+  customer_note = "Smoke website checkout"
+  items = @(
+    @{ product_id = 4; quantity = 1; size = "M" }
+  )
+} | Out-Null
+
 $cashier = New-PosSession -Identity "CASH001" -Password "cashier123" -Pin "2222" -OpeningCash 1000000
 $waiter = New-PosSession -Identity "WAIT001" -Password "waiter123" -Pin "1111"
 $barista = New-PosSession -Identity "BAR001" -Password "barista123" -Pin "3333"
+$marketing = New-PosSession -Identity "MKT001" -Password "marketing123" -Pin "5555"
 $manager = New-PosSession -Identity "MGR001" -Password "manager123" -Pin "7777"
 
 $checkoutBody = Add-Session @{
-  staff_id = 2
   branch_id = 1
   customer_id = $member.member.id
   payment_method = "cash"
@@ -101,42 +165,115 @@ $checkoutBody = Add-Session @{
     @{ product_id = 1; quantity = 1; size = "M" }
   )
 } $cashier
-Invoke-CafeApi "checkout" $checkoutBody | Out-Null
+$posCheckout = Invoke-CafeApi "checkout" $checkoutBody
 
-$orderBody = Add-Session @{
-  staff_id = 1
-  waiter_id = 1
+Expect-CafeApiFailure "checkout" (Add-Session @{
+  branch_id = 1
+  payment_method = "cash"
+  sales_channel = "pos"
+  items = @(
+    @{ product_id = 1; quantity = 1; size = "M" }
+  )
+} $barista) "kh"
+
+Invoke-CafeApi "receipt" (Add-Session @{ invoice_id = $posCheckout.invoice_id } $cashier) | Out-Null
+Invoke-CafeApi "receipt-print-log" (Add-Session @{
+  invoice_id = $posCheckout.invoice_id
+  receipt_type = "html"
+  note = "Smoke receipt print"
+} $cashier) | Out-Null
+
+Expect-CafeApiFailure "create-order" (Add-Session @{
+  waiter_id = $cashier.id
   branch_id = 1
   table_id = 3
-  note = "Smoke test order"
+  note = "Cashier should be blocked"
   items = @(
     @{ product_id = 2; quantity = 1; size = "M" }
   )
-} $waiter
-$orderResult = Invoke-CafeApi "create-order" $orderBody
+} $cashier) "kh"
+
+$orderResult = Invoke-CafeApi "create-order" (Add-Session @{
+  waiter_id = $waiter.id
+  branch_id = 1
+  table_id = 3
+  note = "Smoke role order"
+  items = @(
+    @{ product_id = 2; quantity = 1; size = "M" }
+  )
+} $waiter)
 
 $createdOrder = $orderResult.orders | Where-Object { $_.id -eq $orderResult.order_id } | Select-Object -First 1
 $firstItem = $createdOrder.items | Select-Object -First 1
 
-$kitchenBody = Add-Session @{
-  staff_id = 3
+Expect-CafeApiFailure "update-order-item" (Add-Session @{
   item_id = $firstItem.id
   status = "ready"
-} $barista
-Invoke-CafeApi "update-order-item" $kitchenBody | Out-Null
+} $waiter) "Role"
 
-Invoke-CafeApi "dashboard" @{} | Out-Null
+Invoke-CafeApi "update-order-item" (Add-Session @{
+  item_id = $firstItem.id
+  status = "ready"
+} $barista) | Out-Null
 
-$reportBody = Add-Session @{} $manager
-Invoke-CafeApi "pos-session-report" $reportBody | Out-Null
+Invoke-CafeApi "update-order-item" (Add-Session @{
+  item_id = $firstItem.id
+  status = "served"
+} $waiter) | Out-Null
 
-Invoke-CafeApi "pos-session-logout" (Add-Session @{} $cashier) | Out-Null
-Invoke-CafeApi "pos-session-logout" (Add-Session @{} $waiter) | Out-Null
-Invoke-CafeApi "pos-session-logout" (Add-Session @{} $barista) | Out-Null
-Invoke-CafeApi "pos-session-logout" (Add-Session @{} $manager) | Out-Null
-Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $cashier) | Out-Null
-Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $waiter) | Out-Null
-Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $barista) | Out-Null
-Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $manager) | Out-Null
+$voidOrder = Invoke-CafeApi "create-order" (Add-Session @{
+  waiter_id = $waiter.id
+  branch_id = 1
+  table_id = 4
+  note = "Smoke void order"
+  items = @(
+    @{ product_id = 3; quantity = 1; size = "M" }
+  )
+} $waiter)
+$voidItem = ($voidOrder.orders | Where-Object { $_.id -eq $voidOrder.order_id } | Select-Object -First 1).items | Select-Object -First 1
+Invoke-CafeApi "void-order-item" (Add-Session @{
+  item_id = $voidItem.id
+  reason = "Smoke waiter void before ready"
+} $waiter) | Out-Null
+
+$cancelOrder = Invoke-CafeApi "create-order" (Add-Session @{
+  waiter_id = $waiter.id
+  branch_id = 1
+  table_id = 5
+  note = "Smoke cancel order"
+  items = @(
+    @{ product_id = 4; quantity = 1; size = "M" }
+  )
+} $waiter)
+Invoke-CafeApi "cancel-order" (Add-Session @{
+  order_id = $cancelOrder.order_id
+  reason = "Smoke manager cancel"
+} $manager) | Out-Null
+
+Invoke-CafeApi "create-campaign" (Add-Session @{
+  promotion_name = "Smoke Campaign $suffix"
+  target_segment = "all"
+  discount_type = "percentage"
+  discount_value = 5
+  voucher_quantity = 1
+  start_date = (Get-Date).ToString("yyyy-MM-dd")
+  end_date = (Get-Date).AddDays(7).ToString("yyyy-MM-dd")
+} $marketing) | Out-Null
+
+Expect-CafeApiFailure "inventory" (Add-Session @{} $marketing) "kh"
+
+Invoke-CafeApi "refund-invoice" (Add-Session @{
+  invoice_id = $posCheckout.invoice_id
+  reason = "Smoke test refund"
+} $manager) | Out-Null
+
+Invoke-CafeApi "dashboard" (Add-Session @{} $manager) | Out-Null
+Invoke-CafeApi "pos-session-report" (Add-Session @{} $manager) | Out-Null
+Invoke-CafeApi "reports-export" (Add-Session @{} $manager) | Out-Null
+
+foreach ($staff in @($cashier, $waiter, $barista, $marketing, $manager)) {
+  Invoke-CafeApi "pos-session-logout" (Add-Session @{} $staff) | Out-Null
+  Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $staff) | Out-Null
+}
 
 Write-Host "Smoke API test completed. Reset install.php afterward if you want clean sample data."

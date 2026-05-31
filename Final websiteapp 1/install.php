@@ -77,6 +77,26 @@ function split_sql_statements(string $sql): array
     return $statements;
 }
 
+function run_sql_file(PDO $pdo, string $path): void
+{
+    foreach (split_sql_statements(install_sql_body($path)) as $statement) {
+        $pdo->exec($statement);
+    }
+}
+
+function run_sql_directory(PDO $pdo, string $directory): void
+{
+    if (!is_dir($directory)) {
+        return;
+    }
+
+    $files = glob(rtrim($directory, '/\\') . '/*.sql') ?: [];
+    sort($files, SORT_NATURAL);
+    foreach ($files as $file) {
+        run_sql_file($pdo, $file);
+    }
+}
+
 function installed_table_count(): int
 {
     if (!Database::ready()) {
@@ -140,9 +160,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $pdo = Database::pdo(false);
         $schemaPath = __DIR__ . '/database/cafe_connect_schema.sql';
 
-        foreach (split_sql_statements(install_sql_body($schemaPath)) as $statement) {
-            $pdo->exec($statement);
-        }
+        run_sql_file($pdo, $schemaPath);
+        run_sql_directory($pdo, __DIR__ . '/database/migrations');
+        run_sql_directory($pdo, __DIR__ . '/database/seeders');
         seed_demo_credentials();
 
         $tableCount = installed_table_count();

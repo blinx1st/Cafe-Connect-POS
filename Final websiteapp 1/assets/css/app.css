@@ -16,6 +16,64 @@
   font-family: Inter, "Segoe UI", Arial, sans-serif;
 }
 
+.receipt-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(31, 23, 16, 0.48);
+}
+
+.receipt-box {
+  position: relative;
+  width: min(720px, 100%);
+  max-height: min(86vh, 900px);
+  overflow: auto;
+  padding: 28px;
+  border-radius: 14px;
+  background: #fffaf5;
+  box-shadow: 0 24px 70px rgba(31, 23, 16, 0.28);
+}
+
+.receipt-close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: #2c2118;
+  color: #fffaf5;
+  cursor: pointer;
+}
+
+@media print {
+  body > *:not(.receipt-dialog) {
+    display: none !important;
+  }
+
+  .receipt-dialog {
+    position: static;
+    display: block;
+    padding: 0;
+    background: #fff;
+  }
+
+  .receipt-box {
+    width: 100%;
+    max-height: none;
+    box-shadow: none;
+  }
+
+  .receipt-close,
+  .receipt-box [data-receipt-print] {
+    display: none !important;
+  }
+}
+
 * {
   box-sizing: border-box;
 }

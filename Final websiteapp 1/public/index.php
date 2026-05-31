@@ -36,6 +36,7 @@ $router->get('/pos/staff', [PosController::class, 'staff']);
 $router->get('/pos/cash', [PosController::class, 'cash']);
 
 $apiRoutes = [
+    '/api/csrf-refresh',
     '/api/bootstrap',
     '/api/website-bootstrap',
     '/api/pos-bootstrap',
@@ -65,8 +66,16 @@ $apiRoutes = [
     '/api/orders',
     '/api/create-order',
     '/api/update-order-item',
+    '/api/void-order-item',
+    '/api/cancel-order',
+    '/api/order-status-update',
     '/api/kitchen',
     '/api/checkout-order',
+    '/api/refund-invoice',
+    '/api/receipt',
+    '/api/receipt-print-log',
+    '/api/payment-demo-create',
+    '/api/checkout-closing',
     '/api/dashboard',
     '/api/campaigns',
     '/api/create-campaign',
@@ -76,6 +85,7 @@ $apiRoutes = [
     '/api/product-save',
     '/api/staff-save',
     '/api/reports',
+    '/api/reports-export',
 ];
 
 foreach ($apiRoutes as $route) {

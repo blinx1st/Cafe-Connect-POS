@@ -34,6 +34,21 @@
             <option value="cash">Tiền mặt khi nhận</option>
           </select>
         </label>
+        <label class="field">Hinh thuc nhan
+          <select data-site-fulfillment>
+            <option value="pickup">Nhan tai quay</option>
+            <option value="delivery">Giao hang</option>
+          </select>
+        </label>
+        <label class="field">Dia chi giao hang
+          <input type="text" data-site-delivery-address placeholder="Nhap dia chi neu chon giao hang">
+        </label>
+        <label class="field">Thoi gian nhan du kien
+          <input type="datetime-local" data-site-requested-at>
+        </label>
+        <label class="field">Ghi chu
+          <textarea data-site-customer-note rows="3" placeholder="It da, them muong, ghi chu giao hang..."></textarea>
+        </label>
         <div data-site-totals class="totals"></div>
         <button class="primary-btn full" type="button" data-site-checkout <?= $installed ? '' : 'disabled' ?>>Đặt hàng</button>
       </aside>

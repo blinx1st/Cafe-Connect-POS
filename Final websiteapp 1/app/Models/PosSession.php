@@ -24,6 +24,8 @@ final class PosSession extends Model
         }
 
         $limitIdentity = RateLimiter::identity('pos-session-login|' . $staffId);
+        $lockout = new AuthLockout();
+        $lockout->assertAllowed('pos-session-login', (string) $staffId);
         RateLimiter::hit('pos-session-login', $limitIdentity, 8, 15 * 60);
 
         $staffModel = new Staff();
@@ -34,6 +36,7 @@ final class PosSession extends Model
         $authSession = (new StaffAuthSession())->requireActive($data, $staffId);
         $verifiedStaff = $staffModel->verifyPin($staffId, $pin);
         if (!$verifiedStaff) {
+            $lockout->recordFailure('pos-session-login', (string) $staffId);
             throw new InvalidArgumentException('PIN không đúng.');
         }
         $staff = $verifiedStaff;
@@ -83,7 +86,17 @@ final class PosSession extends Model
             'amount' => $openingCash,
             'note' => 'POS login',
         ]);
+        $lockout->clear('pos-session-login', (string) $staffId);
         RateLimiter::clear('pos-session-login', $limitIdentity);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => $staffId,
+            'actor_role' => (string) $staff['staff_role'],
+            'action' => 'pos_session_open',
+            'entity_type' => 'pos_session',
+            'entity_id' => (int) $session['id'],
+            'metadata' => ['opening_cash_amount' => $openingCash],
+        ]);
 
         return [
             'staff' => $this->staffPayload($session),
@@ -150,6 +163,19 @@ final class PosSession extends Model
                 'entity_id' => (int) $closed['id'],
                 'amount' => $closingCash,
                 'note' => 'POS logout',
+            ]);
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => (int) $closed['staff_id'],
+                'actor_role' => (string) $closed['staff_role'],
+                'action' => 'pos_session_close',
+                'entity_type' => 'pos_session',
+                'entity_id' => (int) $closed['id'],
+                'metadata' => [
+                    'expected_cash_amount' => $expectedCash,
+                    'closing_cash_amount' => $closingCash,
+                    'cash_difference_amount' => $closingCash - $expectedCash,
+                ],
             ]);
         }
 

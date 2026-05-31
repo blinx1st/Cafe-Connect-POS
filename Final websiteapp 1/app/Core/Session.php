@@ -43,4 +43,31 @@ final class Session
     {
         unset($_SESSION[$key]);
     }
+
+    public static function csrfToken(): string
+    {
+        self::start();
+        if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
+            $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+        }
+
+        return $_SESSION['csrf_token'];
+    }
+
+    public static function refreshCsrfToken(): string
+    {
+        self::start();
+        $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+
+        return $_SESSION['csrf_token'];
+    }
+
+    public static function verifyCsrfToken(?string $token): bool
+    {
+        if ($token === null || trim($token) === '') {
+            return false;
+        }
+
+        return hash_equals(self::csrfToken(), $token);
+    }
 }

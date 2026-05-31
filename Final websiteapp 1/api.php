@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 $legacyActionMap = [
     'bootstrap' => '/api/bootstrap',
+    'csrf_refresh' => '/api/csrf-refresh',
     'member_session' => '/api/member-session',
     'member_login' => '/api/member-login',
     'member_staff_adopt' => '/api/member-staff-adopt',
@@ -29,6 +30,14 @@ $legacyActionMap = [
     'dashboard' => '/api/dashboard',
     'campaigns' => '/api/campaigns',
     'create_campaign' => '/api/create-campaign',
+    'refund_invoice' => '/api/refund-invoice',
+    'void_order_item' => '/api/void-order-item',
+    'cancel_order' => '/api/cancel-order',
+    'checkout_closing' => '/api/checkout-closing',
+    'payment_demo_create' => '/api/payment-demo-create',
+    'order_status_update' => '/api/order-status-update',
+    'receipt_print_log' => '/api/receipt-print-log',
+    'reports_export' => '/api/reports-export',
 ];
 
 if (isset($_GET['endpoint'])) {

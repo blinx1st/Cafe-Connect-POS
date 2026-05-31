@@ -4,14 +4,29 @@ Ngay danh gia: 2026-05-31
 
 Pham vi danh gia: thu muc `Cafe-Connect-POS/Final websiteapp 1`, kien truc PHP MVC thuan, XAMPP/Apache/MySQL, website member, POS, CRM, inventory, campaign, report.
 
+## Cap nhat sau Phase 1 nen tang
+
+Trang thai moi sau dot nang cap hien tai:
+
+- Da tach `database/migrations` va `database/seeders`; `install.php` reset DB bang schema goc, sau do chay migration/seed theo thu tu.
+- Database hien co 41 bang sau reset, gom them `schema_migrations`, `auth_lockouts`, `audit_logs`, `website_orders`, `invoice_refunds`, `receipt_print_logs`, `recipes`, `recipe_items`.
+- Da them CSRF cho API ghi du lieu: layout inject `window.CAFE_CSRF_TOKEN`, frontend gui `X-CSRF-Token`, backend chan request ghi thieu/sai token.
+- Da them DB lockout cho member login, POS staff login va PIN mo ca; sai qua nguong bi khoa tam 15 phut.
+- Da them `App\Core\AppLogger` ghi loi vao `storage/logs/app.log`, API khong tra stack/internal exception tho.
+- Da them audit log dung chung cho login/logout, register, profile/password, checkout, refund, receipt print, void/cancel order, cash/product/staff/inventory.
+- Da them website order fields o checkout va bang `website_orders`.
+- Da them receipt/refund/void/cancel/order-status/payment-demo/report-export endpoint nen.
+- Da them recipe/BOM va tu dong tru nguyen lieu khi invoice paid.
+- `tests/verify_project.ps1` da pass sau nang cap: PHP lint 58 files, node check, install, routes, smoke API co CSRF, website checkout, POS checkout, receipt, void/refund, reports export, logout, reset DB sach.
+
 ## 1. Ket luan nhanh
 
 Du an hien khong con la landing page demo don gian. Code hien tai da co nen tang MVC, schema MySQL tuong doi rong, website nhieu trang, POS phan quyen theo role, dang nhap member/staff, POS session, checkout ghi invoice, order ban, kitchen queue, voucher, campaign, inventory, cash transaction va report.
 
 Tuy nhien de tro thanh website/POS hoat dong day du tu A-Z, du an van can cac lop san pham that sau:
 
-- Cai dat va migration on dinh thay vi chi reset sample data bang `install.php`.
-- Bao mat web day du: CSRF, rate limit, lockout, secure session cookie, audit log khong the sua.
+- Migration/seed da co baseline, nhung can nang len up/down migration va che do giu du lieu.
+- Bao mat web da co CSRF, rate limit, DB lockout, secure session cookie va audit log; can bo sung password policy, HTTPS bat buoc va audit bat bien neu production.
 - Payment/delivery/order tracking that cho website.
 - Nghiep vu POS sau ban hang: huy bill, hoan tien, in hoa don, tach/gop/chuyen ban, chot ca bat buoc.
 - Inventory theo cong thuc nguyen lieu thay vi tru ton kho san pham don gian.
@@ -23,15 +38,15 @@ Tuy nhien de tro thanh website/POS hoat dong day du tu A-Z, du an van can cac lo
 | Hang muc | Muc hien tai | Danh gia |
 | --- | --- | --- |
 | Kien truc MVC | `public/index.php`, `app/Core`, Controllers, Models, Views | Tot cho do an, can middleware/validation/migration de len production |
-| Database | Schema lon co customer, staff, POS session, invoices, orders, inventory, campaign | Kha day, nhung chua co migration versioning va seed rieng |
+| Database | Schema lon co customer, staff, POS session, invoices, orders, inventory, campaign, audit, lockout, refund, receipt, recipe | Kha day, da co migration/seed baseline; can up/down migration neu production |
 | Website UI | Co home, menu, login, register, forgot/reset, account, checkout, member | Kha day, can order tracking, payment/delivery that, product detail |
-| Member auth | Phone/email + password, register, profile, change password, forgot password SMTP, rate limit, session regenerate | Tot hon demo, van can CSRF va lockout/audit day du |
+| Member auth | Phone/email + password, register, profile, change password, forgot password SMTP, CSRF, DB lockout, audit, session regenerate | Tot cho nghiem thu, can password policy va email provider that neu production |
 | Staff/Admin web login | Staff POS co the login tren website, header hien POS | Da co, can tach ro trang ho so nhan vien va quan ly quyen nang cao |
-| POS auth | Tai khoan/mat khau + PIN mo ca + heartbeat + token + rate limit | Tot, can lockout bang DB/audit, phan quyen backend tap trung hon, chot ca bat buoc |
-| POS cashier | Checkout, voucher, customer lookup, invoice/payment/points | Tot cho demo nghiep vu, can refund/void/receipt printer/split payment |
+| POS auth | Tai khoan/mat khau + PIN mo ca + heartbeat + token + rate limit + DB lockout + audit | Tot cho nghiem thu, can phan quyen middleware tap trung hon va chot ca bat buoc hon |
+| POS cashier | Checkout, voucher, customer lookup, invoice/payment/points, refund, void, receipt log | Tot cho nghiem thu, can receipt printer/PDF va split payment |
 | Service order | Waiter tao order, barista cap nhat, cashier checkout | Tot, can quy trinh huy mon/chuyen ban/gop ban/SLA bep |
 | Reporting | Dashboard, report, session performance | Co nen tang, can filter ngay/chi nhanh/export va doi soat tai chinh |
-| Inventory | Ton kho san pham, vat tu, stock movement | Co ban, can recipe/BOM va tu dong tru nguyen lieu |
+| Inventory | Ton kho san pham, vat tu, stock movement, recipe/BOM, tu dong tru nguyen lieu | Tot hon demo, can supplier/batch/expiry UI day du va kiem kho |
 | Campaign/CRM | Campaign, voucher, favorite, newsletter, segment | Co ban, can automation, email/SMS/Zalo, consent, unsubscribe |
 | Quality | PHP lint OK, JS syntax OK, route HTTP 200, smoke API pass sau khi import DB | Tot cho nghiem thu hien tai, van can test tu dong co fixture/CI |
 
@@ -39,11 +54,11 @@ Tuy nhien de tro thanh website/POS hoat dong day du tu A-Z, du an van can cac lo
 
 Kiem tra khong pha du lieu da chay:
 
-- `C:\xampp\php\php.exe -l` tren 54 file PHP: OK.
+- `C:\xampp\php\php.exe -l` tren 58 file PHP: OK.
 - `node --check assets/js/app.js`: OK.
 - Route HTTP 200: `/`, `/menu`, `/login`, `/register`, `/forgot-password`, `/account`, `/checkout`, `/member`, `/pos/login`, `/pos/checkout`, `/pos/reports`.
 - MySQL/MariaDB da duoc khoi dong tren `127.0.0.1:3306`.
-- `install.php` POST import thanh cong database `cafe_connect_crm`: 33 bang.
+- `install.php` POST import thanh cong database `cafe_connect_crm`: 41 bang.
 - Sau reset sach: `staff_count = 8`, `customer_count = 6`.
 - API `member-session`: tra `{ ok: true, data: { member: null, web_staff: null } }`.
 - `tests/smoke_api.ps1`: pass toan bo cac buoc `member-register`, `member-lookup`, `pos-auth-login`, `pos-session-login`, `checkout`, `create-order`, `update-order-item`, `dashboard`, `pos-session-report`, logout session/auth.
@@ -51,7 +66,7 @@ Kiem tra khong pha du lieu da chay:
 - Them va chay thanh cong `tests/verify_project.ps1`: script tong hop PHP lint, JS syntax, MySQL readiness, DB reset, API readiness, route checks, smoke API, reset DB sach sau smoke.
 - Them `App\Core\RateLimiter` va session hardening: cookie `HttpOnly`, `SameSite=Lax`, `Secure` khi HTTPS, regenerate session sau login/register/adopt/logout/reset password. Rate limit da gan cho member login/register/forgot/reset, POS staff login va POS PIN mo ca.
 
-Ket luan: code khong loi cu phap, route render duoc va cac luong nghiep vu API chinh da chay duoc tren database mau. Nhung muc san pham that van can cac phase bao mat, payment, refund, inventory recipe, migration va test tu dong ben duoi.
+Ket luan: code khong loi cu phap, route render duoc va cac luong nghiep vu API chinh da chay duoc tren database mau. Phase nen tang da co CSRF, DB lockout, audit, logger, migration/seed, refund/receipt/recipe baseline; cac muc san pham that tiep theo van la payment/delivery that, POS printer/split payment, inventory UI sau hon, CI va backup.
 
 ## 4. Nhung phan da lam duoc
 
@@ -127,12 +142,12 @@ Can them:
 
 Da co hash mat khau, token session, role check, nhung van thieu cac lop quan trong:
 
-- CSRF token cho form website va API state-changing.
-- Rate limit login/register/forgot password/POS PIN da co ban bang file storage; can nang len DB/Redis neu production.
-- Lock account tam thoi khi sai mat khau/PIN nhieu lan.
+- CSRF token cho form website va API state-changing da co baseline; can them rotation policy neu production.
+- Rate limit login/register/forgot password/POS PIN da co ban bang file storage; DB lockout da co cho login/PIN, co the nang len Redis neu production.
+- Lock account tam thoi khi sai mat khau/PIN nhieu lan da co baseline bang `auth_lockouts`.
 - Session cookie options va regenerate session id da co ban; can them policy HTTPS bat buoc neu deploy production.
 - Phan quyen middleware tap trung thay vi goi le trong controller.
-- Log audit bat buoc cho sua staff/product/campaign/cash/refund.
+- Log audit bat buoc da co cho nhieu luong chinh; can mo rong cho tat ca CRUD admin/CMS ve sau.
 - Chinh sach mat khau manh, expire/reset staff password.
 - An thong tin loi noi bo voi nguoi dung, ghi log chi tiet vao file/server.
 
@@ -252,7 +267,7 @@ Can them:
 3. `app.js` qua lon va gom ca website/POS, rui ro regression cao khi sua UI.
 4. Con `includes/repository.php` va `includes/helpers.php` kieu legacy, de gay nham lan voi MVC moi.
 5. README hoac terminal hien thi tieng Viet bi mojibake, can chuan hoa encoding UTF-8.
-6. Thieu CSRF/rate-limit/lockout cho cac endpoint auth va ghi du lieu.
+6. Bao mat nen da co CSRF/rate-limit/lockout/audit; rui ro con lai la chua co HTTPS/password policy/production hardening.
 7. API tra message exception truc tiep, tien loi demo nhung can log noi bo va response an toan hon.
 8. Payment/SMTP la cau hinh demo, chua co doi soat provider that.
 
@@ -381,26 +396,26 @@ Thu tu uu tien de dua du an len muc nghiem thu tot:
 
 1. Chuan hoa encoding UTF-8 cho README, view va message dang bi mojibake khi hien thi.
 2. Tach `app.js` thanh cac module: `site-auth.js`, `site-cart.js`, `pos-auth.js`, `pos-modules.js`, `api.js`.
-3. Them CSRF + lockout cho auth; rate limit co ban da co trong `App\Core\RateLimiter`.
-4. Them refund/void/receipt cho POS.
-5. Them order status va payment sandbox cho website.
-6. Them recipe inventory va tru nguyen lieu tu dong.
-7. Them export report va daily closing report.
-8. Xoa legacy `includes/` sau khi xac minh khong route nao dung.
-9. Viet Playwright/API test sau hon cho cac luong nghiem thu ngoai smoke gate `tests/verify_project.ps1`.
-10. Tach migration/seed de thay the reset DB truc tiep trong `install.php`.
+3. Hoan thien receipt HTML/PDF/in printer va split payment cho POS.
+4. Them payment sandbox UI va theo doi trang thai don website chi tiet.
+5. Hoan thien UI supplier/batch/expiry/kiem kho cho inventory recipe.
+6. Them filter report theo ngay/chi nhanh/staff va daily closing report.
+7. Xoa legacy `includes/` sau khi xac minh khong route nao dung.
+8. Viet Playwright/API test sau hon cho cac luong nghiem thu ngoai smoke gate `tests/verify_project.ps1`.
+9. Nang migration/seed baseline thanh migration up/down giu du lieu khi can.
 
 ## 9. Checklist nghiem thu de khang dinh khong con la demo
 
-- [ ] Cai dat DB bang migration, khong chi reset sample.
-- [ ] Member dang ky, dang nhap, quen mat khau, doi mat khau, sua ho so.
-- [ ] Staff/admin dang nhap website va mo POS bang PIN.
+- [x] Cai dat DB bang migration/seed baseline; production up/down migration con de phase sau.
+- [x] Member dang ky, dang nhap, quen mat khau, doi mat khau, sua ho so.
+- [x] Staff/admin dang nhap website va mo POS bang PIN.
 - [ ] Website dat hang voi payment sandbox va theo doi trang thai.
-- [ ] POS checkout, service order, kitchen queue, checkout order.
-- [ ] POS co cancel/refund/receipt/closing cash.
-- [ ] Voucher/campaign/loyalty co log va report.
-- [ ] Inventory tru nguyen lieu theo recipe.
-- [ ] Dashboard/report filter/export du lieu that.
-- [ ] Security: CSRF, rate limit, lockout, secure session, audit log.
-- [ ] Test: PHP lint, JS check, smoke API, browser test.
+- [x] POS checkout, service order, kitchen queue, checkout order.
+- [x] POS role policy da dong bo backend/frontend; cashier khong tao order, waiter chi served, barista chi preparing/ready, manager/owner/admin co override.
+- [x] POS co void/cancel/refund/receipt/export UI baseline; printer/PDF va split payment con de phase sau.
+- [x] Voucher/campaign/loyalty co log va report baseline.
+- [x] Inventory tru nguyen lieu theo recipe baseline.
+- [x] Dashboard/report export baseline; filter sau hon con de phase tiep.
+- [x] Security baseline: CSRF, rate limit, DB lockout, secure session, audit log, app logger.
+- [x] Test: PHP lint, JS check, smoke API; browser automation con de phase tiep.
 - [ ] Backup/logging/deployment docs san sang.

@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Database;
+use App\Core\RolePolicy;
 use App\Models\Campaign;
 use App\Models\Dashboard;
 use App\Models\Inventory;
@@ -133,6 +134,7 @@ final class PosController extends Controller
             'current_session' => null,
             'session_reports' => [],
             'roles' => Staff::ROLES,
+            'permissions' => RolePolicy::permissionsPayload(),
         ];
 
         if (!Database::ready()) {
@@ -141,19 +143,13 @@ final class PosController extends Controller
 
         $product = new Product();
         $staff = new Staff();
-        $order = new Order();
         $data['products'] = $product->active();
         $data['categories'] = $product->categories();
-        $data['staff'] = $staff->all();
         $data['branches'] = $staff->branches();
-        $data['tables'] = $order->tables();
-        $data['orders'] = $order->activeOrders();
-        $data['kitchen'] = $order->kitchenQueue();
-        $data['dashboard'] = (new Dashboard())->data();
-        $data['campaigns'] = (new Campaign())->performance();
-        $data['inventory'] = (new Inventory())->overview();
-        $data['reports'] = (new Report())->data();
-        $data['session_reports'] = $data['reports']['session_reports'] ?? [];
+
+        if ($module === 'login') {
+            $data['staff'] = $staff->all();
+        }
 
         return $data;
     }

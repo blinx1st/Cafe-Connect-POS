@@ -17,6 +17,10 @@ final class Invoice extends Model
             if (!$order) {
                 throw new InvalidArgumentException('Service order not found.');
             }
+            $activeOrderItems = array_values(array_filter(
+                $order['items'],
+                static fn ($item) => ($item['kitchen_status'] ?? '') !== 'cancelled'
+            ));
             $items = array_map(static fn ($item) => [
                 'product_id' => (int) $item['product_id'],
                 'quantity' => (int) $item['quantity'],
@@ -24,7 +28,7 @@ final class Invoice extends Model
                 'size' => $item['size'],
                 'topping' => $item['topping'],
                 'line_total' => (float) $item['line_total'],
-            ], $order['items']);
+            ], $activeOrderItems);
             $data['branch_id'] = $order['branch_id'];
             $data['customer_id'] = $data['customer_id'] ?? $order['customer_id'];
             $data['items'] = $items;
@@ -127,6 +131,8 @@ final class Invoice extends Model
                 $stockStmt->execute(['quantity' => $item['quantity'], 'branch_id' => $branchId, 'product_id' => $item['product_id']]);
             }
 
+            (new Inventory())->consumeInvoiceMaterials($invoiceId, $branchId, $staffId, $posSessionId ?: null);
+
             $this->db->prepare(
                 "INSERT INTO payments (invoice_id, payment_method, payment_provider, amount, paid_at, transaction_reference, status)
                  VALUES (:invoice_id, :payment_method, :provider, :amount, :paid_at, :ref, 'paid')"
@@ -138,6 +144,28 @@ final class Invoice extends Model
                 'paid_at' => $paidAt,
                 'ref' => strtoupper($salesChannel) . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
             ]);
+
+            if (in_array($salesChannel, ['website', 'delivery'], true)) {
+                $fulfillmentType = in_array(($data['fulfillment_type'] ?? 'pickup'), ['pickup', 'delivery'], true)
+                    ? $data['fulfillment_type']
+                    : 'pickup';
+                $orderStatus = $paymentMethod === 'cash' ? 'pending' : 'paid';
+                $this->db->prepare(
+                    "INSERT INTO website_orders (
+                        invoice_id, customer_id, fulfillment_type, order_status, delivery_address, customer_note, requested_at
+                     ) VALUES (
+                        :invoice_id, :customer_id, :fulfillment_type, :order_status, :delivery_address, :customer_note, :requested_at
+                     )"
+                )->execute([
+                    'invoice_id' => $invoiceId,
+                    'customer_id' => $customerId,
+                    'fulfillment_type' => $fulfillmentType,
+                    'order_status' => $orderStatus,
+                    'delivery_address' => trim((string) ($data['delivery_address'] ?? '')) ?: null,
+                    'customer_note' => trim((string) ($data['customer_note'] ?? $data['note'] ?? '')) ?: null,
+                    'requested_at' => $this->dateTimeOrNull((string) ($data['requested_at'] ?? '')),
+                ]);
+            }
 
             if ($customerId) {
                 if ($points > 0) {
@@ -178,6 +206,19 @@ final class Invoice extends Model
                 ]);
             }
 
+            (new AuditLog())->record([
+                'actor_type' => $posSessionId ? 'staff' : ($customerId ? 'customer' : 'guest'),
+                'actor_id' => $posSessionId ? $staffId : $customerId,
+                'action' => 'checkout_paid',
+                'entity_type' => 'invoice',
+                'entity_id' => $invoiceId,
+                'metadata' => [
+                    'sales_channel' => $salesChannel,
+                    'total_amount' => $total,
+                    'payment_method' => $paymentMethod,
+                ],
+            ]);
+
             $this->db->commit();
 
             return [
@@ -196,6 +237,182 @@ final class Invoice extends Model
             $this->db->rollBack();
             throw $exception;
         }
+    }
+
+    public function refund(array $data): array
+    {
+        $invoiceId = (int) ($data['invoice_id'] ?? 0);
+        $staffId = max(1, (int) ($data['staff_id'] ?? 1));
+        $posSessionId = isset($data['pos_session_id']) && (int) $data['pos_session_id'] > 0 ? (int) $data['pos_session_id'] : null;
+        $reason = trim((string) ($data['reason'] ?? ''));
+        if ($invoiceId <= 0 || $reason === '') {
+            throw new InvalidArgumentException('Refund requires invoice_id and reason.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare("SELECT * FROM invoices WHERE id = :id FOR UPDATE");
+            $stmt->execute(['id' => $invoiceId]);
+            $invoice = $stmt->fetch();
+            if (!$invoice) {
+                throw new InvalidArgumentException('Invoice not found.');
+            }
+            if ($invoice['status'] !== 'paid') {
+                throw new InvalidArgumentException('Only paid invoices can be refunded.');
+            }
+
+            $amount = isset($data['refund_amount']) && (float) $data['refund_amount'] > 0
+                ? min((float) $data['refund_amount'], (float) $invoice['total_amount'])
+                : (float) $invoice['total_amount'];
+
+            $this->db->prepare(
+                "INSERT INTO invoice_refunds (invoice_id, staff_id, pos_session_id, refund_amount, reason, status, created_at)
+                 VALUES (:invoice_id, :staff_id, :pos_session_id, :refund_amount, :reason, 'approved', NOW())"
+            )->execute([
+                'invoice_id' => $invoiceId,
+                'staff_id' => $staffId,
+                'pos_session_id' => $posSessionId,
+                'refund_amount' => $amount,
+                'reason' => $reason,
+            ]);
+            $refundId = (int) $this->db->lastInsertId();
+
+            $this->db->prepare("UPDATE invoices SET status = 'refunded' WHERE id = :id")->execute(['id' => $invoiceId]);
+            $this->db->prepare("UPDATE payments SET status = 'refunded' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
+            $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
+
+            if (!empty($invoice['customer_id'])) {
+                $points = (int) $invoice['points_earned'];
+                if ($points > 0) {
+                    $this->db->prepare(
+                        "INSERT INTO loyalty_point_transactions (customer_id, invoice_id, transaction_type, points, description, created_at)
+                         VALUES (:customer_id, :invoice_id, 'adjust', :points, :description, NOW())"
+                    )->execute([
+                        'customer_id' => (int) $invoice['customer_id'],
+                        'invoice_id' => $invoiceId,
+                        'points' => -$points,
+                        'description' => 'Refund adjustment for invoice #' . $invoiceId,
+                    ]);
+                }
+                $this->db->prepare(
+                    "UPDATE customers
+                     SET current_points = GREATEST(current_points - :points, 0),
+                         total_spending = GREATEST(total_spending - :amount, 0)
+                     WHERE id = :customer_id"
+                )->execute([
+                    'points' => $points,
+                    'amount' => $amount,
+                    'customer_id' => (int) $invoice['customer_id'],
+                ]);
+                $this->upgradeTier((int) $invoice['customer_id']);
+            }
+
+            if ($posSessionId) {
+                (new PosSession())->logFromPayload($data, 'invoice_refund', [
+                    'entity_type' => 'invoice_refund',
+                    'entity_id' => $refundId,
+                    'amount' => $amount,
+                    'status_to' => 'refunded',
+                    'note' => $reason,
+                ]);
+            }
+
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => $staffId,
+                'action' => 'invoice_refund',
+                'entity_type' => 'invoice',
+                'entity_id' => $invoiceId,
+                'metadata' => ['refund_amount' => $amount, 'reason' => $reason],
+            ]);
+
+            $this->db->commit();
+            return ['refund_id' => $refundId, 'invoice' => $this->receipt($invoiceId)];
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
+    public function receipt(int $invoiceId): array
+    {
+        if ($invoiceId <= 0) {
+            throw new InvalidArgumentException('Invoice id is required.');
+        }
+
+        $stmt = $this->db->prepare(
+            "SELECT i.*, b.branch_name, b.address AS branch_address, s.staff_name,
+                    c.customer_name, c.phone_number, c.email,
+                    wo.fulfillment_type, wo.order_status, wo.delivery_address, wo.customer_note, wo.requested_at
+             FROM invoices i
+             JOIN branches b ON b.id = i.branch_id
+             JOIN staff s ON s.id = i.staff_id
+             LEFT JOIN customers c ON c.id = i.customer_id
+             LEFT JOIN website_orders wo ON wo.invoice_id = i.id
+             WHERE i.id = :id
+             LIMIT 1"
+        );
+        $stmt->execute(['id' => $invoiceId]);
+        $invoice = $stmt->fetch();
+        if (!$invoice) {
+            throw new InvalidArgumentException('Invoice not found.');
+        }
+
+        $items = $this->db->prepare(
+            "SELECT idt.*, p.product_name
+             FROM invoice_details idt
+             JOIN products p ON p.id = idt.product_id
+             WHERE idt.invoice_id = :invoice_id
+             ORDER BY idt.id"
+        );
+        $items->execute(['invoice_id' => $invoiceId]);
+
+        $payments = $this->db->prepare("SELECT * FROM payments WHERE invoice_id = :invoice_id ORDER BY id");
+        $payments->execute(['invoice_id' => $invoiceId]);
+
+        $refunds = $this->db->prepare("SELECT * FROM invoice_refunds WHERE invoice_id = :invoice_id ORDER BY created_at DESC");
+        $refunds->execute(['invoice_id' => $invoiceId]);
+
+        return [
+            'invoice' => $invoice,
+            'items' => $items->fetchAll(),
+            'payments' => $payments->fetchAll(),
+            'refunds' => $refunds->fetchAll(),
+        ];
+    }
+
+    public function logReceiptPrint(array $data): array
+    {
+        $invoiceId = (int) ($data['invoice_id'] ?? 0);
+        if ($invoiceId <= 0) {
+            throw new InvalidArgumentException('Invoice id is required.');
+        }
+
+        $type = in_array(($data['receipt_type'] ?? 'html'), ['html', 'pdf', 'thermal'], true) ? $data['receipt_type'] : 'html';
+        $staffId = isset($data['staff_id']) && (int) $data['staff_id'] > 0 ? (int) $data['staff_id'] : null;
+        $posSessionId = isset($data['pos_session_id']) && (int) $data['pos_session_id'] > 0 ? (int) $data['pos_session_id'] : null;
+
+        $this->db->prepare(
+            "INSERT INTO receipt_print_logs (invoice_id, staff_id, pos_session_id, receipt_type, note)
+             VALUES (:invoice_id, :staff_id, :pos_session_id, :receipt_type, :note)"
+        )->execute([
+            'invoice_id' => $invoiceId,
+            'staff_id' => $staffId,
+            'pos_session_id' => $posSessionId,
+            'receipt_type' => $type,
+            'note' => trim((string) ($data['note'] ?? '')) ?: null,
+        ]);
+
+        (new AuditLog())->record([
+            'actor_type' => $staffId ? 'staff' : 'system',
+            'actor_id' => $staffId,
+            'action' => 'receipt_print',
+            'entity_type' => 'invoice',
+            'entity_id' => $invoiceId,
+            'metadata' => ['receipt_type' => $type],
+        ]);
+
+        return ['print_log_id' => (int) $this->db->lastInsertId(), 'receipt' => $this->receipt($invoiceId)];
     }
 
     private function customerForUpdate(int $customerId): array
@@ -234,6 +451,16 @@ final class Invoice extends Model
         $timestamp = trim($value) !== '' ? strtotime($value) : false;
         if ($timestamp === false) {
             return date('Y-m-d H:i:s');
+        }
+
+        return date('Y-m-d H:i:s', $timestamp);
+    }
+
+    private function dateTimeOrNull(string $value): ?string
+    {
+        $timestamp = trim($value) !== '' ? strtotime($value) : false;
+        if ($timestamp === false) {
+            return null;
         }
 
         return date('Y-m-d H:i:s', $timestamp);

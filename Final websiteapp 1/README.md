@@ -11,6 +11,9 @@
 - `app/Views/website`: trang chủ, menu, login, register, forgot/reset password, hồ sơ, checkout, member portal.
 - `app/Views/pos`: đăng nhập POS và trang module POS.
 - `database/cafe_connect_schema.sql`: schema + sample data cho Website + POS roles.
+- `database/migrations`: migration bổ sung cho audit, CSRF/lockout support, website order, refund, receipt, recipe/BOM.
+- `database/seeders`: sample seed riêng cho recipe, unit cost và website order status.
+- `storage/logs/app.log`: nơi ghi lỗi backend an toàn cho API.
 
 ## Cách chạy bằng XAMPP
 
@@ -79,6 +82,14 @@ POS đăng nhập bằng tài khoản nhân viên riêng, sau đó nhập PIN ri
 
 Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho các API ghi dữ liệu nhạy cảm như `customer-create`, `create-order`, `update-order-item`, `checkout-order`, `create-campaign`, `stock-movement`, `cash-transaction`, `product-save`, `staff-save`, `reports`.
 
+## Bảo mật và audit
+
+- Mọi API ghi dữ liệu cần header `X-CSRF-Token`. Layout PHP inject token vào `window.CAFE_CSRF_TOKEN`, và `assets/js/app.js` tự động gửi token này khi gọi API.
+- Endpoint đọc dữ liệu như `member-session`, `member-lookup`, `dashboard`, `inventory`, `reports`, `receipt` được phép bỏ qua CSRF.
+- Login member, login staff POS và PIN mở ca có lockout bằng DB trong bảng `auth_lockouts`; sai quá ngưỡng sẽ bị khóa tạm 15 phút.
+- Bảng `audit_logs` ghi các hành động quan trọng: login/logout, register, update profile, đổi/reset password, checkout, refund, receipt print, void/cancel order, product/staff/cash/inventory.
+- Lỗi backend bất ngờ được ghi vào `storage/logs/app.log`; API chỉ trả thông báo an toàn thay vì stack trace nội bộ.
+
 ## Phiên làm việc POS
 
 - Khi đăng nhập đúng tài khoản ở `/pos/login`, API `pos-auth-login` tạo một dòng `staff_login_sessions` trạng thái `active`.
@@ -90,6 +101,13 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 - Bảng `pos_activity_logs` lưu thao tác quan trọng theo role: waiter tạo order, barista cập nhật bếp, cashier checkout/thu chi, marketing tạo campaign, manager/admin sửa sản phẩm/nhân viên/kho.
 - `/pos/reports` có phần `Phiên làm việc POS` để xem thời lượng ca, doanh thu, số bill, số order, số món pha, thu/chi và log chính theo session.
 
+## Nghiệp vụ vận hành mới
+
+- Website checkout có hình thức nhận hàng, địa chỉ giao hàng, thời gian nhận dự kiến và ghi chú; dữ liệu lưu vào `website_orders`.
+- POS/manager có API nền cho `refund-invoice`, `void-order-item`, `cancel-order`, `order-status-update`, `receipt`, `receipt-print-log`, `checkout-closing`.
+- Inventory có recipe/BOM qua `recipes` và `recipe_items`; khi invoice paid, hệ thống tự tạo stock movement `sales_export` và trừ nguyên liệu từ `inventory_materials`.
+- Report có gross margin/COGS cơ bản và `reports-export` trả CSV để nghiệm thu.
+
 ## Dữ liệu demo
 
 - Tra thành viên `0900000001`: Nguyen An, Gold member, có voucher khả dụng và lịch sử website order.
@@ -100,13 +118,13 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 
 ## API
 
-Gọi `POST api.php?endpoint=...` với JSON body. Response thống nhất:
+Gọi `POST api.php?endpoint=...` với JSON body. API ghi dữ liệu cần thêm header `X-CSRF-Token`. Response thống nhất:
 
 ```json
 { "ok": true, "data": {}, "message": "" }
 ```
 
-Endpoint chính: `member-login`, `member-register`, `member-logout`, `member-profile-update`, `member-change-password`, `member-forgot-password`, `member-reset-password`, `member-lookup`, `customer-create`, `checkout`, `create-order`, `update-order-item`, `dashboard`, `create-campaign`, `stock-movement`.
+Endpoint chính: `csrf-refresh`, `member-login`, `member-register`, `member-logout`, `member-profile-update`, `member-change-password`, `member-forgot-password`, `member-reset-password`, `member-lookup`, `customer-create`, `checkout`, `create-order`, `update-order-item`, `void-order-item`, `cancel-order`, `refund-invoice`, `receipt`, `receipt-print-log`, `dashboard`, `create-campaign`, `stock-movement`, `reports-export`.
 
 - `member-login`: `{ "identity": "0900000001", "password": "123456" }`.
 - `member-register`: `{ "customer_name": "...", "phone_number": "...", "email": "...", "password": "123456", "password_confirm": "123456" }`.
@@ -127,7 +145,7 @@ Sau khi chạy `install.php`, có thể chạy smoke test API bằng PowerShell:
 powershell -ExecutionPolicy Bypass -File "tests/smoke_api.ps1"
 ```
 
-Script sẽ tạo member mới, login POS session cho cashier/waiter/barista/manager, checkout, tạo order bàn, cập nhật kitchen item, gọi dashboard/report rồi logout các session. Chạy lại `install.php` nếu muốn reset sample data sạch.
+Script sẽ lấy CSRF token, kiểm tra thiếu CSRF bị chặn, tạo member mới, website checkout, login POS session cho cashier/waiter/barista/manager, checkout, in receipt, tạo order bàn, cập nhật kitchen item, void item, refund invoice, gọi dashboard/report/export rồi logout các session. Chạy lại `install.php` nếu muốn reset sample data sạch.
 
 ## Audit hoan thien
 
@@ -148,5 +166,23 @@ Script nay se lint PHP, check JS, dam bao MySQL dang chay, reset database mau, c
 - Mat khau member, mat khau staff va PIN POS duoc luu bang `password_hash()`.
 - PHP session dung cookie `HttpOnly`, `SameSite=Lax` va `Secure` khi chay HTTPS.
 - Session id duoc regenerate sau login/register/adopt/logout/reset password.
-- Cac diem auth nhay cam co rate limit co ban: member login/register/forgot/reset, POS staff login va PIN mo ca.
+- Cac diem auth nhay cam co rate limit co ban va DB lockout: member login/register/forgot/reset, POS staff login va PIN mo ca.
+- Cac API ghi du lieu co CSRF header `X-CSRF-Token`.
+- Audit log dung chung duoc luu trong `audit_logs`; loi he thong ghi vao `storage/logs/app.log`.
 - Cac API POS ghi du lieu van bat buoc `staff_id`, role hop le, `pos_session_id` va `session_token`.
+
+## Role matrix POS chuan hoa
+
+Quyen POS hien duoc khai bao tap trung trong `app/Core/RolePolicy.php` va duoc dung chung cho backend API, du lieu `pos-bootstrap` va nav frontend.
+
+| Role | Module duoc xem | Thao tac chinh | API chinh |
+| --- | --- | --- | --- |
+| `waiter` | `orders`, `kitchen` | Tao order ban, gui mon xuong bep, danh dau mon `ready -> served`, void mon chua ready/served co ly do | `orders`, `create-order`, `update-order-item`, `void-order-item` |
+| `barista` | `kitchen` | Xem kitchen queue, chuyen mon `waiting/preparing -> preparing/ready` | `kitchen`, `update-order-item` |
+| `cashier` | `checkout`, `orders`, `customers`, `cash` | Ban hang tai quay, checkout service order, lookup/tao khach, ap voucher, thu chi, xem/in receipt | `checkout`, `checkout-order`, `customer-create`, `cash-transaction`, `receipt` |
+| `marketing` | `customers`, `campaigns` | CRM, campaign/voucher/newsletter, xem hieu qua campaign | `customer-create`, `campaigns`, `create-campaign` |
+| `manager` | `dashboard`, `reports`, `inventory`, `products`, `campaigns`, `cash`, `orders`, `kitchen` | Bao cao, kho, san pham, refund invoice, cancel order, void override, export CSV | `dashboard`, `reports`, `reports-export`, `inventory`, `product-save`, `refund-invoice`, `cancel-order` |
+| `owner` | Nhu manager + `staff` | Van hanh va nhan su | Toan bo API quan ly, gom `staff-save` |
+| `admin` | Toan quyen POS | Quan tri he thong, nhan su, du lieu van hanh | Toan bo API POS noi bo |
+
+API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `inventory`, `reports`, `reports-export`, `receipt`, `checkout`, `checkout-order`, `refund-invoice`, `void-order-item`, `cancel-order`, `stock-movement`, `cash-transaction`, `product-save`, `staff-save` deu bat buoc `staff_id`, `pos_session_id`, `session_token` va role hop le.

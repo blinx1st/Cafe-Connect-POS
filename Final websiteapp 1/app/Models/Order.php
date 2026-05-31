@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Core\RolePolicy;
 use App\Core\Model;
 use InvalidArgumentException;
 
@@ -28,7 +29,7 @@ final class Order extends Model
                     t.table_name, b.branch_name,
                     COALESCE(c.customer_name, 'Khách lẻ') AS customer_name,
                     COALESCE(s.staff_name, 'Chưa gán') AS waiter_name,
-                    SUM(soi.line_total) AS subtotal_amount
+                    SUM(CASE WHEN soi.kitchen_status <> 'cancelled' THEN soi.line_total ELSE 0 END) AS subtotal_amount
              FROM service_orders so
              JOIN dining_tables t ON t.id = so.table_id
              JOIN branches b ON b.id = so.branch_id
@@ -171,6 +172,10 @@ final class Order extends Model
             if (!$item) {
                 throw new InvalidArgumentException('Service order item not found.');
             }
+            $role = (string) ($data['staff_role'] ?? '');
+            if (!RolePolicy::canTransitionKitchenStatus($role, (string) $item['kitchen_status'], $status)) {
+                throw new InvalidArgumentException('Role is not allowed to update item from ' . $item['kitchen_status'] . ' to ' . $status . '.');
+            }
 
             $set = ['kitchen_status = :status'];
             $params = ['status' => $status, 'id' => $itemId];
@@ -213,6 +218,170 @@ final class Order extends Model
         } catch (\Throwable $exception) {
             $this->db->rollBack();
             throw $exception;
+        }
+
+        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+    }
+
+    public function voidItem(array $data): array
+    {
+        $itemId = (int) ($data['item_id'] ?? 0);
+        $reason = trim((string) ($data['reason'] ?? ''));
+        if ($itemId <= 0 || $reason === '') {
+            throw new InvalidArgumentException('Void item requires item_id and reason.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT soi.id, soi.service_order_id, soi.product_id, soi.quantity, soi.line_total,
+                        soi.kitchen_status, p.product_name, so.order_code
+                 FROM service_order_items soi
+                 JOIN products p ON p.id = soi.product_id
+                 JOIN service_orders so ON so.id = soi.service_order_id
+                 WHERE soi.id = :id
+                 FOR UPDATE"
+            );
+            $stmt->execute(['id' => $itemId]);
+            $item = $stmt->fetch();
+            if (!$item) {
+                throw new InvalidArgumentException('Service order item not found.');
+            }
+            $role = (string) ($data['staff_role'] ?? '');
+            if (!RolePolicy::canVoidItem($role, (string) $item['kitchen_status'])) {
+                throw new InvalidArgumentException('Role is not allowed to void this item status.');
+            }
+
+            $this->db->prepare(
+                "UPDATE service_order_items
+                 SET kitchen_status = 'cancelled',
+                     note = TRIM(CONCAT(COALESCE(note, ''), ' Cancelled: ', :reason))
+                 WHERE id = :id"
+            )->execute(['reason' => $reason, 'id' => $itemId]);
+
+            $this->syncOrderStatus((int) $item['service_order_id']);
+            (new PosSession())->logFromPayload($data, 'order_item_void', [
+                'entity_type' => 'service_order_item',
+                'entity_id' => $itemId,
+                'product_id' => (int) $item['product_id'],
+                'quantity' => (int) $item['quantity'],
+                'amount' => (float) $item['line_total'],
+                'status_from' => (string) $item['kitchen_status'],
+                'status_to' => 'cancelled',
+                'note' => $item['order_code'] . ' - ' . $reason,
+            ]);
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => (int) ($data['staff_id'] ?? 0),
+                'action' => 'order_item_void',
+                'entity_type' => 'service_order_item',
+                'entity_id' => $itemId,
+                'metadata' => ['reason' => $reason],
+            ]);
+            $this->db->commit();
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+
+        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+    }
+
+    public function cancel(array $data): array
+    {
+        $orderId = (int) ($data['order_id'] ?? 0);
+        $reason = trim((string) ($data['reason'] ?? ''));
+        if ($orderId <= 0 || $reason === '') {
+            throw new InvalidArgumentException('Cancel order requires order_id and reason.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $order = $this->find($orderId);
+            if (!$order) {
+                throw new InvalidArgumentException('Service order not found.');
+            }
+            if (in_array($order['status'], ['paid', 'cancelled'], true)) {
+                throw new InvalidArgumentException('Paid or cancelled orders cannot be cancelled.');
+            }
+
+            $this->db->prepare(
+                "UPDATE service_orders
+                 SET status = 'cancelled',
+                     note = TRIM(CONCAT(COALESCE(note, ''), ' Cancelled: ', :reason))
+                 WHERE id = :id"
+            )->execute(['reason' => $reason, 'id' => $orderId]);
+            $this->db->prepare(
+                "UPDATE service_order_items
+                 SET kitchen_status = 'cancelled'
+                 WHERE service_order_id = :order_id AND kitchen_status <> 'served'"
+            )->execute(['order_id' => $orderId]);
+            $this->db->prepare("UPDATE dining_tables SET status = 'available' WHERE id = :id")
+                ->execute(['id' => (int) $order['table_id']]);
+
+            (new PosSession())->logFromPayload($data, 'order_cancel', [
+                'entity_type' => 'service_order',
+                'entity_id' => $orderId,
+                'amount' => array_sum(array_map(static fn ($item) => (float) $item['line_total'], $order['items'] ?? [])),
+                'status_from' => (string) $order['status'],
+                'status_to' => 'cancelled',
+                'note' => $reason,
+            ]);
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => (int) ($data['staff_id'] ?? 0),
+                'action' => 'order_cancel',
+                'entity_type' => 'service_order',
+                'entity_id' => $orderId,
+                'metadata' => ['reason' => $reason],
+            ]);
+            $this->db->commit();
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+
+        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+    }
+
+    public function updateOrderStatus(array $data): array
+    {
+        $status = (string) ($data['status'] ?? '');
+        if (!in_array($status, ['pending', 'paid', 'preparing', 'ready', 'delivering', 'completed', 'cancelled'], true)) {
+            throw new InvalidArgumentException('Invalid order status.');
+        }
+
+        if (!empty($data['website_order_id']) || !empty($data['invoice_id'])) {
+            $where = !empty($data['website_order_id']) ? 'id = :id' : 'invoice_id = :id';
+            $id = (int) ($data['website_order_id'] ?? $data['invoice_id']);
+            $this->db->prepare("UPDATE website_orders SET order_status = :status WHERE $where")
+                ->execute(['status' => $status, 'id' => $id]);
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => (int) ($data['staff_id'] ?? 0),
+                'action' => 'website_order_status_update',
+                'entity_type' => !empty($data['website_order_id']) ? 'website_order' : 'invoice',
+                'entity_id' => $id,
+                'metadata' => ['status' => $status],
+            ]);
+
+            return ['updated' => true];
+        }
+
+        $orderId = (int) ($data['order_id'] ?? 0);
+        if ($orderId <= 0 || !in_array($status, ['preparing', 'ready', 'served', 'cancelled'], true)) {
+            throw new InvalidArgumentException('Invalid service order status.');
+        }
+
+        $this->db->prepare("UPDATE service_orders SET status = :status WHERE id = :id")
+            ->execute(['status' => $status, 'id' => $orderId]);
+        if ($status === 'cancelled') {
+            $this->db->prepare(
+                "UPDATE dining_tables t
+                 JOIN service_orders so ON so.table_id = t.id
+                 SET t.status = 'available'
+                 WHERE so.id = :id"
+            )->execute(['id' => $orderId]);
         }
 
         return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
@@ -271,6 +440,7 @@ final class Order extends Model
                 SUM(kitchen_status = 'preparing') AS preparing_count,
                 SUM(kitchen_status = 'ready') AS ready_count,
                 SUM(kitchen_status = 'served') AS served_count,
+                SUM(kitchen_status <> 'cancelled') AS active_count,
                 COUNT(*) AS total_count
              FROM service_order_items
              WHERE service_order_id = :order_id"
@@ -279,13 +449,23 @@ final class Order extends Model
         $row = $stmt->fetch();
 
         $status = 'preparing';
-        if ((int) $row['served_count'] === (int) $row['total_count']) {
+        if ((int) $row['active_count'] === 0) {
+            $status = 'cancelled';
+        } elseif ((int) $row['served_count'] === (int) $row['active_count']) {
             $status = 'served';
-        } elseif ((int) $row['ready_count'] + (int) $row['served_count'] === (int) $row['total_count']) {
+        } elseif ((int) $row['ready_count'] + (int) $row['served_count'] === (int) $row['active_count']) {
             $status = 'ready';
         }
 
         $this->db->prepare("UPDATE service_orders SET status = :status WHERE id = :id")
             ->execute(['status' => $status, 'id' => $orderId]);
+        if ($status === 'cancelled') {
+            $this->db->prepare(
+                "UPDATE dining_tables t
+                 JOIN service_orders so ON so.table_id = t.id
+                 SET t.status = 'available'
+                 WHERE so.id = :id"
+            )->execute(['id' => $orderId]);
+        }
     }
 }

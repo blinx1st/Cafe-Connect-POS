@@ -19,7 +19,7 @@ const roleLabels = {
   admin: "Admin",
 };
 
-const posModules = [
+const fallbackPosModules = [
   { id: "checkout", label: "POS bán hàng", roles: ["cashier", "manager", "owner", "admin"] },
   { id: "orders", label: "Bàn & order", roles: ["waiter", "cashier", "manager", "owner", "admin"] },
   { id: "kitchen", label: "Bếp pha chế", roles: ["barista", "manager", "owner", "admin"] },
@@ -32,6 +32,10 @@ const posModules = [
   { id: "staff", label: "Nhân viên", roles: ["owner", "admin"] },
   { id: "cash", label: "Thu chi", roles: ["cashier", "manager", "owner", "admin"] },
 ];
+
+const posModules = Array.isArray(cafeApp.permissions?.modules) && cafeApp.permissions.modules.length
+  ? cafeApp.permissions.modules
+  : fallbackPosModules;
 
 const state = {
   site: {
@@ -465,12 +469,20 @@ async function api(endpoint, payload = {}) {
     }
   }
 
+  const headers = { "Content-Type": "application/json" };
+  if (window.CAFE_CSRF_TOKEN) {
+    headers["X-CSRF-Token"] = window.CAFE_CSRF_TOKEN;
+  }
+
   const response = await fetch(`${apiBase}?endpoint=${encodeURIComponent(clean)}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(requestPayload),
   });
   const json = await response.json();
+  if (json?.data?.csrf_token) {
+    window.CAFE_CSRF_TOKEN = json.data.csrf_token;
+  }
   if (!json.ok) {
     throw new Error(json.message || "API request failed.");
   }
@@ -496,6 +508,38 @@ function tableHtml(rows, headers, mapper, emptyText = "Chưa có dữ liệu.") 
 
 function cartFor(scope) {
   return state[scope].cart;
+}
+
+function downloadTextFile(filename, text) {
+  const blob = new Blob([text], { type: "text/csv;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  URL.revokeObjectURL(link.href);
+  link.remove();
+}
+
+function showReceiptDialog(receipt) {
+  const invoice = receipt.invoice || {};
+  const items = receipt.items || [];
+  document.querySelector("[data-receipt-dialog]")?.remove();
+  const dialog = document.createElement("div");
+  dialog.className = "receipt-dialog";
+  dialog.dataset.receiptDialog = "true";
+  dialog.innerHTML = `
+    <div class="receipt-box">
+      <button type="button" class="receipt-close" data-receipt-close>x</button>
+      <p class="eyebrow">Cafe Connect Receipt</p>
+      <h2>Hoa don #${escapeHtml(invoice.id || "")}</h2>
+      <p>${escapeHtml(invoice.branch_name || "")} - ${escapeHtml(formatDateTime(invoice.paid_at || invoice.invoice_date || ""))}</p>
+      ${tableHtml(items, ["Mon", "SL", "Gia", "Tong"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
+      <div class="totals"><p><span>Tong</span><strong>${formatMoney(invoice.total_amount)}</strong></p></div>
+      <button type="button" class="primary-btn full" data-receipt-print="${escapeHtml(invoice.id || "")}">In receipt</button>
+    </div>
+  `;
+  document.body.appendChild(dialog);
 }
 
 function persistCart(scope) {
@@ -931,6 +975,15 @@ async function checkoutScope(scope, extraPayload = {}) {
     items: cart,
     ...extraPayload,
   };
+  if (scope === "site") {
+    payload.fulfillment_type = document.querySelector("[data-site-fulfillment]")?.value || "pickup";
+    payload.delivery_address = document.querySelector("[data-site-delivery-address]")?.value?.trim() || "";
+    payload.customer_note = document.querySelector("[data-site-customer-note]")?.value?.trim() || "";
+    const requestedAt = document.querySelector("[data-site-requested-at]")?.value || "";
+    if (requestedAt) {
+      payload.requested_at = requestedAt.replace("T", " ") + ":00";
+    }
+  }
   if (scope === "pos" && !extraPayload.order_id) {
     payload.bill_started_at = state.pos.billStartedAt || sqlNow();
   }
@@ -951,12 +1004,49 @@ async function checkoutScope(scope, extraPayload = {}) {
   renderVoucherOptions(scope);
   renderMiniMember(scope);
   showToast(`Thanh toán thành công hóa đơn #${result.invoice_id}, tổng ${formatMoney(result.total_amount)}.`);
+  if (scope === "pos" && result.invoice_id) {
+    try {
+      showReceiptDialog(await api("receipt", { invoice_id: result.invoice_id }));
+    } catch {}
+  }
   if (section === "pos") await refreshPosData(false);
 }
 
 function allowedModules(user = state.pos.user) {
   if (!user) return [];
   return posModules.filter((module) => module.roles.includes(user.staff_role));
+}
+
+function overrideRoles() {
+  return Array.isArray(cafeApp.permissions?.override_roles) ? cafeApp.permissions.override_roles : ["manager", "owner", "admin"];
+}
+
+function isOverrideRole(role = state.pos.user?.staff_role) {
+  return overrideRoles().includes(role);
+}
+
+function canAccessModule(moduleId, role = state.pos.user?.staff_role) {
+  const module = posModules.find((item) => item.id === moduleId);
+  return Boolean(module && role && module.roles.includes(role));
+}
+
+function canCreateServiceOrder(role = state.pos.user?.staff_role) {
+  return role === "waiter" || isOverrideRole(role);
+}
+
+function canCheckoutServiceOrder(role = state.pos.user?.staff_role) {
+  return ["cashier", "manager", "owner", "admin"].includes(role);
+}
+
+function kitchenActionsForRole(status, role = state.pos.user?.staff_role) {
+  if (isOverrideRole(role)) return ["preparing", "ready", "served"];
+  if (role === "barista") {
+    return status === "waiting" || status === "preparing" ? ["preparing", "ready"] : [];
+  }
+  if (role === "waiter") {
+    return status === "ready" ? ["served"] : [];
+  }
+  return [];
 }
 
 function currentModule() {
@@ -1071,6 +1161,11 @@ function renderPosApp() {
 
   const module = currentModule();
   if (!module.roles.includes(state.pos.user.staff_role)) {
+    const firstAllowed = allowedModules()[0];
+    if (firstAllowed && firstAllowed.id !== state.pos.activeModule) {
+      window.location.href = url(`pos/${firstAllowed.id}`);
+      return;
+    }
     root.innerHTML = renderPosShell(`
       <section class="panel">
         <h2>Không có quyền truy cập</h2>
@@ -1082,6 +1177,7 @@ function renderPosApp() {
 
   root.innerHTML = renderPosShell(renderModule(module.id));
   afterModuleRender(module.id);
+  applyPosActionPolicy();
 }
 
 function renderModule(moduleId) {
@@ -1098,6 +1194,17 @@ function renderModule(moduleId) {
     staff: renderStaffModule,
     cash: renderCashModule,
   }[moduleId]?.() || '<div class="empty-state">Module chưa khả dụng.</div>';
+}
+
+function applyPosActionPolicy() {
+  const role = state.pos.user?.staff_role || "";
+  document.querySelectorAll(".kitchen-card [data-update-item][data-status]").forEach((button) => {
+    const card = button.closest(".kitchen-card");
+    const from = ["waiting", "preparing", "ready", "served"].find((status) => card?.classList.contains(status)) || "";
+    if (!kitchenActionsForRole(from, role).includes(button.dataset.status || "")) {
+      button.remove();
+    }
+  });
 }
 
 function afterModuleRender(moduleId) {
@@ -1156,6 +1263,11 @@ function renderCheckoutModule() {
 function renderOrdersModule() {
   const tables = cafeApp.tables || [];
   const orders = cafeApp.orders || [];
+  const role = state.pos.user?.staff_role || "";
+  const canCreate = canCreateServiceOrder(role);
+  const canCheckout = canCheckoutServiceOrder(role);
+  const canVoid = role === "waiter" || isOverrideRole(role);
+  const canCancel = isOverrideRole(role);
   if (!state.pos.tableId && tables.length) state.pos.tableId = String(tables[0].id);
 
   const tableCards = tables.map((table) => `
@@ -1179,17 +1291,35 @@ function renderOrdersModule() {
             <span>${Number(item.quantity)}× ${escapeHtml(item.product_name)}</span>
             <small>${escapeHtml(item.kitchen_status)}</small>
             <div class="mini-actions">
-              ${["preparing", "ready", "served"].map((status) => `<button type="button" data-update-item="${item.id}" data-status="${status}">${escapeHtml(status)}</button>`).join("")}
+              ${kitchenActionsForRole(item.kitchen_status, role).map((status) => `<button type="button" data-update-item="${item.id}" data-status="${status}">${escapeHtml(status)}</button>`).join("")}
+              ${canVoid && item.kitchen_status !== "cancelled" ? `<button type="button" data-void-item="${item.id}">Void</button>` : ""}
             </div>
           </div>
         `).join("")}
       </div>
       <footer>
         <strong>${formatMoney(order.subtotal_amount)}</strong>
-        <button type="button" class="primary-btn" data-order-checkout="${order.id}">Thanh toán</button>
+        ${canCheckout ? `<button type="button" class="primary-btn" data-order-checkout="${order.id}">Thanh toán</button>` : ""}
+        ${canCancel ? `<button type="button" class="ghost-btn" data-cancel-order="${order.id}">Huy order</button>` : ""}
       </footer>
     </article>
   `).join("");
+
+  if (!canCreate) {
+    return `
+      <section class="panel">
+        <div class="panel-head"><h2>Order dang mo</h2><p>${canCheckout ? "Thu ngan xem order de thanh toan." : "Role nay chi duoc xem order theo quyen duoc cap."}</p></div>
+        ${canCheckout ? `<label class="field order-payment">Thanh toan
+          <select data-pos-payment>
+            <option value="cash">Tien mat</option>
+            <option value="card">The</option>
+            <option value="e_wallet">Vi dien tu</option>
+          </select>
+        </label>` : ""}
+        <div class="order-list">${orderCards || '<div class="empty-state">Khong co order dang mo.</div>'}</div>
+      </section>
+    `;
+  }
 
   return `
     <div class="admin-grid">
@@ -1214,7 +1344,7 @@ function renderOrdersModule() {
       ${productPickerHtml("Thêm món vào order")}
       <section class="panel">
         <div class="panel-head"><h2>Order đang mở</h2><p>Thu ngân có thể checkout order đã phục vụ.</p></div>
-        <label class="field order-payment">Thanh toán
+        <label class="field order-payment" ${canCheckout ? "" : "hidden"}>Thanh toán
           <select data-pos-payment>
             <option value="cash">Tiền mặt</option>
             <option value="card">Thẻ</option>
@@ -1229,6 +1359,7 @@ function renderOrdersModule() {
 
 function renderKitchenModule() {
   const queue = cafeApp.kitchen || [];
+  const role = state.pos.user?.staff_role || "";
   const cards = queue.map((item) => `
     <article class="kitchen-card ${escapeHtml(item.kitchen_status)}">
       <header>
@@ -1377,10 +1508,22 @@ function sessionReportsTable() {
 
 function renderReportsModule() {
   const reports = cafeApp.reports || {};
+  const recentInvoices = cafeApp.dashboard?.recent_invoices || [];
+  const invoiceActions = tableHtml(recentInvoices, ["HD", "Khach", "Kenh", "Tong", ""], (row) => `
+    <tr>
+      <td>#${row.id}</td>
+      <td>${escapeHtml(row.customer_name || "Khach le")}</td>
+      <td>${escapeHtml(row.sales_channel || "")}</td>
+      <td>${formatMoney(row.total_amount)}</td>
+      <td><button type="button" data-receipt-invoice="${row.id}">Receipt</button>${isOverrideRole() ? `<button type="button" data-refund-invoice="${row.id}">Refund</button>` : ""}</td>
+    </tr>
+  `, "Chua co hoa don.");
   return `
     <div class="dashboard-columns">
+      <section class="panel span-2"><div class="panel-head"><h2>Report export</h2><button type="button" class="primary-btn" data-report-export>Export CSV</button></div></section>
       <section class="panel"><h2>Doanh thu theo kênh</h2>${tableHtml(reports.revenue_by_channel || [], ["Kênh", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.sales_channel)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
       <section class="panel"><h2>Hiệu suất nhân viên</h2>${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>`)}</section>
+      <section class="panel span-2"><h2>Hoa don gan nhat</h2>${invoiceActions}</section>
       <section class="panel span-2"><h2>Phien lam viec POS</h2>${sessionReportsTable()}</section>
       <section class="panel span-2"><h2>Thu chi gần nhất</h2>${cashTable()}</section>
     </div>
@@ -1405,7 +1548,7 @@ function renderProductsModule() {
   `;
 }
 
-function renderStaffModule() {
+function legacyRenderStaffModule() {
   const staff = cafeApp.staff || [];
   return `
     <div class="admin-grid">
@@ -1487,6 +1630,15 @@ function legacyRenderPosProducts() {
 async function refreshPosData(showMessage = true) {
   const data = await api("pos-bootstrap");
   Object.assign(cafeApp, data);
+  cafeApp.staff = data.staff || [];
+  cafeApp.tables = data.tables || [];
+  cafeApp.orders = data.orders || [];
+  cafeApp.kitchen = data.kitchen || [];
+  cafeApp.dashboard = data.dashboard || null;
+  cafeApp.campaigns = data.campaigns || [];
+  cafeApp.inventory = data.inventory || [];
+  cafeApp.reports = data.reports || {};
+  cafeApp.session_reports = data.session_reports || [];
   if (data.current_session && state.pos.user) {
     savePosUser({
       ...state.pos.user,
@@ -1933,7 +2085,14 @@ function wireEvents() {
     const remove = event.target.closest("[data-cart-scope][data-remove]");
     const tableCard = event.target.closest("[data-select-table]");
     const updateItem = event.target.closest("[data-update-item]");
+    const voidItem = event.target.closest("[data-void-item]");
+    const cancelOrder = event.target.closest("[data-cancel-order]");
     const orderCheckout = event.target.closest("[data-order-checkout]");
+    const receiptInvoice = event.target.closest("[data-receipt-invoice]");
+    const refundInvoice = event.target.closest("[data-refund-invoice]");
+    const reportExport = event.target.closest("[data-report-export]");
+    const receiptClose = event.target.closest("[data-receipt-close]");
+    const receiptPrint = event.target.closest("[data-receipt-print]");
     const favorite = event.target.closest("[data-favorite-product]");
     const editProduct = event.target.closest("[data-edit-product]");
     const editStaff = event.target.closest("[data-edit-staff]");
@@ -2007,6 +2166,7 @@ function wireEvents() {
     if (pinSubmit) {
       const auth = state.pos.auth;
       if (auth) {
+        let openedStaff = auth;
         try {
           const result = await api("pos-session-login", {
             staff_id: auth.id,
@@ -2015,6 +2175,7 @@ function wireEvents() {
             opening_cash_amount: auth.staff_role === "cashier" ? 1000000 : 0,
           });
           cafeApp.current_session = result.session || null;
+          openedStaff = result.staff || auth;
           savePosUser(result.staff || auth);
           state.pos.loginPin = "";
           state.pos.loginStaffId = "";
@@ -2026,7 +2187,7 @@ function wireEvents() {
           showToast(error.message);
           return;
         }
-        window.location.href = url("pos/checkout");
+        window.location.href = url(`pos/${allowedModules(openedStaff)[0]?.id || "checkout"}`);
       } else {
         showToast("Dang nhap tai khoan POS truoc khi mo ca.");
       }
@@ -2122,12 +2283,82 @@ function wireEvents() {
       }
       return;
     }
+    if (voidItem) {
+      const reason = window.prompt("Ly do void mon?");
+      if (!reason || !reason.trim()) return;
+      try {
+        const result = await api("void-order-item", { item_id: voidItem.dataset.voidItem, reason: reason.trim() });
+        updatePosCollections(result);
+        renderPosApp();
+        showToast("Da void mon.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (cancelOrder) {
+      const reason = window.prompt("Ly do huy order?");
+      if (!reason || !reason.trim()) return;
+      try {
+        const result = await api("cancel-order", { order_id: cancelOrder.dataset.cancelOrder, reason: reason.trim() });
+        updatePosCollections(result);
+        renderPosApp();
+        showToast("Da huy order.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
     if (orderCheckout) {
       try {
         await checkoutScope("pos", { order_id: Number(orderCheckout.dataset.orderCheckout), items: [], payment_method: document.querySelector("[data-pos-payment]")?.value || "cash" });
       } catch (error) {
         showToast(error.message);
       }
+      return;
+    }
+    if (receiptInvoice) {
+      try {
+        const receipt = await api("receipt", { invoice_id: receiptInvoice.dataset.receiptInvoice });
+        showReceiptDialog(receipt);
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (refundInvoice) {
+      const reason = window.prompt("Ly do hoan tien?");
+      if (!reason || !reason.trim()) return;
+      try {
+        await api("refund-invoice", { invoice_id: refundInvoice.dataset.refundInvoice, reason: reason.trim() });
+        await refreshPosData(false);
+        showToast("Da hoan tien hoa don.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (reportExport) {
+      try {
+        const result = await api("reports-export");
+        downloadTextFile(result.filename || "cafe-connect-report.csv", result.csv || "");
+        showToast("Da xuat CSV.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (receiptClose) {
+      document.querySelector("[data-receipt-dialog]")?.remove();
+      return;
+    }
+    if (receiptPrint) {
+      try {
+        await api("receipt-print-log", { invoice_id: receiptPrint.dataset.receiptPrint, receipt_type: "html" });
+      } catch (error) {
+        showToast(error.message);
+      }
+      window.print();
       return;
     }
     if (favorite) {
@@ -2481,6 +2712,9 @@ function initialRender() {
   adoptWebStaffFromPosAuth();
   if (section === "pos") {
     renderPosApp();
+    if (pageName !== "pos-login" && state.pos.user?.session_token) {
+      refreshPosData(false).catch((error) => showToast(error.message));
+    }
     startPosHeartbeat();
   }
 }

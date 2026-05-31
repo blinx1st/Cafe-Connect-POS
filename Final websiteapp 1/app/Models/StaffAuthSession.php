@@ -17,11 +17,14 @@ final class StaffAuthSession extends Model
         $identity = require_field($data, 'identity', 'Staff code, email or phone');
         $password = require_field($data, 'password', 'Password');
         $limitIdentity = RateLimiter::identity('pos-auth-login|' . $identity);
+        $lockout = new AuthLockout();
+        $lockout->assertAllowed('pos-auth-login', $identity);
         RateLimiter::hit('pos-auth-login', $limitIdentity, 8, 15 * 60);
 
         $staffModel = new Staff();
         $staff = $staffModel->verifyPassword($identity, $password);
         if (!$staff) {
+            $lockout->recordFailure('pos-auth-login', $identity);
             throw new InvalidArgumentException('Tai khoan POS hoac mat khau khong dung.');
         }
 
@@ -52,7 +55,16 @@ final class StaffAuthSession extends Model
             throw new InvalidArgumentException('Khong the tao phien dang nhap POS.');
         }
 
+        $lockout->clear('pos-auth-login', $identity);
         RateLimiter::clear('pos-auth-login', $limitIdentity);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) $staff['id'],
+            'actor_role' => (string) $staff['staff_role'],
+            'action' => 'staff_auth_login',
+            'entity_type' => 'staff_login_session',
+            'entity_id' => (int) $session['id'],
+        ]);
 
         return $this->payload($session);
     }
@@ -87,6 +99,15 @@ final class StaffAuthSession extends Model
              SET status = 'logged_out', logged_out_at = NOW(), last_seen_at = NOW()
              WHERE id = :id AND status = 'active'"
         )->execute(['id' => (int) $session['id']]);
+
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) $session['staff_id'],
+            'actor_role' => (string) $session['staff_role'],
+            'action' => 'staff_auth_logout',
+            'entity_type' => 'staff_login_session',
+            'entity_id' => (int) $session['id'],
+        ]);
 
         return [
             'auth_session' => $this->findById((int) $session['id']),

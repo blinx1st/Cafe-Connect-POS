@@ -6,6 +6,14 @@ USE cafe_connect_crm;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
+DROP TABLE IF EXISTS receipt_print_logs;
+DROP TABLE IF EXISTS invoice_refunds;
+DROP TABLE IF EXISTS recipe_items;
+DROP TABLE IF EXISTS recipes;
+DROP TABLE IF EXISTS website_orders;
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS auth_lockouts;
+DROP TABLE IF EXISTS schema_migrations;
 DROP TABLE IF EXISTS loyalty_point_transactions;
 DROP TABLE IF EXISTS cash_transactions;
 DROP TABLE IF EXISTS stock_movements;

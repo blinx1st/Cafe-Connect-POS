@@ -8,6 +8,8 @@ use App\Core\Controller;
 use App\Core\Mailer;
 use App\Core\RateLimiter;
 use App\Core\Session;
+use App\Models\AuditLog;
+use App\Models\AuthLockout;
 use App\Models\Customer;
 use App\Models\PosSession;
 use App\Models\Staff;
@@ -42,6 +44,8 @@ final class AuthController extends Controller
         $identity = require_field($payload, 'identity', 'Phone, email or staff code');
         $password = require_field($payload, 'password', 'Password');
         $limitIdentity = RateLimiter::identity('member-login|' . $identity);
+        $lockout = new AuthLockout();
+        $lockout->assertAllowed('member-login', $identity);
         RateLimiter::hit('member-login', $limitIdentity, 8, 15 * 60);
 
         $customerModel = new Customer();
@@ -68,9 +72,11 @@ final class AuthController extends Controller
         }
 
         if (($account['status'] ?? '') !== 'active') {
+            $lockout->recordFailure('member-login', $identity);
             throw new InvalidArgumentException('Tài khoản thành viên không hoạt động.');
         }
         if (empty($account['password_hash']) || !password_verify($password, (string) $account['password_hash'])) {
+            $lockout->recordFailure('member-login', $identity);
             throw new InvalidArgumentException('Mật khẩu không đúng.');
         }
 
@@ -81,9 +87,18 @@ final class AuthController extends Controller
         }
 
         $this->clearWebStaffSession();
+        $lockout->clear('member-login', $identity);
         RateLimiter::clear('member-login', $limitIdentity);
         Session::regenerate();
         Session::put('member_customer_id', (int) $member['id']);
+
+        (new AuditLog())->record([
+            'actor_type' => 'customer',
+            'actor_id' => (int) $member['id'],
+            'action' => 'member_login',
+            'entity_type' => 'customer',
+            'entity_id' => (int) $member['id'],
+        ]);
 
         return ['account_type' => 'customer', 'member' => $member, 'web_staff' => null];
     }
@@ -158,14 +173,42 @@ final class AuthController extends Controller
         Session::regenerate();
         Session::put('member_customer_id', (int) $member['id']);
 
+        (new AuditLog())->record([
+            'actor_type' => 'customer',
+            'actor_id' => (int) $member['id'],
+            'action' => 'member_register',
+            'entity_type' => 'customer',
+            'entity_id' => (int) $member['id'],
+        ]);
+
         return ['member' => $member, 'web_staff' => null];
     }
 
     public function memberLogout(): array
     {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        $staffId = (int) Session::get('web_staff_id', 0);
         $this->clearWebStaffSession();
         Session::forget('member_customer_id');
         Session::regenerate();
+
+        if ($customerId > 0) {
+            (new AuditLog())->record([
+                'actor_type' => 'customer',
+                'actor_id' => $customerId,
+                'action' => 'member_logout',
+                'entity_type' => 'customer',
+                'entity_id' => $customerId,
+            ]);
+        } elseif ($staffId > 0) {
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => $staffId,
+                'action' => 'staff_web_logout',
+                'entity_type' => 'staff',
+                'entity_id' => $staffId,
+            ]);
+        }
 
         return ['member' => null, 'web_staff' => null];
     }
@@ -175,12 +218,27 @@ final class AuthController extends Controller
         if ((int) Session::get('member_customer_id', 0) > 0) {
             $member = $this->currentMember();
             $updated = (new Customer())->updateProfile((int) $member['id'], $payload);
+            (new AuditLog())->record([
+                'actor_type' => 'customer',
+                'actor_id' => (int) $member['id'],
+                'action' => 'member_profile_update',
+                'entity_type' => 'customer',
+                'entity_id' => (int) $member['id'],
+            ]);
 
             return ['member' => $updated, 'web_staff' => null];
         }
 
         $staff = $this->currentStaffAccount();
         $updated = (new Staff())->updateProfile((int) $staff['id'], $payload);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) $staff['id'],
+            'actor_role' => (string) $staff['staff_role'],
+            'action' => 'staff_profile_update',
+            'entity_type' => 'staff',
+            'entity_id' => (int) $staff['id'],
+        ]);
 
         return ['member' => null, 'web_staff' => $updated];
     }
@@ -206,6 +264,13 @@ final class AuthController extends Controller
             }
 
             $customer->updatePassword((int) $member['id'], password_hash($newPassword, PASSWORD_DEFAULT));
+            (new AuditLog())->record([
+                'actor_type' => 'customer',
+                'actor_id' => (int) $member['id'],
+                'action' => 'member_change_password',
+                'entity_type' => 'customer',
+                'entity_id' => (int) $member['id'],
+            ]);
 
             return ['changed' => true, 'account_type' => 'customer'];
         }
@@ -218,6 +283,14 @@ final class AuthController extends Controller
         }
 
         $staffModel->updatePassword((int) $staff['id'], password_hash($newPassword, PASSWORD_DEFAULT));
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) $staff['id'],
+            'actor_role' => (string) $staff['staff_role'],
+            'action' => 'staff_change_password',
+            'entity_type' => 'staff',
+            'entity_id' => (int) $staff['id'],
+        ]);
 
         return ['changed' => true, 'account_type' => 'staff'];
     }
@@ -252,6 +325,13 @@ final class AuthController extends Controller
         );
 
         RateLimiter::clear('member-forgot-password', $limitIdentity);
+        (new AuditLog())->record([
+            'actor_type' => 'customer',
+            'actor_id' => (int) $account['id'],
+            'action' => 'member_forgot_password',
+            'entity_type' => 'customer',
+            'entity_id' => (int) $account['id'],
+        ]);
 
         return ['sent' => true, 'email' => $this->maskEmail((string) $account['email'])];
     }
@@ -282,6 +362,13 @@ final class AuthController extends Controller
         Session::forget('member_customer_id');
         RateLimiter::clear('member-reset-password', $limitIdentity);
         Session::regenerate();
+        (new AuditLog())->record([
+            'actor_type' => 'customer',
+            'actor_id' => (int) $reset['customer_id'],
+            'action' => 'member_reset_password',
+            'entity_type' => 'customer',
+            'entity_id' => (int) $reset['customer_id'],
+        ]);
 
         return ['reset' => true];
     }
