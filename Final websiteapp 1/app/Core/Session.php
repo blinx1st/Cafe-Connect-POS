@@ -9,8 +9,24 @@ final class Session
     public static function start(): void
     {
         if (session_status() !== PHP_SESSION_ACTIVE) {
+            session_name('CAFE_CONNECT_SESSID');
+            $params = session_get_cookie_params();
+            session_set_cookie_params([
+                'lifetime' => 0,
+                'path' => $params['path'] ?: '/',
+                'domain' => $params['domain'] ?: '',
+                'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+                'httponly' => true,
+                'samesite' => 'Lax',
+            ]);
             session_start();
         }
+    }
+
+    public static function regenerate(bool $deleteOldSession = true): void
+    {
+        self::start();
+        session_regenerate_id($deleteOldSession);
     }
 
     public static function get(string $key, mixed $default = null): mixed

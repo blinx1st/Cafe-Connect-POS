@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Core\RateLimiter;
 use App\Core\Model;
 use InvalidArgumentException;
 
@@ -15,6 +16,8 @@ final class StaffAuthSession extends Model
     {
         $identity = require_field($data, 'identity', 'Staff code, email or phone');
         $password = require_field($data, 'password', 'Password');
+        $limitIdentity = RateLimiter::identity('pos-auth-login|' . $identity);
+        RateLimiter::hit('pos-auth-login', $limitIdentity, 8, 15 * 60);
 
         $staffModel = new Staff();
         $staff = $staffModel->verifyPassword($identity, $password);
@@ -48,6 +51,8 @@ final class StaffAuthSession extends Model
         if (!$session) {
             throw new InvalidArgumentException('Khong the tao phien dang nhap POS.');
         }
+
+        RateLimiter::clear('pos-auth-login', $limitIdentity);
 
         return $this->payload($session);
     }

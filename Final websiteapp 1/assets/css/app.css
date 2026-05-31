@@ -24,6 +24,16 @@
   display: none !important;
 }
 
+body.has-site-auth [data-account-guest] {
+  display: none !important;
+}
+
+[data-account-root].account-authenticated [data-account-guest],
+[data-account-root]:has([data-account-member]:not([hidden])) [data-account-guest],
+[data-account-root]:has([data-account-staff]:not([hidden])) [data-account-guest] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
@@ -588,6 +598,738 @@ p {
 
 .auth-page-card {
   width: min(100%, 620px);
+}
+
+.login-auth-card {
+  width: min(100%, 680px);
+  gap: 18px;
+  border-radius: 18px;
+  padding: 28px;
+}
+
+.auth-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.auth-title-row .eyebrow {
+  margin-bottom: 6px;
+}
+
+.auth-title-row h3 {
+  font-size: 28px;
+}
+
+.auth-badge {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--coffee);
+  background: #fff5ec;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.login-links-row {
+  justify-content: space-between;
+  margin-top: 0;
+}
+
+.login-helper-box {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  background: #fff8f0;
+}
+
+.login-helper-box h4 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.login-helper-box p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.login-demo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.login-demo-grid button {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px;
+  color: var(--ink);
+  background: var(--white);
+  text-align: left;
+}
+
+.login-demo-grid button:hover {
+  border-color: var(--coffee);
+  background: #fff1e5;
+}
+
+.login-demo-grid span,
+.login-demo-grid strong {
+  display: block;
+}
+
+.login-demo-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.login-demo-grid strong {
+  margin-top: 4px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.auth-market-page {
+  min-height: 100vh;
+  color: #111827;
+  background: #fff;
+}
+
+.market-header {
+  background: #fff;
+}
+
+.market-header-inner {
+  width: min(1600px, calc(100% - 128px));
+  min-height: 112px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 190px minmax(280px, 520px) 1fr;
+  align-items: center;
+  gap: 34px;
+}
+
+.market-logo {
+  width: 104px;
+  height: 104px;
+  display: grid;
+  place-items: center;
+  border: 3px solid #bd2229;
+  border-radius: 999px;
+  color: #bd2229;
+  font-weight: 900;
+  line-height: 1;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.market-logo span {
+  font-size: 14px;
+  letter-spacing: 0.16em;
+}
+
+.market-logo strong {
+  font-size: 18px;
+  letter-spacing: 0.08em;
+}
+
+.market-search {
+  height: 48px;
+  display: grid;
+  grid-template-columns: 1fr 72px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #f0f0f0;
+}
+
+.market-search input {
+  min-width: 0;
+  border: 0;
+  padding: 0 24px;
+  outline: 0;
+  color: #4b5563;
+  background: transparent;
+}
+
+.market-search button {
+  border: 0;
+  color: #bd2229;
+  background: #ded3c5;
+  font-size: 30px;
+}
+
+.market-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 22px;
+  color: #1f2937;
+}
+
+.market-lang {
+  font-size: 32px;
+  line-height: 1;
+}
+
+.market-hotline,
+.market-account,
+.market-cart,
+.market-pos-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: #111827;
+  font-weight: 700;
+}
+
+.market-icon {
+  width: 44px;
+  height: 44px;
+  display: inline-grid;
+  place-items: center;
+  border: 3px solid #d3272e;
+  border-radius: 999px;
+  color: #d3272e;
+  font-size: 24px;
+}
+
+.market-pos-link {
+  min-height: 42px;
+  border: 2px solid #d3272e;
+  border-radius: 6px;
+  padding: 0 16px;
+  color: #bd2229;
+}
+
+.market-account {
+  position: relative;
+}
+
+.market-account > a {
+  display: grid;
+  gap: 2px;
+  color: #111827;
+  font-weight: 700;
+}
+
+.market-account > a small {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.market-account-icon {
+  width: 44px;
+  height: 44px;
+  display: inline-grid;
+  place-items: center;
+  border: 3px solid #d3272e;
+  border-radius: 999px;
+  color: #d3272e;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.market-account .member-menu-toggle {
+  min-height: 46px;
+  max-width: 230px;
+  border-color: #e7d8c7;
+  color: #111827;
+  background: #fff;
+}
+
+.market-account .member-dropdown {
+  z-index: 5;
+}
+
+.market-cart {
+  min-height: 58px;
+  border: 2px solid #bd2229;
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 18px;
+}
+
+.market-cart strong {
+  min-width: 28px;
+  min-height: 28px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 6px;
+  color: #bd2229;
+  background: #ead8c5;
+  font-size: 14px;
+}
+
+.market-redbar {
+  background: #b7262d;
+}
+
+.market-redbar-inner {
+  width: min(1600px, calc(100% - 128px));
+  height: 66px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 42px;
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.market-redbar-inner a {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.market-category {
+  align-self: flex-start;
+  min-width: 330px;
+  height: 66px;
+  justify-content: center;
+  border-radius: 7px 7px 0 0;
+  color: #bd2229 !important;
+  background: #fff;
+}
+
+.market-breadcrumb {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 max(22px, calc((100vw - 1600px) / 2 + 64px));
+  color: #9ca3af;
+  background: #f4f4f4;
+  font-size: 16px;
+}
+
+.market-breadcrumb strong {
+  color: #111827;
+}
+
+.market-login-section {
+  min-height: 640px;
+  padding: 46px 22px 86px;
+  background:
+    linear-gradient(180deg, #fff 0%, #fff 56%, #f7f3ef 56%, #f7f3ef 100%);
+}
+
+.market-login-panel {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 34px;
+  align-items: stretch;
+}
+
+.market-login-card {
+  border: 1px solid #eadfda;
+  border-radius: 8px;
+  padding: 42px 52px;
+  background: #fff;
+  box-shadow: 0 18px 42px rgba(71, 28, 28, 0.08);
+  text-align: left;
+}
+
+.market-login-kicker {
+  margin: 0 0 10px;
+  color: #b7262d;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.market-login-card h1 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 34px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.market-login-intro {
+  max-width: 650px;
+  margin: 12px 0 30px;
+  color: #667085;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.market-login-card a {
+  color: #b7262d;
+  font-weight: 800;
+  text-decoration: underline;
+}
+
+.market-login-form {
+  display: grid;
+  gap: 20px;
+  text-align: left;
+}
+
+.market-login-form label {
+  display: grid;
+  gap: 10px;
+  font-weight: 800;
+}
+
+.market-login-form sup {
+  color: #d3272e;
+}
+
+.market-login-form input {
+  height: 56px;
+  width: 100%;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  padding: 0 26px;
+  color: #111827;
+  background: #fff;
+  font-size: 18px;
+  outline: 0;
+}
+
+.market-login-form input:focus {
+  border-color: #bd2229;
+  box-shadow: 0 0 0 3px rgba(189, 34, 41, 0.12);
+}
+
+.market-forgot {
+  color: #111827;
+  font-size: 14px;
+}
+
+.market-forgot a {
+  color: #1769c2;
+}
+
+.market-login-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.market-login-note {
+  color: #6b7280;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.market-login-form button[type="submit"] {
+  height: 60px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: #b7262d;
+  font-size: 20px;
+  font-weight: 800;
+  box-shadow: 0 12px 24px rgba(183, 38, 45, 0.18);
+}
+
+.market-login-form button[type="submit"]:hover {
+  background: #9f1f27;
+}
+
+.market-login-help {
+  display: grid;
+  align-content: start;
+  gap: 20px;
+  border: 1px solid #eadfda;
+  border-radius: 8px;
+  padding: 30px;
+  background: #fff8f5;
+  box-shadow: 0 18px 42px rgba(71, 28, 28, 0.06);
+}
+
+.market-login-help h2,
+.market-demo-list h3 {
+  margin: 0;
+  color: #1f2937;
+}
+
+.market-auth-types {
+  display: grid;
+  gap: 12px;
+}
+
+.market-auth-types article {
+  border: 1px solid #ead8c5;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fff;
+}
+
+.market-auth-types strong,
+.market-demo-list button strong {
+  display: block;
+  color: #211813;
+}
+
+.market-auth-types span,
+.market-demo-list button span {
+  display: block;
+  margin-top: 5px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.market-demo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.market-demo-list button {
+  width: 100%;
+  border: 1px solid #ead8c5;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #fff;
+  text-align: left;
+}
+
+.market-demo-list button:hover {
+  border-color: #b7262d;
+  background: #fff1ef;
+}
+
+.market-social-login {
+  display: grid;
+  justify-items: center;
+  gap: 26px;
+  margin-top: 50px;
+  color: #6b7280;
+  font-size: 18px;
+}
+
+.market-social-login div {
+  display: flex;
+  gap: 4px;
+}
+
+.market-social-login button {
+  min-width: 150px;
+  height: 44px;
+  border: 0;
+  color: #fff;
+  font-weight: 700;
+}
+
+.market-social-login .facebook {
+  background: #35559a;
+}
+
+.market-social-login .google {
+  background: #e84635;
+}
+
+.market-footer {
+  display: grid;
+  grid-template-columns: 1.25fr 0.55fr 0.55fr 1fr;
+  gap: 44px;
+  padding: 48px max(22px, calc((100vw - 1600px) / 2 + 64px));
+  background: #f1f1f1;
+}
+
+.market-footer h2 {
+  margin: 0 0 24px;
+  font-size: 22px;
+}
+
+.market-footer p,
+.market-footer a {
+  display: block;
+  margin: 0 0 14px;
+  color: #111827;
+  line-height: 1.55;
+}
+
+.market-footer-logo {
+  width: 102px;
+  height: 102px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+  border: 3px solid #bd2229;
+  border-radius: 999px;
+  color: #bd2229;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.market-newsletter {
+  height: 48px;
+  display: grid;
+  grid-template-columns: 1fr 124px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.market-newsletter input {
+  min-width: 0;
+  border: 0;
+  padding: 0 20px;
+  outline: 0;
+  background: transparent;
+}
+
+.market-newsletter button {
+  border: 0;
+  color: #bd2229;
+  background: #ded3c5;
+  font-weight: 800;
+}
+
+.market-certified {
+  width: 230px;
+  margin-top: 28px;
+  border-radius: 12px;
+  padding: 14px;
+  color: #fff;
+  background: #1397ce;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+@media (max-width: 1120px) {
+  .market-header-inner {
+    width: min(100% - 36px, 900px);
+    grid-template-columns: 120px 1fr;
+    gap: 20px;
+  }
+
+  .market-tools {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .market-redbar-inner,
+  .market-breadcrumb {
+    width: 100%;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .market-footer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-left: 28px;
+    padding-right: 28px;
+  }
+
+  .market-login-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .market-login-help {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .market-login-help h2 {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 720px) {
+  .market-header-inner {
+    width: calc(100% - 28px);
+    grid-template-columns: 88px 1fr;
+    min-height: auto;
+    padding: 16px 0;
+  }
+
+  .market-logo {
+    width: 78px;
+    height: 78px;
+  }
+
+  .market-search {
+    height: 44px;
+    grid-template-columns: 1fr 54px;
+  }
+
+  .market-tools {
+    gap: 12px;
+    align-items: stretch;
+  }
+
+  .market-lang,
+  .market-hotline {
+    display: none;
+  }
+
+  .market-account,
+  .market-cart,
+  .market-pos-link {
+    min-height: 44px;
+  }
+
+  .market-redbar-inner {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 0;
+    font-size: 16px;
+  }
+
+  .market-redbar-inner > a {
+    min-height: 54px;
+    padding: 0 16px;
+  }
+
+  .market-category {
+    width: 100%;
+    min-width: 0;
+    height: 58px;
+  }
+
+  .market-login-section {
+    min-height: auto;
+    padding: 28px 18px 58px;
+  }
+
+  .market-login-card,
+  .market-login-help {
+    padding: 24px;
+  }
+
+  .market-login-card h1 {
+    font-size: 26px;
+  }
+
+  .market-login-intro {
+    font-size: 16px;
+  }
+
+  .market-login-help {
+    grid-template-columns: 1fr;
+  }
+
+  .market-login-row {
+    display: grid;
+  }
+
+  .market-footer {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
 }
 
 .account-profile-layout {
@@ -3413,6 +4155,18 @@ body {
     padding-top: 60px;
   }
 
+  .login-auth-card {
+    padding: 20px;
+  }
+
+  .auth-title-row {
+    display: grid;
+  }
+
+  .login-demo-grid {
+    grid-template-columns: 1fr;
+  }
+
   .hero-copy h1 {
     font-size: 44px;
   }
@@ -3423,5 +4177,472 @@ body {
 
   .footer {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Refined website login page */
+.auth-login-page {
+  --login-red: #b7262d;
+  --login-red-dark: #8f1d25;
+  --login-ink: #211813;
+  --login-muted: #6f625b;
+  --login-border: #eadfd7;
+  --login-sand: #f7f0e8;
+  background: #fffaf5;
+}
+
+.auth-login-page .market-header {
+  border-bottom: 1px solid rgba(183, 38, 45, 0.12);
+  background: #fff;
+}
+
+.auth-login-page .market-header-inner {
+  width: min(1280px, calc(100% - 48px));
+  min-height: 92px;
+  grid-template-columns: auto minmax(280px, 1fr) auto;
+  gap: 28px;
+}
+
+.auth-login-page .market-logo {
+  width: 82px;
+  height: 82px;
+  border-width: 2px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(183, 38, 45, 0.1);
+}
+
+.auth-login-page .market-logo span {
+  font-size: 11px;
+}
+
+.auth-login-page .market-logo strong {
+  font-size: 15px;
+}
+
+.market-main-nav {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  color: var(--login-ink);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.market-main-nav a {
+  position: relative;
+  padding: 10px 0;
+}
+
+.market-main-nav a::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 4px;
+  width: 0;
+  height: 2px;
+  background: var(--login-red);
+  transition: width 160ms ease;
+}
+
+.market-main-nav a:hover::after {
+  width: 100%;
+}
+
+.auth-login-page .market-tools {
+  gap: 14px;
+}
+
+.auth-login-page .market-search {
+  width: 300px;
+  height: 44px;
+  grid-template-columns: 1fr 72px;
+  border: 1px solid #eee3dc;
+  background: #f6f2ee;
+}
+
+.auth-login-page .market-search input {
+  padding: 0 18px;
+  font-size: 14px;
+}
+
+.auth-login-page .market-search button {
+  color: #fff;
+  background: var(--login-red);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.auth-login-page .market-hotline {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: #fff6f3;
+  font-size: 13px;
+}
+
+.auth-login-page .market-icon {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  color: #fff;
+  background: var(--login-red);
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.auth-login-page .market-account .member-menu-toggle,
+.auth-login-page .market-pos-link {
+  min-height: 42px;
+  border-color: #ecd7d3;
+  border-radius: 999px;
+  color: var(--login-red-dark);
+  background: #fff;
+}
+
+.auth-login-page .market-account-icon {
+  width: 38px;
+  height: 38px;
+  border: 0;
+  color: #fff;
+  background: var(--login-red);
+  font-size: 24px;
+}
+
+.auth-login-page .market-redbar {
+  background: var(--login-red);
+}
+
+.auth-login-page .market-redbar-inner {
+  width: min(1280px, calc(100% - 48px));
+  height: 58px;
+  gap: 32px;
+  font-size: 16px;
+}
+
+.auth-login-page .market-category {
+  min-width: 260px;
+  height: 58px;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 -1px 0 #fff inset;
+}
+
+.auth-login-page .market-breadcrumb {
+  padding: 0 max(24px, calc((100vw - 1280px) / 2 + 24px));
+  font-size: 14px;
+}
+
+.auth-login-page .market-login-section {
+  min-height: 680px;
+  padding: 58px 24px 88px;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 245, 0.9), rgba(255, 250, 245, 0.96)),
+    url("../images/beans-left.png") left 80px top 90px / 180px auto no-repeat,
+    url("../images/beans-right.png") right 80px bottom 48px / 190px auto no-repeat,
+    #fffaf5;
+}
+
+.auth-login-page .market-login-panel {
+  width: min(1120px, 100%);
+  grid-template-columns: minmax(0, 1fr) 410px;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid var(--login-border);
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 26px 70px rgba(47, 27, 20, 0.14);
+}
+
+.auth-login-page .market-login-card {
+  display: grid;
+  align-content: center;
+  min-height: 620px;
+  border: 0;
+  border-radius: 0;
+  padding: 56px 68px;
+  box-shadow: none;
+}
+
+.auth-login-page .market-login-kicker {
+  color: var(--login-red);
+}
+
+.auth-login-page .market-login-card h1 {
+  max-width: 540px;
+  font-family: "Playfair Display", Georgia, serif;
+  color: var(--login-ink);
+  font-size: clamp(38px, 4vw, 58px);
+  line-height: 1;
+  text-transform: none;
+}
+
+.auth-login-page .market-login-intro {
+  max-width: 570px;
+  margin-bottom: 34px;
+  color: var(--login-muted);
+}
+
+.auth-login-page .market-login-form {
+  max-width: 590px;
+}
+
+.auth-login-page .market-login-form label {
+  color: var(--login-ink);
+}
+
+.auth-login-page .market-login-form input {
+  height: 60px;
+  border-color: #e5d8cf;
+  border-radius: 12px;
+  background: #fffdfb;
+  font-size: 16px;
+}
+
+.auth-login-page .market-login-form input::placeholder {
+  color: #a8988e;
+}
+
+.password-field {
+  position: relative;
+  display: block;
+}
+
+.password-field input {
+  padding-right: 82px;
+}
+
+.password-field button {
+  position: absolute;
+  top: 50%;
+  right: 10px;
+  min-width: 58px;
+  height: 40px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 9px;
+  color: var(--login-red-dark);
+  background: #f4e8df;
+  font-weight: 900;
+}
+
+.auth-login-page .market-login-row {
+  align-items: center;
+  color: var(--login-muted);
+}
+
+.auth-login-page .market-login-row a {
+  color: var(--login-red-dark);
+}
+
+.auth-login-page .market-login-form button[type="submit"] {
+  height: 62px;
+  margin-top: 4px;
+  border-radius: 14px;
+  background: var(--login-red);
+}
+
+.auth-login-page .market-login-form button[type="submit"]:hover {
+  background: var(--login-red-dark);
+}
+
+.auth-login-page .market-login-help {
+  gap: 18px;
+  border: 0;
+  border-left: 1px solid var(--login-border);
+  border-radius: 0;
+  padding: 24px;
+  background: #f8efe7;
+  box-shadow: none;
+}
+
+.login-visual {
+  position: relative;
+  overflow: hidden;
+  min-height: 230px;
+  margin: 0;
+  border-radius: 18px;
+  background: var(--login-ink);
+}
+
+.login-visual img {
+  width: 100%;
+  height: 100%;
+  min-height: 230px;
+  object-fit: cover;
+  opacity: 0.78;
+}
+
+.login-visual figcaption {
+  position: absolute;
+  inset: auto 18px 18px;
+  display: grid;
+  gap: 6px;
+  color: #fff;
+}
+
+.login-visual figcaption strong {
+  font-family: "Playfair Display", Georgia, serif;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.login-visual figcaption span {
+  color: #f6e7dc;
+  line-height: 1.5;
+}
+
+.auth-login-page .market-auth-types {
+  grid-template-columns: 1fr;
+}
+
+.auth-login-page .market-auth-types article,
+.auth-login-page .market-demo-list button {
+  border-color: #ead8c5;
+  border-radius: 14px;
+  background: #fffdfb;
+}
+
+.auth-login-page .market-auth-types article {
+  padding: 16px;
+}
+
+.auth-login-page .market-demo-list {
+  gap: 9px;
+}
+
+.auth-login-page .market-demo-list h3 {
+  margin-top: 4px;
+}
+
+.auth-login-page .market-demo-list button {
+  display: grid;
+  gap: 4px;
+  padding: 13px 15px;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.auth-login-page .market-demo-list button:hover {
+  transform: translateY(-1px);
+}
+
+.auth-login-page .market-footer {
+  border-top: 1px solid #e9ded6;
+  background: #f5f1ed;
+}
+
+@media (max-width: 1160px) {
+  .auth-login-page .market-header-inner {
+    grid-template-columns: auto 1fr;
+  }
+
+  .market-main-nav {
+    justify-content: flex-end;
+  }
+
+  .auth-login-page .market-tools {
+    grid-column: 1 / -1;
+    justify-content: space-between;
+  }
+
+  .auth-login-page .market-search {
+    flex: 1;
+    width: auto;
+  }
+
+  .auth-login-page .market-login-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-login-page .market-login-card {
+    min-height: auto;
+  }
+
+  .auth-login-page .market-login-help {
+    grid-template-columns: 1fr 1fr;
+    border-left: 0;
+    border-top: 1px solid var(--login-border);
+  }
+
+  .auth-login-page .login-visual {
+    grid-row: span 2;
+  }
+}
+
+@media (max-width: 760px) {
+  .auth-login-page .market-header-inner,
+  .auth-login-page .market-redbar-inner {
+    width: calc(100% - 28px);
+  }
+
+  .auth-login-page .market-header-inner {
+    grid-template-columns: 74px 1fr;
+    gap: 14px;
+  }
+
+  .auth-login-page .market-logo {
+    width: 70px;
+    height: 70px;
+  }
+
+  .market-main-nav {
+    display: none;
+  }
+
+  .auth-login-page .market-tools {
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .auth-login-page .market-search,
+  .auth-login-page .market-hotline {
+    display: none;
+  }
+
+  .auth-login-page .market-redbar-inner {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 0;
+    padding: 0;
+    font-size: 15px;
+  }
+
+  .auth-login-page .market-redbar-inner a {
+    min-height: 50px;
+    padding: 0 14px;
+  }
+
+  .auth-login-page .market-category {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .auth-login-page .market-login-section {
+    padding: 34px 14px 58px;
+    background: #fffaf5;
+  }
+
+  .auth-login-page .market-login-panel {
+    border-radius: 18px;
+  }
+
+  .auth-login-page .market-login-card,
+  .auth-login-page .market-login-help {
+    padding: 24px;
+  }
+
+  .auth-login-page .market-login-card h1 {
+    font-size: 36px;
+  }
+
+  .auth-login-page .market-login-row {
+    display: grid;
+  }
+
+  .auth-login-page .market-login-help {
+    grid-template-columns: 1fr;
+  }
+
+  .login-visual {
+    min-height: 190px;
   }
 }

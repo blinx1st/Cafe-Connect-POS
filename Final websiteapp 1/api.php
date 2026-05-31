@@ -6,6 +6,7 @@ $legacyActionMap = [
     'bootstrap' => '/api/bootstrap',
     'member_session' => '/api/member-session',
     'member_login' => '/api/member-login',
+    'member_staff_adopt' => '/api/member-staff-adopt',
     'member_register' => '/api/member-register',
     'member_logout' => '/api/member-logout',
     'member_profile_update' => '/api/member-profile-update',

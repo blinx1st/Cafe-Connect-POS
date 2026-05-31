@@ -7,7 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Poppins:wght@400;500;600;700;800&family=Reggae+One&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="<?= e(asset_url('css/app.css')) ?>">
+    <?php $cssVersion = is_file(APP_ROOT . '/assets/css/app.css') ? (string) filemtime(APP_ROOT . '/assets/css/app.css') : (string) time(); ?>
+    <link rel="stylesheet" href="<?= e(asset_url('css/app.css') . '?v=' . $cssVersion) ?>">
   </head>
   <body class="<?= e(($section ?? 'website') === 'pos' ? 'pos-body' : '') ?>" data-page="<?= e($page ?? 'website-home') ?>">
     <script type="application/json" data-cafe-app><?= json_encode($appData ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG) ?></script>
@@ -19,6 +20,7 @@
     </script>
     <?= $content ?>
     <div class="toast" data-toast hidden></div>
-    <script src="<?= e(asset_url('js/app.js')) ?>"></script>
+    <?php $jsVersion = is_file(APP_ROOT . '/assets/js/app.js') ? (string) filemtime(APP_ROOT . '/assets/js/app.js') : (string) time(); ?>
+    <script src="<?= e(asset_url('js/app.js') . '?v=' . $jsVersion) ?>"></script>
   </body>
 </html>

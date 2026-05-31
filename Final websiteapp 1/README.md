@@ -128,3 +128,25 @@ powershell -ExecutionPolicy Bypass -File "tests/smoke_api.ps1"
 ```
 
 Script sẽ tạo member mới, login POS session cho cashier/waiter/barista/manager, checkout, tạo order bàn, cập nhật kitchen item, gọi dashboard/report rồi logout các session. Chạy lại `install.php` nếu muốn reset sample data sạch.
+
+## Audit hoan thien
+
+Xem `PROJECT_COMPLETION_AUDIT.md` de biet du an hien da co nhung gi, con thieu gi de len muc san pham van hanh that, va roadmap nang cap A-Z theo tung phase.
+
+## Verification gate
+
+Co the chay mot lenh kiem tra tong hop sau khi bat Apache:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "tests/verify_project.ps1"
+```
+
+Script nay se lint PHP, check JS, dam bao MySQL dang chay, reset database mau, check route, chay smoke API va reset database lai sach sau khi test.
+
+## Security baseline
+
+- Mat khau member, mat khau staff va PIN POS duoc luu bang `password_hash()`.
+- PHP session dung cookie `HttpOnly`, `SameSite=Lax` va `Secure` khi chay HTTPS.
+- Session id duoc regenerate sau login/register/adopt/logout/reset password.
+- Cac diem auth nhay cam co rate limit co ban: member login/register/forgot/reset, POS staff login va PIN mo ca.
+- Cac API POS ghi du lieu van bat buoc `staff_id`, role hop le, `pos_session_id` va `session_token`.

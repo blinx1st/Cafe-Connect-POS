@@ -34,7 +34,12 @@ const posModules = [
 ];
 
 const state = {
-  site: { cart: loadSiteCart(), customer: cafeApp.member || null, voucherId: "" },
+  site: {
+    cart: loadSiteCart(),
+    customer: cafeApp.member || null,
+    webStaff: cafeApp.web_staff || null,
+    voucherId: "",
+  },
   pos: {
     cart: [],
     customer: null,
@@ -87,6 +92,7 @@ function savePosUser(user) {
   } else {
     localStorage.removeItem("cafe_pos_user");
   }
+  renderHeaderPosLink();
 }
 
 function loadPosAuth() {
@@ -117,6 +123,7 @@ function savePosAuth(auth) {
   } else {
     localStorage.removeItem("cafe_pos_auth");
   }
+  renderHeaderPosLink();
 }
 
 const formatMoney = (value) =>
@@ -183,7 +190,9 @@ function renderMemberNav() {
   if (!target) return;
 
   const member = state.site.customer;
-  target.innerHTML = member ? `
+  const webStaff = activeWebStaff();
+  if (member) {
+    target.innerHTML = `
     <button class="member-menu-toggle" type="button" data-member-menu-toggle aria-expanded="false">
       Chào, ${escapeHtml(member.customer_name || "thành viên")}
       <span>▾</span>
@@ -193,10 +202,51 @@ function renderMemberNav() {
       <a href="${url("account#change-password")}">Thay đổi password</a>
       <button type="button" data-member-logout>Đăng xuất</button>
     </div>
-  ` : `
+  `;
+    return;
+  }
+
+  if (webStaff) {
+    target.innerHTML = `
+    <button class="member-menu-toggle" type="button" data-member-menu-toggle aria-expanded="false">
+      Chào, ${escapeHtml(webStaff.staff_name || "nhân viên")}
+      <span>▾</span>
+    </button>
+    <div class="member-dropdown" data-member-menu hidden>
+      <a href="${url("account")}">Thông tin nhân viên</a>
+      <a href="${url("pos/login")}">Mở POS</a>
+      <button type="button" data-member-logout>Đăng xuất</button>
+    </div>
+  `;
+    return;
+  }
+
+  if (target.classList.contains("market-account")) {
+    target.innerHTML = `
+      <span class="market-account-icon">◎</span>
+      <a href="${url("login")}"><strong>Tài khoản</strong><small>Đăng nhập</small></a>
+    `;
+    return;
+  }
+
+  target.innerHTML = `
     <a href="${url("login")}">Đăng nhập</a>
     <a class="nav-pill" href="${url("register")}">Đăng ký</a>
   `;
+}
+
+function renderHeaderPosLink() {
+  const target = document.querySelector("[data-pos-header-link]");
+  if (!target) return;
+
+  const webStaff = activeWebStaff();
+  if (!webStaff) {
+    target.hidden = true;
+    return;
+  }
+
+  const role = webStaff?.staff_role || "";
+  target.hidden = !Object.prototype.hasOwnProperty.call(roleLabels, role);
 }
 
 function closeMemberMenu() {
@@ -214,18 +264,54 @@ function setMessage(selector, message, danger = false) {
   target.classList.toggle("danger", danger);
 }
 
+function activeWebStaff() {
+  if (state.site.webStaff) return state.site.webStaff;
+  if (section === "website" && state.pos.auth?.auth_token) return state.pos.auth;
+  return null;
+}
+
 function renderAccountState() {
-  const guest = document.querySelector("[data-account-guest]");
-  const memberPanel = document.querySelector("[data-account-member]");
-  if (!guest && !memberPanel) return;
+  const roots = document.querySelectorAll("[data-account-root]");
+  const guests = document.querySelectorAll("[data-account-guest]");
+  const memberPanels = document.querySelectorAll("[data-account-member]");
+  const staffPanels = document.querySelectorAll("[data-account-staff]");
+  if (!guests.length && !memberPanels.length && !staffPanels.length) return;
 
   const hasMember = Boolean(state.site.customer);
-  if (guest) guest.hidden = hasMember;
-  if (memberPanel) memberPanel.hidden = !hasMember;
+  const hasStaff = Boolean(activeWebStaff());
+  document.body.classList.toggle("has-site-auth", hasMember || hasStaff);
+  roots.forEach((root) => {
+    root.classList.toggle("account-authenticated", hasMember || hasStaff);
+    root.classList.toggle("account-guest", !hasMember && !hasStaff);
+  });
+  guests.forEach((guest) => {
+    const shouldHide = hasMember || hasStaff;
+    guest.hidden = shouldHide;
+    guest.style.display = shouldHide ? "none" : "";
+  });
+  memberPanels.forEach((panel) => {
+    panel.hidden = !hasMember;
+    panel.style.display = hasMember ? "" : "none";
+  });
+  staffPanels.forEach((panel) => {
+    const shouldShow = hasStaff && !hasMember;
+    panel.hidden = !shouldShow;
+    panel.style.display = shouldShow ? "" : "none";
+  });
 }
 
 function renderAccountForm() {
-  const form = document.querySelector("[data-member-profile-update]");
+  const staffForm = document.querySelector("[data-account-staff] [data-member-profile-update]");
+  const staff = activeWebStaff();
+  if (staffForm && staff) {
+    if (staffForm.elements.staff_name) staffForm.elements.staff_name.value = staff.staff_name || "";
+    if (staffForm.elements.staff_code) staffForm.elements.staff_code.value = staff.staff_code || "";
+    if (staffForm.elements.email) staffForm.elements.email.value = staff.email || "";
+    if (staffForm.elements.phone_number) staffForm.elements.phone_number.value = staff.phone_number || "";
+    return;
+  }
+
+  const form = document.querySelector("[data-account-member] [data-member-profile-update]");
   const member = state.site.customer;
   if (!form || !member) return;
 
@@ -278,13 +364,16 @@ function websiteRouteFromUrl(rawUrl) {
 
 function shouldUseWebsitePjax(anchor, event) {
   if (!anchor || section !== "website") return false;
+  if (pageName === "website-login") return false;
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return false;
   if (anchor.target && anchor.target !== "_self") return false;
   if (anchor.hasAttribute("download") || anchor.dataset.noPjax !== undefined) return false;
 
   const target = new URL(anchor.href, window.location.href);
   if (target.hash && target.pathname === window.location.pathname && target.search === window.location.search) return false;
-  return websiteRouteFromUrl(target.href) !== null;
+  const route = websiteRouteFromUrl(target.href);
+  if (route === "login") return false;
+  return route !== null;
 }
 
 function applyPageAppData(nextApp) {
@@ -294,6 +383,7 @@ function applyPageAppData(nextApp) {
   section = cafeApp.section || (pageName.startsWith("pos-") ? "pos" : "website");
   document.body.dataset.page = pageName;
   state.site.customer = cafeApp.member || null;
+  state.site.webStaff = cafeApp.web_staff || null;
   syncProducts(Array.isArray(cafeApp.products) ? cafeApp.products : []);
 }
 
@@ -579,7 +669,12 @@ function renderMiniMember(scope) {
 
 function setSiteMember(member) {
   state.site.customer = member || null;
+  if (member) {
+    state.site.webStaff = null;
+    savePosAuth(null);
+  }
   state.site.voucherId = "";
+  renderHeaderPosLink();
   renderMemberNav();
   renderAccountState();
   renderAccountForm();
@@ -589,6 +684,48 @@ function setSiteMember(member) {
   renderSiteProducts();
   renderProfile("portal", state.site.customer);
   renderProfile("account", state.site.customer);
+}
+
+function setWebStaff(staff, authSession = null) {
+  state.site.webStaff = staff || null;
+  if (staff) {
+    state.site.customer = null;
+  }
+  if (staff && authSession) {
+    savePosAuth({ staff, auth_session: authSession });
+  } else if (staff && state.pos.auth?.id && Number(state.pos.auth.id) === Number(staff.id)) {
+    savePosAuth({ ...state.pos.auth, ...staff });
+  } else if (!staff) {
+    savePosAuth(null);
+  }
+  renderHeaderPosLink();
+  renderMemberNav();
+  renderAccountState();
+  renderAccountForm();
+  renderMemberAccount();
+  renderMiniMember("site");
+  renderVoucherOptions("site");
+  renderSiteProducts();
+  renderProfile("portal", state.site.customer);
+  renderProfile("account", state.site.customer);
+}
+
+async function adoptWebStaffFromPosAuth() {
+  if (section !== "website" || state.site.customer || state.site.webStaff || !state.pos.auth?.auth_token) return;
+
+  try {
+    const result = await api("member-staff-adopt", {
+      staff_id: state.pos.auth.id,
+      auth_session_id: state.pos.auth.auth_session_id,
+      auth_token: state.pos.auth.auth_token,
+    });
+    if (result.web_staff) {
+      setWebStaff(result.web_staff, result.auth_session);
+    }
+  } catch {
+    savePosAuth(null);
+    renderAccountState();
+  }
 }
 
 function renderMemberAccount() {
@@ -1800,6 +1937,8 @@ function wireEvents() {
     const favorite = event.target.closest("[data-favorite-product]");
     const editProduct = event.target.closest("[data-edit-product]");
     const editStaff = event.target.closest("[data-edit-staff]");
+    const fillLogin = event.target.closest("[data-fill-login]");
+    const passwordToggle = event.target.closest("[data-password-toggle]");
     const memberMenuToggle = event.target.closest("[data-member-menu-toggle]");
     const memberNav = event.target.closest("[data-member-nav]");
 
@@ -1812,6 +1951,27 @@ function wireEvents() {
     }
     if (!memberNav) {
       closeMemberMenu();
+    }
+
+    if (passwordToggle) {
+      const field = passwordToggle.closest(".password-field");
+      const input = field?.querySelector("input");
+      if (input) {
+        const shouldShow = input.type === "password";
+        input.type = shouldShow ? "text" : "password";
+        passwordToggle.textContent = shouldShow ? "Ẩn" : "Hiện";
+      }
+      return;
+    }
+
+    if (fillLogin) {
+      const form = document.querySelector("[data-member-login]");
+      if (form) {
+        form.elements.identity.value = fillLogin.dataset.identity || "";
+        form.elements.password.value = fillLogin.dataset.password || "";
+        form.elements.identity.focus();
+      }
+      return;
     }
 
     if (roleButton) {
@@ -1914,7 +2074,8 @@ function wireEvents() {
         await api("member-logout");
         closeMemberMenu();
         setSiteMember(null);
-        showToast("Đã đăng xuất tài khoản thành viên.");
+        setWebStaff(null);
+        showToast("Đã đăng xuất tài khoản.");
       } catch (error) {
         showToast(error.message);
       }
@@ -2066,10 +2227,18 @@ function wireEvents() {
       event.preventDefault();
       try {
         const result = await api("member-login", Object.fromEntries(new FormData(memberLoginForm)));
+        if (result.account_type === "staff") {
+          setWebStaff(result.web_staff, result.auth_session);
+          showToast("Đăng nhập nhân viên thành công. Có thể mở POS bằng PIN.");
+          if (pageName === "website-login") {
+            window.location.href = url("account");
+          }
+          return;
+        }
         setSiteMember(result.member);
         showToast("Đăng nhập thành viên thành công.");
         if (pageName === "website-login") {
-          await navigateWebsite(url("account"));
+          window.location.href = url("account");
         }
       } catch (error) {
         showToast(error.message);
@@ -2095,7 +2264,11 @@ function wireEvents() {
       event.preventDefault();
       try {
         const result = await api("member-profile-update", Object.fromEntries(new FormData(memberProfileForm)));
-        setSiteMember(result.member);
+        if (result.web_staff) {
+          setWebStaff(result.web_staff);
+        } else {
+          setSiteMember(result.member);
+        }
         showToast("Đã cập nhật hồ sơ.");
       } catch (error) {
         showToast(error.message);
@@ -2291,6 +2464,7 @@ function wireEvents() {
 }
 
 function initialRender() {
+  renderHeaderPosLink();
   renderMemberNav();
   renderAccountState();
   renderAccountForm();
@@ -2304,6 +2478,7 @@ function initialRender() {
     renderProfile("portal", state.site.customer);
     renderProfile("account", state.site.customer);
   }
+  adoptWebStaffFromPosAuth();
   if (section === "pos") {
     renderPosApp();
     startPosHeartbeat();

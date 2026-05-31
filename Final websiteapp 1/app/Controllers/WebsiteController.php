@@ -6,8 +6,6 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Database;
-use App\Core\Session;
-use App\Models\Customer;
 use App\Models\Product;
 
 final class WebsiteController extends Controller
@@ -79,6 +77,7 @@ final class WebsiteController extends Controller
             'staff' => [],
             'branches' => [],
             'member' => null,
+            'web_staff' => null,
         ];
 
         if (!Database::ready()) {
@@ -86,20 +85,13 @@ final class WebsiteController extends Controller
         }
 
         $product = new Product();
-        $customer = new Customer();
         $data['products'] = $product->active();
         $data['categories'] = $product->categories();
-        $data['reviews'] = $customer->reviews();
+        $data['reviews'] = (new \App\Models\Customer())->reviews();
 
-        $memberId = (int) Session::get('member_customer_id', 0);
-        if ($memberId > 0) {
-            $member = $customer->lookup((string) $memberId);
-            if ($member) {
-                $data['member'] = $member;
-            } else {
-                Session::forget('member_customer_id');
-            }
-        }
+        $authState = (new AuthController())->memberSession();
+        $data['member'] = $authState['member'] ?? null;
+        $data['web_staff'] = $authState['web_staff'] ?? null;
 
         return $data;
     }

@@ -41,6 +41,7 @@ $apiRoutes = [
     '/api/pos-bootstrap',
     '/api/member-session',
     '/api/member-login',
+    '/api/member-staff-adopt',
     '/api/member-register',
     '/api/member-logout',
     '/api/member-profile-update',

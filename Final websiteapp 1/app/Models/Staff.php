@@ -101,6 +101,41 @@ final class Staff extends Model
             ->execute(['id' => $id]);
     }
 
+    public function updateProfile(int $id, array $data): array
+    {
+        $payload = [
+            'id' => $id,
+            'staff_name' => require_field($data, 'staff_name', 'Staff name'),
+            'phone_number' => trim((string) ($data['phone_number'] ?? '')) ?: null,
+            'email' => trim((string) ($data['email'] ?? '')) ?: null,
+        ];
+
+        $this->db->prepare(
+            "UPDATE staff
+             SET staff_name = :staff_name,
+                 phone_number = :phone_number,
+                 email = :email
+             WHERE id = :id AND status = 'active'"
+        )->execute($payload);
+
+        return $this->find($id) ?: ['id' => $id] + $payload;
+    }
+
+    public function passwordHash(int $id): ?string
+    {
+        $stmt = $this->db->prepare("SELECT password_hash FROM staff WHERE id = :id AND status = 'active' LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $hash = $stmt->fetchColumn();
+
+        return $hash ? (string) $hash : null;
+    }
+
+    public function updatePassword(int $id, string $passwordHash): void
+    {
+        $this->db->prepare("UPDATE staff SET password_hash = :password_hash WHERE id = :id AND status = 'active'")
+            ->execute(['password_hash' => $passwordHash, 'id' => $id]);
+    }
+
     public function save(array $data): array
     {
         $id = (int) ($data['id'] ?? 0);

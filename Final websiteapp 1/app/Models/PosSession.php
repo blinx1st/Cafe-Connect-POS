@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Core\Model;
+use App\Core\RateLimiter;
 use InvalidArgumentException;
 
 final class PosSession extends Model
@@ -21,6 +22,9 @@ final class PosSession extends Model
         if ($pin === '') {
             throw new InvalidArgumentException('Vui lòng nhập PIN.');
         }
+
+        $limitIdentity = RateLimiter::identity('pos-session-login|' . $staffId);
+        RateLimiter::hit('pos-session-login', $limitIdentity, 8, 15 * 60);
 
         $staffModel = new Staff();
         $staff = $staffModel->find($staffId);
@@ -79,6 +83,7 @@ final class PosSession extends Model
             'amount' => $openingCash,
             'note' => 'POS login',
         ]);
+        RateLimiter::clear('pos-session-login', $limitIdentity);
 
         return [
             'staff' => $this->staffPayload($session),
