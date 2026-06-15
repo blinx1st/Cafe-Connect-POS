@@ -138,8 +138,13 @@ $member = Invoke-CafeApi "member-register" @{
 
 Invoke-CafeApi "member-lookup" @{ identity = $phone } | Out-Null
 
+$claimed = Invoke-CafeApi "voucher-claim" @{
+  promotion_id = 3
+}
+
 Invoke-CafeApi "checkout" @{
   customer_id = $member.member.id
+  voucher_id = $claimed.voucher_id
   payment_method = "e_wallet"
   sales_channel = "website"
   fulfillment_type = "pickup"

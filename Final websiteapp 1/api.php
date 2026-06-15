@@ -15,6 +15,7 @@ $legacyActionMap = [
     'member_forgot_password' => '/api/member-forgot-password',
     'member_reset_password' => '/api/member-reset-password',
     'member_lookup' => '/api/member-lookup',
+    'voucher_claim' => '/api/voucher-claim',
     'customer_create' => '/api/customer-create',
     'pos_auth_login' => '/api/pos-auth-login',
     'pos_auth_current' => '/api/pos-auth-current',

@@ -50,6 +50,7 @@ $apiRoutes = [
     '/api/member-forgot-password',
     '/api/member-reset-password',
     '/api/member-lookup',
+    '/api/voucher-claim',
     '/api/pos-auth-login',
     '/api/pos-auth-current',
     '/api/pos-auth-heartbeat',

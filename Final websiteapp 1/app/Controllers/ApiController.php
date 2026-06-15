@@ -53,6 +53,7 @@ final class ApiController extends Controller
                 '/api/member-forgot-password' => $auth->memberForgotPassword($payload),
                 '/api/member-reset-password' => $auth->memberResetPassword($payload),
                 '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
+                '/api/voucher-claim' => $this->claimVoucher($payload),
                 '/api/pos-auth-login' => (new StaffAuthSession())->login($payload),
                 '/api/pos-auth-current' => (new StaffAuthSession())->current($payload),
                 '/api/pos-auth-heartbeat' => (new StaffAuthSession())->heartbeat($payload),
@@ -126,6 +127,7 @@ final class ApiController extends Controller
                 'member_forgot_password' => '/api/member-forgot-password',
                 'member_reset_password' => '/api/member-reset-password',
                 'member_lookup' => '/api/member-lookup',
+                'voucher_claim' => '/api/voucher-claim',
                 'customer_create' => '/api/customer-create',
                 'checkout' => '/api/checkout',
                 'dashboard' => '/api/dashboard',
@@ -365,6 +367,21 @@ final class ApiController extends Controller
         ]);
 
         return $result;
+    }
+
+    private function claimVoucher(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Vui lòng đăng nhập thành viên để nhận voucher.');
+        }
+
+        $promotionId = (int) ($payload['promotion_id'] ?? 0);
+        if ($promotionId <= 0) {
+            throw new InvalidArgumentException('Promotion id is required.');
+        }
+
+        return (new Customer())->claimVoucher($customerId, $promotionId);
     }
 
     private function checkout(array $payload, AuthController $auth): array

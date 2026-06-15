@@ -825,6 +825,24 @@ function renderProfile(targetName, customer) {
   }
 
   const favoriteNames = (customer.favorites || []).map((id) => productMap.get(Number(id))?.product_name).filter(Boolean);
+  const canClaimHere = Boolean(state.site.customer && Number(state.site.customer.id) === Number(customer.id) && ["account", "portal", "site"].includes(targetName));
+  const claimRows = (customer.claimable_vouchers || []).map((promotion) => {
+    const discount = promotion.discount_type === "percentage" ? `${Number(promotion.discount_value)}%` : formatMoney(promotion.discount_value);
+    const remaining = promotion.remaining_quantity === null ? "Không giới hạn" : Number(promotion.remaining_quantity);
+    return `
+      <tr>
+        <td>${escapeHtml(promotion.promotion_name)}</td>
+        <td>${discount}</td>
+        <td>${escapeHtml(promotion.end_date)}</td>
+        <td>${escapeHtml(remaining)}</td>
+        <td>
+          ${canClaimHere && promotion.can_claim
+            ? `<button type="button" class="secondary-btn compact" data-claim-voucher="${promotion.id}">Nhận voucher</button>`
+            : `<span class="status ${promotion.can_claim ? "good" : ""}">${promotion.customer_claim_count > 0 ? "Đã nhận" : (promotion.eligible ? "Hết lượt" : "Không phù hợp")}</span>`}
+        </td>
+      </tr>
+    `;
+  }).join("");
   const voucherRows = (customer.vouchers || []).map((voucher) => `
     <tr>
       <td>${escapeHtml(voucher.voucher_code)}</td>
@@ -858,6 +876,13 @@ function renderProfile(targetName, customer) {
       <div class="metric"><strong>${formatMoney(customer.total_spending)}</strong><small>Tổng chi tiêu</small></div>
     </div>
     <div class="favorite-line"><strong>Yêu thích:</strong> ${favoriteNames.length ? favoriteNames.map(escapeHtml).join(", ") : "Chưa có sản phẩm yêu thích"}</div>
+    <div class="table-wrap">
+      <h3>Voucher có thể nhận</h3>
+      <table class="data-table">
+        <thead><tr><th>Chiến dịch</th><th>Giảm</th><th>Hạn</th><th>Còn lại</th><th></th></tr></thead>
+        <tbody>${claimRows || '<tr><td colspan="5">Chưa có campaign có thể nhận.</td></tr>'}</tbody>
+      </table>
+    </div>
     <div class="table-wrap">
       <h3>Voucher</h3>
       <table class="data-table">
@@ -2093,6 +2118,7 @@ function wireEvents() {
     const reportExport = event.target.closest("[data-report-export]");
     const receiptClose = event.target.closest("[data-receipt-close]");
     const receiptPrint = event.target.closest("[data-receipt-print]");
+    const claimVoucher = event.target.closest("[data-claim-voucher]");
     const favorite = event.target.closest("[data-favorite-product]");
     const editProduct = event.target.closest("[data-edit-product]");
     const editStaff = event.target.closest("[data-edit-staff]");
@@ -2359,6 +2385,18 @@ function wireEvents() {
         showToast(error.message);
       }
       window.print();
+      return;
+    }
+    if (claimVoucher) {
+      try {
+        const result = await api("voucher-claim", { promotion_id: claimVoucher.dataset.claimVoucher });
+        setSiteMember(result.member);
+        renderProfile("portal", result.member);
+        renderProfile("account", result.member);
+        showToast(`Đã nhận voucher ${result.voucher_code}.`);
+      } catch (error) {
+        showToast(error.message);
+      }
       return;
     }
     if (favorite) {

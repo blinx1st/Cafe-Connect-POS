@@ -41,6 +41,7 @@ final class Customer extends Model
         $customer['total_spending'] = (float) $customer['total_spending'];
         $customer['discount_rate'] = (float) $customer['discount_rate'];
         $customer['vouchers'] = $this->vouchers((int) $customer['id']);
+        $customer['claimable_vouchers'] = $this->claimableVouchers((int) $customer['id'], $customer);
         $customer['history'] = $this->history((int) $customer['id']);
         $customer['favorites'] = $this->favorites((int) $customer['id']);
 
@@ -223,6 +224,158 @@ final class Customer extends Model
         return $rows;
     }
 
+    public function claimableVouchers(int $customerId, ?array $customer = null): array
+    {
+        $customer ??= $this->lookup((string) $customerId);
+        if (!$customer) {
+            return [];
+        }
+
+        $today = today_sql();
+        $stmt = $this->db->prepare(
+            "SELECT p.id, p.promotion_name, p.description, p.start_date, p.end_date,
+                    p.target_segment, p.campaign_channel, p.discount_type, p.discount_value,
+                    p.voucher_quantity, p.usage_limit_per_customer,
+                    COUNT(v.id) AS issued_count,
+                    SUM(CASE WHEN v.customer_id = :customer_id_claim THEN 1 ELSE 0 END) AS customer_claim_count,
+                    SUM(CASE WHEN v.customer_id = :customer_id_active AND v.status IN ('issued', 'active', 'reserved') THEN 1 ELSE 0 END) AS customer_active_count
+             FROM promotions p
+             LEFT JOIN vouchers v ON v.promotion_id = p.id
+             WHERE p.status = 'active'
+               AND p.start_date <= :today_start
+               AND p.end_date >= :today_end
+               AND p.campaign_channel IN ('website', 'omnichannel')
+             GROUP BY p.id, p.promotion_name, p.description, p.start_date, p.end_date,
+                      p.target_segment, p.campaign_channel, p.discount_type, p.discount_value,
+                      p.voucher_quantity, p.usage_limit_per_customer
+             ORDER BY p.end_date, p.id"
+        );
+        $stmt->execute([
+            'customer_id_claim' => $customerId,
+            'customer_id_active' => $customerId,
+            'today_start' => $today,
+            'today_end' => $today,
+        ]);
+
+        $rows = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $row['discount_value'] = (float) $row['discount_value'];
+            $row['voucher_quantity'] = (int) $row['voucher_quantity'];
+            $row['usage_limit_per_customer'] = (int) $row['usage_limit_per_customer'];
+            $row['issued_count'] = (int) $row['issued_count'];
+            $row['customer_claim_count'] = (int) $row['customer_claim_count'];
+            $row['customer_active_count'] = (int) $row['customer_active_count'];
+            $row['remaining_quantity'] = $row['voucher_quantity'] > 0
+                ? max(0, $row['voucher_quantity'] - $row['issued_count'])
+                : null;
+            $row['eligible'] = $this->customerMatchesPromotion($customer, (string) $row['target_segment']);
+            $row['can_claim'] = $row['eligible']
+                && ($row['remaining_quantity'] === null || $row['remaining_quantity'] > 0)
+                && $row['customer_claim_count'] < max(1, $row['usage_limit_per_customer']);
+            $rows[] = $row;
+        }
+
+        return $rows;
+    }
+
+    public function claimVoucher(int $customerId, int $promotionId): array
+    {
+        if ($customerId <= 0 || $promotionId <= 0) {
+            throw new InvalidArgumentException('Claim voucher requires customer and promotion.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $customerStmt = $this->db->prepare(
+                "SELECT c.id, c.customer_name, c.phone_number, c.email, c.birth_date, c.last_visit_date,
+                        mt.tier_name
+                 FROM customers c
+                 JOIN membership_tiers mt ON mt.id = c.membership_tier_id
+                 WHERE c.id = :id AND c.status = 'active'
+                 FOR UPDATE"
+            );
+            $customerStmt->execute(['id' => $customerId]);
+            $customer = $customerStmt->fetch();
+            if (!$customer) {
+                throw new InvalidArgumentException('Member account is not available for voucher claim.');
+            }
+
+            $today = today_sql();
+            $promotionStmt = $this->db->prepare(
+                "SELECT *
+                 FROM promotions
+                 WHERE id = :id
+                   AND status = 'active'
+                   AND start_date <= :today_start
+                   AND end_date >= :today_end
+                   AND campaign_channel IN ('website', 'omnichannel')
+                 FOR UPDATE"
+            );
+            $promotionStmt->execute(['id' => $promotionId, 'today_start' => $today, 'today_end' => $today]);
+            $promotion = $promotionStmt->fetch();
+            if (!$promotion) {
+                throw new InvalidArgumentException('Voucher campaign is not available.');
+            }
+            if (!$this->customerMatchesPromotion($customer, (string) $promotion['target_segment'])) {
+                throw new InvalidArgumentException('Member is not eligible for this voucher campaign.');
+            }
+
+            $countStmt = $this->db->prepare(
+                "SELECT
+                    COUNT(*) AS issued_count,
+                    SUM(customer_id = :customer_id) AS customer_claim_count
+                 FROM vouchers
+                 WHERE promotion_id = :promotion_id"
+            );
+            $countStmt->execute(['customer_id' => $customerId, 'promotion_id' => $promotionId]);
+            $counts = $countStmt->fetch() ?: ['issued_count' => 0, 'customer_claim_count' => 0];
+            $issuedCount = (int) ($counts['issued_count'] ?? 0);
+            $customerClaimCount = (int) ($counts['customer_claim_count'] ?? 0);
+            $quantity = (int) ($promotion['voucher_quantity'] ?? 0);
+            $limit = max(1, (int) ($promotion['usage_limit_per_customer'] ?? 1));
+
+            if ($quantity > 0 && $issuedCount >= $quantity) {
+                throw new InvalidArgumentException('Voucher campaign has no remaining quantity.');
+            }
+            if ($customerClaimCount >= $limit) {
+                throw new InvalidArgumentException('Member has already claimed this voucher campaign.');
+            }
+
+            $code = $this->uniqueVoucherCode((string) $promotion['promotion_name'], $promotionId, $customerId);
+            $this->db->prepare(
+                "INSERT INTO vouchers (voucher_code, customer_id, promotion_id, release_date, expiration_date, status)
+                 VALUES (:code, :customer_id, :promotion_id, :release_date, :expiration_date, 'active')"
+            )->execute([
+                'code' => $code,
+                'customer_id' => $customerId,
+                'promotion_id' => $promotionId,
+                'release_date' => $today,
+                'expiration_date' => $promotion['end_date'],
+            ]);
+            $voucherId = (int) $this->db->lastInsertId();
+
+            (new AuditLog())->record([
+                'actor_type' => 'customer',
+                'actor_id' => $customerId,
+                'action' => 'voucher_claim',
+                'entity_type' => 'voucher',
+                'entity_id' => $voucherId,
+                'metadata' => ['promotion_id' => $promotionId, 'voucher_code' => $code],
+            ]);
+
+            $this->db->commit();
+
+            return [
+                'voucher_id' => $voucherId,
+                'voucher_code' => $code,
+                'member' => $this->lookup((string) $customerId),
+            ];
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
     public function history(int $customerId, int $limit = 8): array
     {
         $stmt = $this->db->prepare(
@@ -252,6 +405,32 @@ final class Customer extends Model
         $stmt->execute(['customer_id' => $customerId]);
 
         return array_map('intval', array_column($stmt->fetchAll(), 'product_id'));
+    }
+
+    private function customerMatchesPromotion(array $customer, string $target): bool
+    {
+        return match ($target) {
+            'all' => true,
+            'bronze', 'silver', 'gold' => strtolower((string) ($customer['tier_name'] ?? '')) === $target,
+            'birthday' => !empty($customer['birth_date']) && date('m', strtotime((string) $customer['birth_date'])) === date('m'),
+            'inactive' => empty($customer['last_visit_date']) || strtotime((string) $customer['last_visit_date']) <= strtotime('-30 days'),
+            default => false,
+        };
+    }
+
+    private function uniqueVoucherCode(string $promotionName, int $promotionId, int $customerId): string
+    {
+        $prefix = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $promotionName) ?: 'CLAIM', 0, 6));
+        for ($attempt = 0; $attempt < 8; $attempt++) {
+            $code = sprintf('%s-%03d-%04d-%s', $prefix, $promotionId, $customerId, strtoupper(bin2hex(random_bytes(2))));
+            $stmt = $this->db->prepare("SELECT COUNT(*) FROM vouchers WHERE voucher_code = :code");
+            $stmt->execute(['code' => $code]);
+            if ((int) $stmt->fetchColumn() === 0) {
+                return $code;
+            }
+        }
+
+        throw new InvalidArgumentException('Cannot generate a unique voucher code.');
     }
 
     public function create(array $data): array

@@ -186,3 +186,11 @@ Quyen POS hien duoc khai bao tap trung trong `app/Core/RolePolicy.php` va duoc d
 | `admin` | Toan quyen POS | Quan tri he thong, nhan su, du lieu van hanh | Toan bo API POS noi bo |
 
 API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `inventory`, `reports`, `reports-export`, `receipt`, `checkout`, `checkout-order`, `refund-invoice`, `void-order-item`, `cancel-order`, `stock-movement`, `cash-transaction`, `product-save`, `staff-save` deu bat buoc `staff_id`, `pos_session_id`, `session_token` va role hop le.
+
+## Claim voucher member
+
+- Member dang nhap co the vao `/account` de xem muc `Voucher co the nhan`.
+- Danh sach nay lay tu campaign `active`, con han, kenh `website/omnichannel`, dung segment cua khach va con so luong.
+- Bam `Nhan voucher` goi API `voucher-claim` voi payload `{ "promotion_id": 3 }`.
+- He thong tao voucher rieng trong bang `vouchers` gan voi `customer_id`; voucher moi lap tuc hien o ho so va dropdown checkout.
+- Khi thanh toan co chon voucher, `Invoice::checkout()` validate voucher va tu chuyen voucher sang `redeemed`.
