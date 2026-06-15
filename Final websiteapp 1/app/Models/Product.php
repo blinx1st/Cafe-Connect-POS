@@ -156,7 +156,7 @@ final class Product extends Model
 
         $product['price'] = (float) $product['price'];
         $product['stock_quantity'] = (float) $product['stock_quantity'];
-        $product['is_out_of_stock'] = $product['stock_quantity'] <= 0;
+        $product['is_out_of_stock'] = $product['status'] !== 'active' || $product['stock_quantity'] <= 0;
 
         $images = $this->db->prepare(
             "SELECT image_path, alt_text, is_primary, display_order
@@ -166,6 +166,57 @@ final class Product extends Model
         );
         $images->execute(['id' => $productId]);
         $product['images'] = $images->fetchAll();
+        if (!$product['images']) {
+            $product['images'] = [[
+                'image_path' => $product['image'],
+                'alt_text' => $product['product_name'],
+                'is_primary' => 1,
+                'display_order' => 1,
+            ]];
+        }
+
+        $branchInventory = $this->db->prepare(
+            "SELECT b.branch_name, b.district, COALESCE(bi.stock_quantity, 0) AS stock_quantity,
+                    COALESCE(bi.min_stock_level, 0) AS min_stock_level,
+                    COALESCE(bi.last_updated, b.created_at) AS last_updated
+             FROM branches b
+             LEFT JOIN branch_inventory bi ON bi.branch_id = b.id AND bi.product_id = :id
+             WHERE b.status = 'active'
+             ORDER BY b.id"
+        );
+        $branchInventory->execute(['id' => $productId]);
+        $product['branch_inventory'] = array_map(static function (array $row): array {
+            $stock = (float) $row['stock_quantity'];
+            $min = (float) $row['min_stock_level'];
+            $row['stock_quantity'] = $stock;
+            $row['min_stock_level'] = $min;
+            $row['stock_status'] = $stock <= 0 ? 'out' : ($min > 0 && $stock <= $min ? 'low' : 'available');
+            return $row;
+        }, $branchInventory->fetchAll());
+
+        $related = $this->db->prepare(
+            "SELECT p.id, p.product_name, p.category, p.price, p.take_note, c.category_name,
+                    COALESCE(pi.image_path, 'assets/images/coffee-1.png') AS image,
+                    COALESCE(stock.stock_quantity, 0) AS stock_quantity
+             FROM products p
+             LEFT JOIN product_categories c ON c.category_code = p.category
+             LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
+             LEFT JOIN (
+                SELECT product_id, SUM(stock_quantity) AS stock_quantity
+                FROM branch_inventory
+                GROUP BY product_id
+             ) stock ON stock.product_id = p.id
+             WHERE p.status = 'active' AND p.id <> :id AND p.category = :category
+             ORDER BY COALESCE(stock.stock_quantity, 0) DESC, p.product_name
+             LIMIT 3"
+        );
+        $related->execute(['id' => $productId, 'category' => $product['category']]);
+        $product['related_products'] = array_map(static function (array $row): array {
+            $row['price'] = (float) $row['price'];
+            $row['stock_quantity'] = (float) $row['stock_quantity'];
+            $row['is_out_of_stock'] = $row['stock_quantity'] <= 0;
+            return $row;
+        }, $related->fetchAll());
 
         return $product;
     }

@@ -291,6 +291,21 @@ final class Customer extends Model
             throw new InvalidArgumentException('Claim voucher requires customer and promotion.');
         }
 
+        return $this->claimVoucherInternal($customerId, $promotionId, null, 'voucher_claim');
+    }
+
+    public function claimVoucherByCode(int $customerId, string $claimCode): array
+    {
+        $claimCode = strtoupper(trim($claimCode));
+        if ($customerId <= 0 || $claimCode === '') {
+            throw new InvalidArgumentException('Vui lòng nhập mã voucher.');
+        }
+
+        return $this->claimVoucherInternal($customerId, null, $claimCode, 'voucher_claim_code');
+    }
+
+    private function claimVoucherInternal(int $customerId, ?int $promotionId, ?string $claimCode, string $action): array
+    {
         $this->db->beginTransaction();
         try {
             $customerStmt = $this->db->prepare(
@@ -308,21 +323,27 @@ final class Customer extends Model
             }
 
             $today = today_sql();
+            $promotionWhere = $promotionId !== null ? 'id = :promotion_key' : 'claim_code = :promotion_key';
             $promotionStmt = $this->db->prepare(
                 "SELECT *
                  FROM promotions
-                 WHERE id = :id
+                 WHERE $promotionWhere
                    AND status = 'active'
                    AND start_date <= :today_start
                    AND end_date >= :today_end
                    AND campaign_channel IN ('website', 'omnichannel')
                  FOR UPDATE"
             );
-            $promotionStmt->execute(['id' => $promotionId, 'today_start' => $today, 'today_end' => $today]);
+            $promotionStmt->execute([
+                'promotion_key' => $promotionId ?? $claimCode,
+                'today_start' => $today,
+                'today_end' => $today,
+            ]);
             $promotion = $promotionStmt->fetch();
             if (!$promotion) {
                 throw new InvalidArgumentException('Voucher campaign is not available.');
             }
+            $promotionId = (int) $promotion['id'];
             if (!$this->customerMatchesPromotion($customer, (string) $promotion['target_segment'])) {
                 throw new InvalidArgumentException('Member is not eligible for this voucher campaign.');
             }
@@ -364,10 +385,14 @@ final class Customer extends Model
             (new AuditLog())->record([
                 'actor_type' => 'customer',
                 'actor_id' => $customerId,
-                'action' => 'voucher_claim',
+                'action' => $action,
                 'entity_type' => 'voucher',
                 'entity_id' => $voucherId,
-                'metadata' => ['promotion_id' => $promotionId, 'voucher_code' => $code],
+                'metadata' => [
+                    'promotion_id' => $promotionId,
+                    'claim_code' => $claimCode,
+                    'voucher_code' => $code,
+                ],
             ]);
 
             $this->db->commit();

@@ -52,6 +52,7 @@ const state = {
     adminProductSearch: "",
     adminProductStatus: "all",
     adminProductCategory: "",
+    editingCampaignId: "",
     roleFilter: "",
     loginStaffId: "",
     loginPin: "",
@@ -144,6 +145,13 @@ function sqlNow() {
   const value = new Date();
   const pad = (number) => String(number).padStart(2, "0");
   return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())} ${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}`;
+}
+
+function sqlDate(daysFromToday = 0) {
+  const value = new Date();
+  value.setDate(value.getDate() + Number(daysFromToday || 0));
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${value.getFullYear()}-${pad(value.getMonth() + 1)}-${pad(value.getDate())}`;
 }
 
 function formatDateTime(value) {
@@ -514,6 +522,15 @@ function syncProductAdminPayload(result = {}) {
   }
   if (Array.isArray(result.admin_categories)) {
     cafeApp.admin_categories = result.admin_categories;
+  }
+}
+
+function syncCampaignPayload(result = {}) {
+  if (Array.isArray(result.campaigns)) {
+    cafeApp.campaigns = result.campaigns;
+    if (cafeApp.dashboard) {
+      cafeApp.dashboard.campaigns = result.campaigns;
+    }
   }
 }
 
@@ -977,6 +994,15 @@ function renderProfile(targetName, customer) {
       <div class="metric"><strong>${formatMoney(customer.total_spending)}</strong><small>Tổng chi tiêu</small></div>
     </div>
     <div class="favorite-line"><strong>Yêu thích:</strong> ${favoriteNames.length ? favoriteNames.map(escapeHtml).join(", ") : "Chưa có sản phẩm yêu thích"}</div>
+    ${canClaimHere ? `
+      <form class="lookup-form voucher-code-form" data-voucher-claim-code>
+        <label>Nhập mã voucher</label>
+        <div class="inline-fields">
+          <input name="claim_code" maxlength="50" placeholder="Ví dụ: SUMMER-8F3K" required>
+          <button type="submit" class="primary-btn">Claim voucher</button>
+        </div>
+      </form>
+    ` : ""}
     <div class="table-wrap">
       <h3>Voucher có thể nhận</h3>
       <table class="data-table">
@@ -1652,32 +1678,115 @@ function renderCustomersModule() {
   `;
 }
 
+function campaignStatusLabel(status) {
+  return {
+    draft: "Nháp",
+    active: "Đang chạy",
+    cancelled: "Đã hủy",
+    completed: "Hoàn tất",
+  }[status] || status || "";
+}
+
+function campaignStatusClass(status) {
+  if (status === "active") return "good";
+  if (status === "cancelled") return "bad";
+  return "";
+}
+
 function campaignsTable(rows = cafeApp.campaigns || cafeApp.dashboard?.campaigns || []) {
-  return tableHtml(rows, ["Chiến dịch", "Nhóm", "Giảm", "Dùng/Phát", "Doanh thu", "Trạng thái"], (campaign) => {
+  return tableHtml(rows, ["Chiến dịch", "Thời gian", "Nhóm", "Cách phát", "Mã claim", "Giảm", "Dùng/Phát", "Doanh thu", "Trạng thái", "Thao tác"], (campaign) => {
     const issued = Number(campaign.issued_vouchers || 0);
     const redeemed = Number(campaign.redeemed_vouchers || 0);
     const rate = issued > 0 ? Math.round((redeemed / issued) * 100) : 0;
     const discount = campaign.discount_type === "percentage" ? `${Number(campaign.discount_value)}%` : formatMoney(campaign.discount_value);
-    return `<tr><td>${escapeHtml(campaign.promotion_name)}</td><td>${escapeHtml(campaign.target_segment)}</td><td>${discount}</td><td>${redeemed}/${issued} (${rate}%)</td><td>${formatMoney(campaign.attributed_revenue)}</td><td><span class="status good">${escapeHtml(campaign.status)}</span></td></tr>`;
+    const distribution = campaign.distribution_type === "auto_issue" ? "Tự phát" : "Claim bằng mã";
+    const claimCode = campaign.claim_code || "";
+    return `<tr>
+      <td>${escapeHtml(campaign.promotion_name)}</td>
+      <td>${escapeHtml(campaign.start_date)}<br><small>${escapeHtml(campaign.end_date)}</small></td>
+      <td>${escapeHtml(campaign.target_segment)}</td>
+      <td>${distribution}</td>
+      <td>${claimCode ? `<button type="button" class="secondary-btn compact" data-copy-claim-code="${escapeHtml(claimCode)}">${escapeHtml(claimCode)}</button>` : "<span class=\"muted\">-</span>"}</td>
+      <td>${discount}</td>
+      <td>${redeemed}/${issued} (${rate}%)</td>
+      <td>${formatMoney(campaign.attributed_revenue)}</td>
+      <td><span class="status ${campaignStatusClass(campaign.status)}">${escapeHtml(campaignStatusLabel(campaign.status))}</span></td>
+      <td>
+        <div class="table-actions">
+          <button type="button" class="secondary-btn compact" data-edit-campaign="${campaign.id}">Sửa</button>
+          ${campaign.status === "cancelled"
+            ? `<button type="button" class="secondary-btn compact" data-campaign-restore="${campaign.id}">Khôi phục</button>`
+            : `<button type="button" class="secondary-btn compact danger" data-campaign-delete="${campaign.id}">Hủy</button>`}
+        </div>
+      </td>
+    </tr>`;
   });
 }
 
 function renderCampaignsModule() {
+  const campaigns = cafeApp.campaigns || cafeApp.dashboard?.campaigns || [];
+  const editing = campaigns.find((campaign) => Number(campaign.id) === Number(state.pos.editingCampaignId)) || null;
+  const selected = (value, expected) => String(value || "") === expected ? "selected" : "";
+  const status = editing?.status || "active";
   return `
     <div class="campaign-layout">
       <form class="create-form" data-campaign-create>
-        <h2>Tạo campaign</h2>
-        <label>Tên chiến dịch <input name="promotion_name" required></label>
-        <label>Mô tả <textarea name="description"></textarea></label>
-        <label>Ngày bắt đầu <input type="date" name="start_date" value="2026-05-13" required></label>
-        <label>Ngày kết thúc <input type="date" name="end_date" value="2026-06-15" required></label>
-        <label>Nhóm khách <select name="target_segment"><option value="all">Tất cả</option><option value="bronze">Bronze</option><option value="silver">Silver</option><option value="gold">Gold</option><option value="birthday">Sinh nhật</option><option value="inactive">Khách ngủ đông</option></select></label>
-        <label>Loại giảm <select name="discount_type"><option value="fixed">Số tiền</option><option value="percentage">Phần trăm</option></select></label>
-        <label>Giá trị <input type="number" name="discount_value" value="20000" min="0"></label>
-        <label>Số voucher <input type="number" name="voucher_quantity" value="5" min="0"></label>
-        <button class="primary-btn" type="submit">Tạo và phát voucher</button>
+        <input type="hidden" name="id" value="${editing ? escapeHtml(editing.id) : ""}">
+        <h2>${editing ? "Cập nhật campaign" : "Tạo campaign"}</h2>
+        <label>Tên chiến dịch <input name="promotion_name" value="${escapeHtml(editing?.promotion_name || "")}" required></label>
+        <label>Mô tả <textarea name="description">${escapeHtml(editing?.description || "")}</textarea></label>
+        <label>Ngày bắt đầu <input type="date" name="start_date" value="${escapeHtml(editing?.start_date || sqlDate())}" required></label>
+        <label>Ngày kết thúc <input type="date" name="end_date" value="${escapeHtml(editing?.end_date || sqlDate(30))}" required></label>
+        <label>Cách phát
+          <select name="distribution_type">
+            <option value="claim_code" ${selected(editing?.distribution_type || "claim_code", "claim_code")}>Claim bằng mã</option>
+            <option value="auto_issue" ${selected(editing?.distribution_type, "auto_issue")}>Tự phát theo segment</option>
+          </select>
+        </label>
+        <label>Kênh dùng voucher
+          <select name="campaign_channel">
+            <option value="omnichannel" ${selected(editing?.campaign_channel || "omnichannel", "omnichannel")}>Website + POS</option>
+            <option value="website" ${selected(editing?.campaign_channel, "website")}>Website</option>
+            <option value="pos" ${selected(editing?.campaign_channel, "pos")}>POS</option>
+            <option value="email" ${selected(editing?.campaign_channel, "email")}>Email</option>
+            <option value="zalo" ${selected(editing?.campaign_channel, "zalo")}>Zalo</option>
+            <option value="sms" ${selected(editing?.campaign_channel, "sms")}>SMS</option>
+          </select>
+        </label>
+        <label>Nhóm khách
+          <select name="target_segment">
+            <option value="all" ${selected(editing?.target_segment || "all", "all")}>Tất cả</option>
+            <option value="bronze" ${selected(editing?.target_segment, "bronze")}>Bronze</option>
+            <option value="silver" ${selected(editing?.target_segment, "silver")}>Silver</option>
+            <option value="gold" ${selected(editing?.target_segment, "gold")}>Gold</option>
+            <option value="birthday" ${selected(editing?.target_segment, "birthday")}>Sinh nhật</option>
+            <option value="inactive" ${selected(editing?.target_segment, "inactive")}>Khách ngủ đông</option>
+          </select>
+        </label>
+        <label>Loại giảm
+          <select name="discount_type">
+            <option value="fixed" ${selected(editing?.discount_type || "fixed", "fixed")}>Số tiền</option>
+            <option value="percentage" ${selected(editing?.discount_type, "percentage")}>Phần trăm</option>
+          </select>
+        </label>
+        <label>Trạng thái
+          <select name="status">
+            <option value="draft" ${selected(status, "draft")}>Nháp</option>
+            <option value="active" ${selected(status, "active")}>Đang chạy</option>
+            <option value="completed" ${selected(status, "completed")}>Hoàn tất</option>
+            <option value="cancelled" ${selected(status, "cancelled")}>Đã hủy</option>
+          </select>
+        </label>
+        <label>Giá trị <input type="number" name="discount_value" value="${escapeHtml(editing?.discount_value ?? 20000)}" min="0"></label>
+        <label>Số voucher <input type="number" name="voucher_quantity" value="${escapeHtml(editing?.voucher_quantity ?? 5)}" min="0"></label>
+        <label>Mỗi khách tối đa <input type="number" name="usage_limit_per_customer" value="${escapeHtml(editing?.usage_limit_per_customer ?? 1)}" min="1"></label>
+        <label>Mã claim tùy chọn <input name="claim_code" maxlength="50" value="${escapeHtml(editing?.claim_code || "")}" placeholder="Để trống để tự sinh"></label>
+        <div class="form-actions">
+          <button class="primary-btn" type="submit">${editing ? "Lưu thay đổi" : "Tạo campaign"}</button>
+          ${editing ? '<button class="secondary-btn" type="button" data-campaign-form-reset>Hủy sửa</button>' : ""}
+        </div>
       </form>
-      <section class="panel"><div class="panel-head"><h2>Hiệu quả campaign</h2><p>Voucher redeemed và doanh thu quy đổi.</p></div>${campaignsTable()}</section>
+      <section class="panel"><div class="panel-head"><h2>Hiệu quả campaign</h2><p>Quản lý tạo, sửa, hủy và khôi phục campaign/voucher.</p></div>${campaignsTable(campaigns)}</section>
     </div>
   `;
 }
@@ -2448,19 +2557,35 @@ function wireEvents() {
     const receiptClose = event.target.closest("[data-receipt-close]");
     const receiptPrint = event.target.closest("[data-receipt-print]");
     const claimVoucher = event.target.closest("[data-claim-voucher]");
+    const copyClaimCode = event.target.closest("[data-copy-claim-code]");
     const favorite = event.target.closest("[data-favorite-product]");
     const websiteOrderCancel = event.target.closest("[data-website-order-cancel]");
     const websiteOrderReceipt = event.target.closest("[data-order-receipt]");
     const editProduct = event.target.closest("[data-edit-product]");
     const productDelete = event.target.closest("[data-product-delete]");
     const productRestore = event.target.closest("[data-product-restore]");
+    const editCampaign = event.target.closest("[data-edit-campaign]");
+    const campaignDelete = event.target.closest("[data-campaign-delete]");
+    const campaignRestore = event.target.closest("[data-campaign-restore]");
+    const campaignFormReset = event.target.closest("[data-campaign-form-reset]");
     const editCategory = event.target.closest("[data-edit-category]");
     const productFormReset = event.target.closest("[data-product-form-reset]");
     const editStaff = event.target.closest("[data-edit-staff]");
     const fillLogin = event.target.closest("[data-fill-login]");
     const passwordToggle = event.target.closest("[data-password-toggle]");
     const memberMenuToggle = event.target.closest("[data-member-menu-toggle]");
+    const productThumb = event.target.closest("[data-product-thumb]");
     const memberNav = event.target.closest("[data-member-nav]");
+
+    if (productThumb) {
+      const image = document.querySelector(".product-main-image img");
+      if (image && productThumb.dataset.productThumb) {
+        image.src = productThumb.dataset.productThumb;
+        document.querySelectorAll("[data-product-thumb]").forEach((button) => button.classList.remove("is-active"));
+        productThumb.classList.add("is-active");
+      }
+      return;
+    }
 
     if (memberMenuToggle) {
       const menu = document.querySelector("[data-member-menu]");
@@ -2770,6 +2895,57 @@ function wireEvents() {
       }
       return;
     }
+    if (copyClaimCode) {
+      const code = copyClaimCode.dataset.copyClaimCode || copyClaimCode.textContent.trim();
+      try {
+        await navigator.clipboard?.writeText(code);
+        showToast(`Đã copy mã ${code}.`);
+      } catch (error) {
+        window.prompt("Copy mã voucher", code);
+      }
+      return;
+    }
+    if (editCampaign) {
+      state.pos.editingCampaignId = editCampaign.dataset.editCampaign || "";
+      renderPosApp();
+      window.setTimeout(() => document.querySelector("[data-campaign-create]")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+      return;
+    }
+    if (campaignFormReset) {
+      state.pos.editingCampaignId = "";
+      renderPosApp();
+      return;
+    }
+    if (campaignDelete) {
+      const reason = window.prompt("Lý do hủy campaign?");
+      if (!reason || !reason.trim()) return;
+      try {
+        const result = await api("campaign-delete", {
+          id: campaignDelete.dataset.campaignDelete,
+          reason: reason.trim(),
+        });
+        syncCampaignPayload(result);
+        if (String(state.pos.editingCampaignId) === String(campaignDelete.dataset.campaignDelete)) {
+          state.pos.editingCampaignId = "";
+        }
+        renderPosApp();
+        showToast("Đã hủy campaign và voucher chưa dùng.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (campaignRestore) {
+      try {
+        const result = await api("campaign-restore", { id: campaignRestore.dataset.campaignRestore });
+        syncCampaignPayload(result);
+        renderPosApp();
+        showToast("Đã khôi phục campaign.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
     if (favorite) {
       try {
         if (!state.site.customer) {
@@ -2896,6 +3072,7 @@ function wireEvents() {
     const memberPasswordForm = event.target.closest("[data-member-change-password]");
     const memberForgotForm = event.target.closest("[data-member-forgot-password]");
     const memberResetForm = event.target.closest("[data-member-reset-password]");
+    const voucherClaimCodeForm = event.target.closest("[data-voucher-claim-code]");
     const createForm = event.target.closest("[data-customer-create]");
     const newsletterForm = event.target.closest("[data-newsletter-form]");
     const serviceOrderForm = event.target.closest("[data-service-order-create]");
@@ -3011,6 +3188,25 @@ function wireEvents() {
       }
       return;
     }
+    if (voucherClaimCodeForm) {
+      event.preventDefault();
+      if (!state.site.customer) {
+        showToast("Vui lòng đăng nhập thành viên để claim voucher.");
+        await navigateWebsite(url("login"));
+        return;
+      }
+      try {
+        const result = await api("voucher-claim-code", Object.fromEntries(new FormData(voucherClaimCodeForm)));
+        setSiteMember(result.member);
+        renderProfile("portal", result.member);
+        renderProfile("account", result.member);
+        voucherClaimCodeForm.reset();
+        showToast(`Đã claim voucher ${result.voucher_code}.`);
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
     if (lookupForm) {
       event.preventDefault();
       try {
@@ -3066,11 +3262,20 @@ function wireEvents() {
     if (campaignForm) {
       event.preventDefault();
       try {
-        const result = await api("create-campaign", Object.fromEntries(new FormData(campaignForm)));
-        cafeApp.campaigns = result.campaigns || [];
-        if (cafeApp.dashboard) cafeApp.dashboard.campaigns = cafeApp.campaigns;
+        const payload = Object.fromEntries(new FormData(campaignForm));
+        const wasEditing = Boolean(payload.id);
+        if (!payload.id) delete payload.id;
+        const result = await api("campaign-save", payload);
+        syncCampaignPayload(result);
+        state.pos.editingCampaignId = "";
         renderPosApp();
-        showToast(`Đã tạo campaign và phát hành ${result.issued_count} voucher.`);
+        if (wasEditing) {
+          showToast("Đã cập nhật campaign.");
+        } else {
+          showToast(result.distribution_type === "claim_code"
+            ? `Đã tạo campaign. Mã claim: ${result.claim_code}.`
+            : `Đã tạo campaign và phát hành ${result.issued_count} voucher.`);
+        }
       } catch (error) {
         showToast(error.message);
       }

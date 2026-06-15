@@ -292,8 +292,11 @@ CREATE TABLE promotions (
     discount_value DECIMAL(12,2) NOT NULL DEFAULT 0,
     voucher_quantity INT NOT NULL DEFAULT 0,
     usage_limit_per_customer INT NOT NULL DEFAULT 1,
+    claim_code VARCHAR(50) NULL,
+    distribution_type ENUM('auto_issue', 'claim_code') NOT NULL DEFAULT 'claim_code',
     status ENUM('draft', 'active', 'cancelled', 'completed') NOT NULL DEFAULT 'draft',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_promotions_claim_code (claim_code),
     KEY idx_promotions_status_date (status, start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -839,12 +842,12 @@ INSERT INTO customer_segment_memberships (customer_id, segment_id, source) VALUE
 
 INSERT INTO promotions (
     promotion_name, description, start_date, end_date, target_segment,
-    campaign_channel, discount_type, discount_value, voucher_quantity, usage_limit_per_customer, status
+    campaign_channel, discount_type, discount_value, voucher_quantity, usage_limit_per_customer, claim_code, distribution_type, status
 ) VALUES
-('May Birthday Reward', 'Birthday voucher for May members.', '2026-05-01', '2026-05-31', 'birthday', 'omnichannel', 'fixed', 20000, 3, 1, 'active'),
-('Gold Member Week', 'Gold members receive 20 percent off.', '2026-05-01', '2026-06-15', 'gold', 'omnichannel', 'percentage', 20, 2, 1, 'active'),
-('Website First Order', 'Fixed discount for website checkout.', '2026-05-01', '2026-06-30', 'all', 'website', 'fixed', 15000, 4, 1, 'active'),
-('Return Coffee Call', 'Reactivate inactive customers.', '2026-05-01', '2026-06-15', 'inactive', 'email', 'percentage', 15, 2, 1, 'active');
+('May Birthday Reward', 'Birthday voucher for May members.', '2026-05-01', '2026-05-31', 'birthday', 'omnichannel', 'fixed', 20000, 3, 1, 'BDAY-MAY', 'auto_issue', 'active'),
+('Gold Member Week', 'Gold members receive 20 percent off.', '2026-05-01', '2026-06-15', 'gold', 'omnichannel', 'percentage', 20, 2, 1, 'GOLD-WEEK', 'auto_issue', 'active'),
+('Website First Order', 'Fixed discount for website checkout.', '2026-05-01', '2026-06-30', 'all', 'website', 'fixed', 15000, 4, 1, 'WEB-FIRST', 'claim_code', 'active'),
+('Return Coffee Call', 'Reactivate inactive customers.', '2026-05-01', '2026-06-15', 'inactive', 'email', 'percentage', 15, 2, 1, 'RETURN-CALL', 'auto_issue', 'active');
 
 INSERT INTO vouchers (voucher_code, customer_id, promotion_id, release_date, expiration_date, status, used_at) VALUES
 ('BDAY-NAN-001', 1, 1, '2026-05-01', '2026-05-31', 'active', NULL),

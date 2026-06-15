@@ -340,12 +340,98 @@ Invoke-CafeApi "cancel-order" (Add-Session @{
 $smokeCampaign = Invoke-CafeApi "create-campaign" (Add-Session @{
   promotion_name = "Smoke Campaign $suffix"
   target_segment = "all"
+  distribution_type = "auto_issue"
+  campaign_channel = "omnichannel"
   discount_type = "percentage"
   discount_value = 5
   voucher_quantity = 0
   start_date = (Get-Date).ToString("yyyy-MM-dd")
   end_date = (Get-Date).AddDays(7).ToString("yyyy-MM-dd")
 } $marketing)
+
+$claimCodeCampaign = Invoke-CafeApi "create-campaign" (Add-Session @{
+  promotion_name = "Smoke Claim Code $suffix"
+  target_segment = "all"
+  distribution_type = "claim_code"
+  campaign_channel = "website"
+  discount_type = "fixed"
+  discount_value = 12000
+  voucher_quantity = 2
+  start_date = (Get-Date).ToString("yyyy-MM-dd")
+  end_date = (Get-Date).AddDays(7).ToString("yyyy-MM-dd")
+} $marketing)
+
+if (-not $claimCodeCampaign.claim_code) {
+  throw "Claim-code campaign did not return a claim code."
+}
+
+$claimedByCode = Invoke-CafeApi "voucher-claim-code" @{
+  claim_code = $claimCodeCampaign.claim_code
+}
+
+if (-not $claimedByCode.voucher_id) {
+  throw "Voucher claim by campaign code did not create a voucher."
+}
+
+Expect-CafeApiFailure "voucher-claim-code" @{
+  claim_code = $claimCodeCampaign.claim_code
+} "claimed"
+
+$updatedCampaign = Invoke-CafeApi "campaign-save" (Add-Session @{
+  id = $claimCodeCampaign.promotion_id
+  promotion_name = "Smoke Claim Code Updated $suffix"
+  description = "Smoke update campaign"
+  target_segment = "all"
+  distribution_type = "claim_code"
+  campaign_channel = "website"
+  discount_type = "fixed"
+  discount_value = 15000
+  voucher_quantity = 2
+  usage_limit_per_customer = 1
+  claim_code = $claimCodeCampaign.claim_code
+  status = "active"
+  start_date = (Get-Date).ToString("yyyy-MM-dd")
+  end_date = (Get-Date).AddDays(8).ToString("yyyy-MM-dd")
+} $marketing)
+
+$updatedRow = $updatedCampaign.campaigns | Where-Object { $_.id -eq $claimCodeCampaign.promotion_id } | Select-Object -First 1
+if (-not $updatedRow -or [int]$updatedRow.discount_value -ne 15000) {
+  throw "Campaign update did not persist expected fields."
+}
+
+Expect-CafeApiFailure "campaign-save" (Add-Session @{
+  id = $claimCodeCampaign.promotion_id
+  promotion_name = "Blocked Campaign Update $suffix"
+  target_segment = "all"
+  distribution_type = "claim_code"
+  campaign_channel = "website"
+  discount_type = "fixed"
+  discount_value = 10000
+  voucher_quantity = 1
+  claim_code = $claimCodeCampaign.claim_code
+  status = "active"
+  start_date = (Get-Date).ToString("yyyy-MM-dd")
+  end_date = (Get-Date).AddDays(8).ToString("yyyy-MM-dd")
+} $cashier) "kh"
+
+$cancelledCampaign = Invoke-CafeApi "campaign-delete" (Add-Session @{
+  id = $claimCodeCampaign.promotion_id
+  reason = "Smoke campaign cancel"
+} $marketing)
+
+$cancelledRow = $cancelledCampaign.campaigns | Where-Object { $_.id -eq $claimCodeCampaign.promotion_id } | Select-Object -First 1
+if (-not $cancelledRow -or $cancelledRow.status -ne "cancelled") {
+  throw "Campaign delete did not mark campaign as cancelled."
+}
+
+$restoredCampaign = Invoke-CafeApi "campaign-restore" (Add-Session @{
+  id = $claimCodeCampaign.promotion_id
+} $marketing)
+
+$restoredRow = $restoredCampaign.campaigns | Where-Object { $_.id -eq $claimCodeCampaign.promotion_id } | Select-Object -First 1
+if (-not $restoredRow -or $restoredRow.status -ne "active") {
+  throw "Campaign restore did not reactivate campaign."
+}
 
 Expect-CafeApiFailure "inventory" (Add-Session @{} $marketing) "kh"
 

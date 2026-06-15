@@ -227,5 +227,8 @@ API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `invento
 - Member đăng nhập có thể vào `/account` để xem mục `Voucher có thể nhận`.
 - Danh sach nay lay tu campaign `active`, con han, kenh `website/omnichannel`, dung segment cua khach va con so luong.
 - Bấm `Nhận voucher` gọi API `voucher-claim` với payload `{ "promotion_id": 3 }`.
+- Marketing tạo campaign ở `/pos/campaigns` có thể chọn `Claim bằng mã`; hệ thống tự sinh `claim_code` duy nhất như `SUMMER-8F3K`.
+- Member nhập mã này trong form `Nhập mã voucher` ở `/account` hoặc `/member`; frontend gọi API `voucher-claim-code` với payload `{ "claim_code": "SUMMER-8F3K" }`.
+- Campaign `Tự phát theo segment` dùng `distribution_type = auto_issue` và tiếp tục phát voucher tự động cho nhóm khách phù hợp như luồng cũ.
 - Hệ thống tạo voucher riêng trong bảng `vouchers` gắn với `customer_id`; voucher mới lập tức hiện ở hồ sơ và dropdown checkout.
 - Khi thanh toán có chọn voucher, `Invoice::checkout()` validate voucher và tự chuyển voucher sang `redeemed`.

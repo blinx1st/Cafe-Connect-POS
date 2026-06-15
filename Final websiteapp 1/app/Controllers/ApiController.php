@@ -59,6 +59,7 @@ final class ApiController extends Controller
                 '/api/website-order-detail' => $this->memberOrderDetail($payload),
                 '/api/website-order-cancel' => $this->memberOrderCancel($payload),
                 '/api/voucher-claim' => $this->claimVoucher($payload),
+                '/api/voucher-claim-code' => $this->claimVoucherByCode($payload),
                 '/api/pos-auth-login' => (new StaffAuthSession())->login($payload),
                 '/api/pos-auth-current' => (new StaffAuthSession())->current($payload),
                 '/api/pos-auth-heartbeat' => (new StaffAuthSession())->heartbeat($payload),
@@ -90,6 +91,9 @@ final class ApiController extends Controller
                 '/api/dashboard' => $this->withEndpoint($route, $auth, $payload, fn () => (new Dashboard())->data()),
                 '/api/campaigns' => $this->withEndpoint($route, $auth, $payload, fn () => ['campaigns' => (new Campaign())->performance()]),
                 '/api/create-campaign' => $this->withEndpoint($route, $auth, $payload, fn () => (new Campaign())->create($payload)),
+                '/api/campaign-save' => $this->withEndpoint($route, $auth, $payload, fn () => (new Campaign())->save($payload)),
+                '/api/campaign-delete' => $this->withEndpoint($route, $auth, $payload, fn () => (new Campaign())->cancel((int) ($payload['id'] ?? $payload['promotion_id'] ?? 0), $payload)),
+                '/api/campaign-restore' => $this->withEndpoint($route, $auth, $payload, fn () => (new Campaign())->restore((int) ($payload['id'] ?? $payload['promotion_id'] ?? 0), $payload)),
                 '/api/inventory' => $this->withEndpoint($route, $auth, $payload, fn () => (new Inventory())->overview()),
                 '/api/stock-movement' => $this->withEndpoint($route, $auth, $payload, fn () => (new Inventory())->createMovement($payload)),
                 '/api/cash-transaction' => $this->withEndpoint($route, $auth, $payload, fn () => $this->createCashTransaction($payload)),
@@ -145,11 +149,15 @@ final class ApiController extends Controller
                 'website_order_detail' => '/api/website-order-detail',
                 'website_order_cancel' => '/api/website-order-cancel',
                 'voucher_claim' => '/api/voucher-claim',
+                'voucher_claim_code' => '/api/voucher-claim-code',
                 'customer_create' => '/api/customer-create',
                 'checkout' => '/api/checkout',
                 'dashboard' => '/api/dashboard',
                 'campaigns' => '/api/campaigns',
                 'create_campaign' => '/api/create-campaign',
+                'campaign_save' => '/api/campaign-save',
+                'campaign_delete' => '/api/campaign-delete',
+                'campaign_restore' => '/api/campaign-restore',
                 'pos_auth_login' => '/api/pos-auth-login',
                 'pos_auth_current' => '/api/pos-auth-current',
                 'pos_auth_heartbeat' => '/api/pos-auth-heartbeat',
@@ -573,6 +581,21 @@ final class ApiController extends Controller
         }
 
         return (new Customer())->claimVoucher($customerId, $promotionId);
+    }
+
+    private function claimVoucherByCode(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Vui long dang nhap thanh vien de nhap ma voucher.');
+        }
+
+        $claimCode = trim((string) ($payload['claim_code'] ?? ''));
+        if ($claimCode === '') {
+            throw new InvalidArgumentException('Vui long nhap ma voucher.');
+        }
+
+        return (new Customer())->claimVoucherByCode($customerId, $claimCode);
     }
 
     private function productDetail(array $payload): array
