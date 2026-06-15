@@ -214,6 +214,14 @@ Quyen POS hien duoc khai bao tap trung trong `app/Core/RolePolicy.php` va duoc d
 
 API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `inventory`, `reports`, `reports-export`, `receipt`, `checkout`, `checkout-order`, `refund-invoice`, `void-order-item`, `cancel-order`, `stock-movement`, `cash-transaction`, `product-save`, `staff-save` deu bat buoc `staff_id`, `pos_session_id`, `session_token` va role hop le.
 
+## CRUD sản phẩm POS
+
+- Module `/pos/products` dành cho `manager`, `owner`, `admin`.
+- Hỗ trợ tạo/sửa sản phẩm, danh mục, giá, ghi chú, trạng thái, tồn kho chi nhánh, mức tồn tối thiểu và ảnh chính.
+- Xóa sản phẩm là xóa mềm/ngừng bán bằng `status = inactive`; sản phẩm không còn hiện trên website `/menu` nhưng vẫn còn trong POS để xem lịch sử và khôi phục.
+- Endpoint quản trị: `product-list`, `product-save`, `product-delete`, `product-restore`, `product-image-upload`, `category-save`.
+- Upload ảnh lưu vào `assets/uploads/products`, chỉ nhận JPG/PNG/WEBP tối đa 2MB.
+
 ## Claim voucher member
 
 - Member đăng nhập có thể vào `/account` để xem mục `Voucher có thể nhận`.

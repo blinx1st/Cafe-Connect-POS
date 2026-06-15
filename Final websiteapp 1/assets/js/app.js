@@ -49,6 +49,9 @@ const state = {
     customer: null,
     voucherId: "",
     productFilter: "",
+    adminProductSearch: "",
+    adminProductStatus: "all",
+    adminProductCategory: "",
     roleFilter: "",
     loginStaffId: "",
     loginPin: "",
@@ -164,7 +167,7 @@ function durationSince(value, closedAt = "") {
 
 const escapeHtml = (value) =>
   String(value ?? "")
-    .replaceAll("&", "&")
+    .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
@@ -497,6 +500,65 @@ function syncProducts(rows) {
   products = Array.isArray(rows) ? rows : [];
   cafeApp.products = products;
   productMap = new Map(products.map((product) => [Number(product.id), product]));
+}
+
+function syncProductAdminPayload(result = {}) {
+  if (Array.isArray(result.products)) {
+    syncProducts(result.products);
+  }
+  if (Array.isArray(result.admin_products)) {
+    cafeApp.admin_products = result.admin_products;
+  }
+  if (Array.isArray(result.categories)) {
+    cafeApp.categories = result.categories;
+  }
+  if (Array.isArray(result.admin_categories)) {
+    cafeApp.admin_categories = result.admin_categories;
+  }
+}
+
+function appendFormIfMissing(formData, key, value) {
+  if (formData.has(key) || value === undefined || value === null || value === "") return;
+  formData.append(key, value);
+}
+
+async function apiForm(endpoint, formData) {
+  if (!cafeInstalled) {
+    throw new Error("Database chÆ°a sáºµn sÃ ng. HÃ£y cháº¡y install.php trÆ°á»›c.");
+  }
+
+  const clean = String(endpoint).replace(/^\/?api\/?/, "");
+  if (section === "pos" && state.pos.auth) {
+    if (!formData.has("staff_id") && !state.pos.user) appendFormIfMissing(formData, "staff_id", state.pos.auth.id);
+    appendFormIfMissing(formData, "auth_session_id", state.pos.auth.auth_session_id);
+    appendFormIfMissing(formData, "auth_token", state.pos.auth.auth_token);
+  }
+  if (section === "pos" && state.pos.user) {
+    appendFormIfMissing(formData, "staff_id", state.pos.user.id);
+    appendFormIfMissing(formData, "pos_session_id", state.pos.user.pos_session_id);
+    appendFormIfMissing(formData, "session_token", state.pos.user.session_token);
+    appendFormIfMissing(formData, "staff_role", state.pos.user.staff_role);
+    appendFormIfMissing(formData, "branch_id", state.pos.user.branch_id);
+  }
+
+  const headers = {};
+  if (window.CAFE_CSRF_TOKEN) {
+    headers["X-CSRF-Token"] = window.CAFE_CSRF_TOKEN;
+  }
+
+  const response = await fetch(`${apiBase}?endpoint=${encodeURIComponent(clean)}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
+  const json = await response.json();
+  if (json?.data?.csrf_token) {
+    window.CAFE_CSRF_TOKEN = json.data.csrf_token;
+  }
+  if (!json.ok) {
+    throw new Error(json.message || "API request failed.");
+  }
+  return json.data;
 }
 
 function tableHtml(rows, headers, mapper, emptyText = "Chưa có dữ liệu.") {
@@ -1194,8 +1256,8 @@ function branchOptions(selected = "") {
   ).join("");
 }
 
-function categoryOptions(selected = "") {
-  return (cafeApp.categories || []).map((category) =>
+function categoryOptions(selected = "", rows = cafeApp.categories || []) {
+  return rows.map((category) =>
     `<option value="${escapeHtml(category.category_code)}" ${selected === category.category_code ? "selected" : ""}>${escapeHtml(category.category_name)}</option>`
   ).join("");
 }
@@ -1683,6 +1745,117 @@ function renderProductsModule() {
   `;
 }
 
+function renderProductsModule() {
+  const adminProducts = Array.isArray(cafeApp.admin_products) && cafeApp.admin_products.length ? cafeApp.admin_products : products;
+  const adminCategories = Array.isArray(cafeApp.admin_categories) && cafeApp.admin_categories.length ? cafeApp.admin_categories : cafeApp.categories || [];
+  const search = state.pos.adminProductSearch.trim().toLowerCase();
+  const status = state.pos.adminProductStatus || "all";
+  const category = state.pos.adminProductCategory || "";
+  const filtered = adminProducts.filter((product) => {
+    const matchesSearch = !search
+      || String(product.product_name || "").toLowerCase().includes(search)
+      || String(product.take_note || "").toLowerCase().includes(search);
+    const matchesStatus = status === "all" || String(product.status || "") === status;
+    const matchesCategory = !category || String(product.category || "") === category;
+    return matchesSearch && matchesStatus && matchesCategory;
+  });
+  const selectedBranch = state.pos.user?.branch_id || state.pos.auth?.branch_id || 1;
+  const statusOptions = `
+    <option value="active">Đang bán</option>
+    <option value="inactive">Ngừng bán</option>
+  `;
+  return `
+    <div class="admin-grid product-admin-layout">
+      <form class="create-form product-admin-form" data-product-save enctype="multipart/form-data">
+        <div class="panel-head compact">
+          <div>
+            <p class="eyebrow">Sản phẩm</p>
+            <h2>Tạo / sửa sản phẩm</h2>
+          </div>
+          <button type="button" class="secondary-btn" data-product-form-reset>Nhập mới</button>
+        </div>
+        <input type="hidden" name="id">
+        <label>Tên sản phẩm <input name="product_name" required placeholder="Latte hạt dẻ"></label>
+        <label>Danh mục <select name="category">${categoryOptions("coffee", adminCategories)}</select></label>
+        <label>Giá bán <input type="number" name="price" min="0" step="1000" value="45000"></label>
+        <label>Trạng thái <select name="status">${statusOptions}</select></label>
+        <label>Chi nhánh <select name="branch_id">${branchOptions(selectedBranch)}</select></label>
+        <div class="form-two">
+          <label>Tồn kho <input type="number" name="stock_quantity" min="0" value="0"></label>
+          <label>Tồn tối thiểu <input type="number" name="min_stock_level" min="0" value="0"></label>
+        </div>
+        <label>Ghi chú <textarea name="take_note" placeholder="Mô tả ngắn, nguyên liệu nổi bật, ghi chú bán hàng"></textarea></label>
+        <label>Ảnh chính <input type="file" name="image" accept="image/jpeg,image/png,image/webp"><small>JPG, PNG hoặc WEBP, tối đa 2MB.</small></label>
+        <button class="primary-btn" type="submit">Lưu sản phẩm</button>
+      </form>
+      <section class="panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Danh sách</p>
+            <h2>Sản phẩm</h2>
+          </div>
+          <div class="product-admin-filters">
+            <input data-admin-product-search placeholder="Tìm sản phẩm" value="${escapeHtml(state.pos.adminProductSearch)}">
+            <select data-admin-product-category>
+              <option value="">Tất cả danh mục</option>
+              ${adminCategories.map((item) => `<option value="${escapeHtml(item.category_code)}" ${state.pos.adminProductCategory === item.category_code ? "selected" : ""}>${escapeHtml(item.category_name)}</option>`).join("")}
+            </select>
+            <select data-admin-product-status>
+              <option value="all" ${state.pos.adminProductStatus === "all" ? "selected" : ""}>Tất cả trạng thái</option>
+              <option value="active" ${state.pos.adminProductStatus === "active" ? "selected" : ""}>Đang bán</option>
+              <option value="inactive" ${state.pos.adminProductStatus === "inactive" ? "selected" : ""}>Ngừng bán</option>
+            </select>
+          </div>
+        </div>
+        ${tableHtml(filtered, ["Ảnh", "Tên", "Danh mục", "Giá", "Tồn kho", "Trạng thái", ""], (row) => `
+          <tr>
+            <td><img class="product-admin-thumb" src="${escapeHtml(asset(row.image))}" alt="${escapeHtml(row.product_name)}"></td>
+            <td><strong>${escapeHtml(row.product_name)}</strong><small>${escapeHtml(row.take_note || "")}</small></td>
+            <td>${escapeHtml(row.category_name || row.category)}</td>
+            <td>${formatMoney(row.price)}</td>
+            <td>${Number(row.stock_quantity || 0)} <small>Min ${Number(row.min_stock_level || 0)}</small></td>
+            <td><span class="status ${row.status === "active" ? "good" : "bad"}">${row.status === "active" ? "Đang bán" : "Ngừng bán"}</span></td>
+            <td class="row-actions">
+              <button type="button" data-edit-product="${row.id}">Sửa</button>
+              <button type="button" data-edit-product="${row.id}" data-focus-image="1">Đổi ảnh</button>
+              ${row.status === "active"
+                ? `<button type="button" data-product-delete="${row.id}">Ngừng bán</button>`
+                : `<button type="button" data-product-restore="${row.id}">Khôi phục</button>`}
+            </td>
+          </tr>
+        `, "Chưa có sản phẩm phù hợp.")}
+      </section>
+      <section class="panel span-2">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Danh mục</p>
+            <h2>Quản lý danh mục</h2>
+          </div>
+        </div>
+        <div class="category-admin-grid">
+          <form class="create-form compact" data-category-save>
+            <input type="hidden" name="id">
+            <label>Mã danh mục <input name="category_code" required placeholder="signature"></label>
+            <label>Tên danh mục <input name="category_name" required placeholder="Món đặc trưng"></label>
+            <label>Thứ tự <input type="number" name="display_order" min="0" value="0"></label>
+            <label>Trạng thái <select name="status">${statusOptions}</select></label>
+            <button class="primary-btn" type="submit">Lưu danh mục</button>
+          </form>
+          ${tableHtml(adminCategories, ["Mã", "Tên", "Thứ tự", "Trạng thái", ""], (row) => `
+            <tr>
+              <td>${escapeHtml(row.category_code)}</td>
+              <td>${escapeHtml(row.category_name)}</td>
+              <td>${Number(row.display_order || 0)}</td>
+              <td><span class="status ${row.status === "inactive" ? "bad" : "good"}">${row.status === "inactive" ? "Ngừng dùng" : "Đang dùng"}</span></td>
+              <td><button type="button" data-edit-category="${row.id}">Sửa</button></td>
+            </tr>
+          `, "Chưa có danh mục.")}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
 function legacyRenderStaffModule() {
   const staff = cafeApp.staff || [];
   return `
@@ -1774,6 +1947,7 @@ async function refreshPosData(showMessage = true) {
   cafeApp.inventory = data.inventory || [];
   cafeApp.reports = data.reports || {};
   cafeApp.session_reports = data.session_reports || [];
+  syncProductAdminPayload(data);
   if (data.current_session && state.pos.user) {
     savePosUser({
       ...state.pos.user,
@@ -1787,7 +1961,7 @@ async function refreshPosData(showMessage = true) {
   if (data.current_auth_session?.auth_session) {
     savePosAuth(data.current_auth_session);
   }
-  syncProducts(data.products || []);
+  if (!Array.isArray(data.products)) syncProducts([]);
   if (showMessage) showToast("Đã làm mới dữ liệu POS.");
   renderPosApp();
 }
@@ -1840,6 +2014,7 @@ function updatePosCollections(result = {}) {
   if (result.tables) cafeApp.tables = result.tables;
   if (result.kitchen) cafeApp.kitchen = result.kitchen;
   if (result.product_inventory || result.materials || result.movements) cafeApp.inventory = result;
+  syncProductAdminPayload(result);
 }
 
 function renderSiteProducts() {
@@ -2251,6 +2426,10 @@ function wireEvents() {
     const websiteOrderCancel = event.target.closest("[data-website-order-cancel]");
     const websiteOrderReceipt = event.target.closest("[data-order-receipt]");
     const editProduct = event.target.closest("[data-edit-product]");
+    const productDelete = event.target.closest("[data-product-delete]");
+    const productRestore = event.target.closest("[data-product-restore]");
+    const editCategory = event.target.closest("[data-edit-category]");
+    const productFormReset = event.target.closest("[data-product-form-reset]");
     const editStaff = event.target.closest("[data-edit-staff]");
     const fillLogin = event.target.closest("[data-fill-login]");
     const passwordToggle = event.target.closest("[data-password-toggle]");
@@ -2596,8 +2775,58 @@ function wireEvents() {
       }
       return;
     }
+    if (productFormReset) {
+      const form = document.querySelector("[data-product-save]");
+      if (form) form.reset();
+      const id = form?.elements?.id;
+      if (id) id.value = "";
+      return;
+    }
+    if (productDelete) {
+      if (!window.confirm("Ngừng bán sản phẩm này? Website sẽ không còn hiển thị sản phẩm.")) return;
+      try {
+        const result = await api("product-delete", {
+          id: productDelete.dataset.productDelete,
+          branch_id: state.pos.user?.branch_id || 1,
+        });
+        syncProductAdminPayload(result);
+        renderPosApp();
+        showToast("Đã ngừng bán sản phẩm.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (productRestore) {
+      try {
+        const result = await api("product-restore", {
+          id: productRestore.dataset.productRestore,
+          branch_id: state.pos.user?.branch_id || 1,
+        });
+        syncProductAdminPayload(result);
+        renderPosApp();
+        showToast("Đã khôi phục sản phẩm.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (editCategory) {
+      const category = (cafeApp.admin_categories || cafeApp.categories || []).find((item) => String(item.id) === String(editCategory.dataset.editCategory));
+      const form = document.querySelector("[data-category-save]");
+      if (category && form) {
+        form.elements.id.value = category.id;
+        form.elements.category_code.value = category.category_code || "";
+        form.elements.category_name.value = category.category_name || "";
+        form.elements.display_order.value = category.display_order || 0;
+        form.elements.status.value = category.status || "active";
+        form.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+      return;
+    }
     if (editProduct) {
-      const product = products.find((item) => String(item.id) === String(editProduct.dataset.editProduct));
+      const productRows = Array.isArray(cafeApp.admin_products) && cafeApp.admin_products.length ? cafeApp.admin_products : products;
+      const product = productRows.find((item) => String(item.id) === String(editProduct.dataset.editProduct));
       const form = document.querySelector("[data-product-save]");
       if (product && form) {
         form.elements.id.value = product.id;
@@ -2606,6 +2835,12 @@ function wireEvents() {
         form.elements.price.value = product.price;
         form.elements.take_note.value = product.take_note || "";
         form.elements.status.value = product.status || "active";
+        if (form.elements.branch_id) form.elements.branch_id.value = product.branch_id || state.pos.user?.branch_id || 1;
+        if (form.elements.stock_quantity) form.elements.stock_quantity.value = product.stock_quantity || 0;
+        if (form.elements.min_stock_level) form.elements.min_stock_level.value = product.min_stock_level || 0;
+        const target = editProduct.dataset.focusImage ? form.elements.image : form.elements.product_name;
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (target) target.focus();
       }
       return;
     }
@@ -2642,6 +2877,7 @@ function wireEvents() {
     const stockForm = event.target.closest("[data-stock-movement]");
     const cashForm = event.target.closest("[data-cash-transaction]");
     const productForm = event.target.closest("[data-product-save]");
+    const categoryForm = event.target.closest("[data-category-save]");
     const staffForm = event.target.closest("[data-staff-save]");
 
     if (posAuthForm) {
@@ -2845,11 +3081,38 @@ function wireEvents() {
     if (productForm) {
       event.preventDefault();
       try {
-        const result = await api("product-save", Object.fromEntries(new FormData(productForm)));
-        syncProducts(result.products || []);
+        const formData = new FormData(productForm);
+        const imageFile = productForm.elements.image?.files?.[0] || null;
+        formData.delete("image");
+        let result = await apiForm("product-save", formData);
+        if (imageFile) {
+          const imageData = new FormData();
+          imageData.append("product_id", result.id);
+          imageData.append("image", imageFile);
+          imageData.append("alt_text", productForm.elements.product_name?.value || "");
+          imageData.append("is_primary", "1");
+          imageData.append("branch_id", productForm.elements.branch_id?.value || state.pos.user?.branch_id || 1);
+          result = await apiForm("product-image-upload", imageData);
+        }
+        syncProductAdminPayload(result);
         productForm.reset();
+        if (productForm.elements.id) productForm.elements.id.value = "";
         renderPosApp();
         showToast("Đã lưu sản phẩm.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (categoryForm) {
+      event.preventDefault();
+      try {
+        const result = await api("category-save", Object.fromEntries(new FormData(categoryForm)));
+        syncProductAdminPayload(result);
+        categoryForm.reset();
+        if (categoryForm.elements.id) categoryForm.elements.id.value = "";
+        renderPosApp();
+        showToast("Đã lưu danh mục.");
       } catch (error) {
         showToast(error.message);
       }
@@ -2874,6 +3137,8 @@ function wireEvents() {
     const posVoucher = event.target.closest("[data-pos-voucher]");
     const tableSelect = event.target.closest("[data-table-select]");
     const siteFilter = event.target.closest("[data-site-category-filter], [data-site-sort]");
+    const adminStatusFilter = event.target.closest("[data-admin-product-status]");
+    const adminCategoryFilter = event.target.closest("[data-admin-product-category]");
     if (siteVoucher) {
       state.site.voucherId = siteVoucher.value;
       renderTotals("site");
@@ -2891,18 +3156,41 @@ function wireEvents() {
     }
     if (siteFilter) {
       renderSiteProducts();
+      return;
+    }
+    if (adminStatusFilter) {
+      state.pos.adminProductStatus = adminStatusFilter.value || "all";
+      renderPosApp();
+      return;
+    }
+    if (adminCategoryFilter) {
+      state.pos.adminProductCategory = adminCategoryFilter.value || "";
+      renderPosApp();
     }
   });
 
   document.addEventListener("input", (event) => {
     const productSearch = event.target.closest("[data-product-search]");
     const siteProductSearch = event.target.closest("[data-site-product-search]");
+    const adminProductSearch = event.target.closest("[data-admin-product-search]");
     if (productSearch) {
       state.pos.productFilter = productSearch.value;
       renderPosProducts();
     }
     if (siteProductSearch) {
       renderSiteProducts();
+      return;
+    }
+    if (adminProductSearch) {
+      state.pos.adminProductSearch = adminProductSearch.value || "";
+      renderPosApp();
+      window.setTimeout(() => {
+        const input = document.querySelector("[data-admin-product-search]");
+        if (input) {
+          input.focus();
+          input.setSelectionRange(input.value.length, input.value.length);
+        }
+      }, 0);
     }
   });
 }

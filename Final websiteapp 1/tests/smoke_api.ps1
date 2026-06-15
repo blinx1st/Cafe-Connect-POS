@@ -115,6 +115,52 @@ function Add-Auth {
   return $Body
 }
 
+function Invoke-CafeImageUpload {
+  param(
+    [hashtable]$Body,
+    $Staff
+  )
+
+  $uploadBody = Add-Session $Body $Staff
+  $boundary = "----CafeConnectSmoke$([guid]::NewGuid().ToString("N"))"
+  $stream = New-Object System.IO.MemoryStream
+  $encoding = [System.Text.Encoding]::ASCII
+
+  function Write-PartText {
+    param([string]$Text)
+    $bytes = $encoding.GetBytes($Text)
+    $stream.Write($bytes, 0, $bytes.Length)
+  }
+
+  foreach ($key in $uploadBody.Keys) {
+    Write-PartText "--$boundary`r`n"
+    Write-PartText "Content-Disposition: form-data; name=`"$key`"`r`n`r`n"
+    Write-PartText "$($uploadBody[$key])`r`n"
+  }
+
+  $pngBytes = [Convert]::FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+  Write-PartText "--$boundary`r`n"
+  Write-PartText "Content-Disposition: form-data; name=`"image`"; filename=`"smoke-product.png`"`r`n"
+  Write-PartText "Content-Type: image/png`r`n`r`n"
+  $stream.Write($pngBytes, 0, $pngBytes.Length)
+  Write-PartText "`r`n--$boundary--`r`n"
+  $bodyBytes = $stream.ToArray()
+  $stream.Dispose()
+
+  $headers = @{}
+  if ($script:CsrfToken) {
+    $headers["X-CSRF-Token"] = $script:CsrfToken
+  }
+
+  $json = Invoke-RestMethod -Method Post -Uri "$BaseUrl/api.php?endpoint=product-image-upload" -ContentType "multipart/form-data; boundary=$boundary" -Body $bodyBytes -WebSession $script:CafeSession -Headers $headers -TimeoutSec 10
+  if (-not $json.ok) {
+    throw "product-image-upload failed: $($json.message)"
+  }
+
+  Write-Host "OK product-image-upload"
+  return $json.data
+}
+
 Set-CsrfToken
 
 $blocked = Invoke-CafeRaw "member-register" @{} -WithoutCsrf
@@ -289,6 +335,70 @@ Invoke-CafeApi "create-campaign" (Add-Session @{
 } $marketing) | Out-Null
 
 Expect-CafeApiFailure "inventory" (Add-Session @{} $marketing) "kh"
+
+$categoryCode = "smoke_$suffix"
+Invoke-CafeApi "category-save" (Add-Session @{
+  category_code = $categoryCode
+  category_name = "Smoke Category $suffix"
+  display_order = 99
+  status = "active"
+} $manager) | Out-Null
+
+$productResult = Invoke-CafeApi "product-save" (Add-Session @{
+  product_name = "Smoke Product $suffix"
+  category = $categoryCode
+  price = 39000
+  take_note = "Smoke CRUD product"
+  status = "active"
+  branch_id = 1
+  stock_quantity = 25
+  min_stock_level = 5
+} $manager)
+$productId = $productResult.id
+if (-not ($productResult.admin_products | Where-Object { $_.id -eq $productId })) {
+  throw "Created product was not returned in admin_products."
+}
+
+Invoke-CafeImageUpload @{
+  product_id = $productId
+  alt_text = "Smoke Product $suffix"
+  is_primary = 1
+  branch_id = 1
+} $manager | Out-Null
+
+Invoke-CafeApi "product-save" (Add-Session @{
+  id = $productId
+  product_name = "Smoke Product $suffix Updated"
+  category = $categoryCode
+  price = 42000
+  take_note = "Smoke CRUD product updated"
+  status = "active"
+  branch_id = 1
+  stock_quantity = 20
+  min_stock_level = 4
+} $manager) | Out-Null
+
+Expect-CafeApiFailure "product-save" (Add-Session @{
+  product_name = "Cashier Blocked Product $suffix"
+  category = $categoryCode
+  price = 1000
+  status = "active"
+  branch_id = 1
+} $cashier) "kh"
+
+Invoke-CafeApi "product-delete" (Add-Session @{
+  id = $productId
+  branch_id = 1
+} $manager) | Out-Null
+
+Invoke-CafeApi "product-restore" (Add-Session @{
+  id = $productId
+  branch_id = 1
+} $manager) | Out-Null
+
+Invoke-CafeApi "product-list" (Add-Session @{
+  branch_id = 1
+} $manager) | Out-Null
 
 Invoke-CafeApi "refund-invoice" (Add-Session @{
   invoice_id = $posCheckout.invoice_id

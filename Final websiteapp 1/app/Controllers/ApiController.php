@@ -93,7 +93,11 @@ final class ApiController extends Controller
                 '/api/inventory' => $this->withEndpoint($route, $auth, $payload, fn () => (new Inventory())->overview()),
                 '/api/stock-movement' => $this->withEndpoint($route, $auth, $payload, fn () => (new Inventory())->createMovement($payload)),
                 '/api/cash-transaction' => $this->withEndpoint($route, $auth, $payload, fn () => $this->createCashTransaction($payload)),
+                '/api/product-list' => $this->withEndpoint($route, $auth, $payload, fn () => $this->productList($payload)),
                 '/api/product-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveProduct($payload)),
+                '/api/product-delete' => $this->withEndpoint($route, $auth, $payload, fn () => $this->deleteProduct($payload)),
+                '/api/product-restore' => $this->withEndpoint($route, $auth, $payload, fn () => $this->restoreProduct($payload)),
+                '/api/product-image-upload' => $this->withEndpoint($route, $auth, $payload, fn () => $this->uploadProductImage($payload)),
                 '/api/category-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveCategory($payload)),
                 '/api/content-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveContent($payload)),
                 '/api/staff-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveStaff($payload)),
@@ -165,6 +169,10 @@ final class ApiController extends Controller
                 'order_status_update' => '/api/order-status-update',
                 'receipt_print_log' => '/api/receipt-print-log',
                 'reports_export' => '/api/reports-export',
+                'product_list' => '/api/product-list',
+                'product_delete' => '/api/product-delete',
+                'product_restore' => '/api/product-restore',
+                'product_image_upload' => '/api/product-image-upload',
                 'category_save' => '/api/category-save',
                 'content_save' => '/api/content-save',
                 default => '/api/' . str_replace('_', '-', (string) $_GET['action']),
@@ -212,6 +220,7 @@ final class ApiController extends Controller
             '/api/inventory',
             '/api/reports',
             '/api/receipt',
+            '/api/product-list',
         ];
 
         if (in_array($route, $readOnly, true)) {
@@ -301,6 +310,11 @@ final class ApiController extends Controller
         if (RolePolicy::canAccessModule($role, 'staff')) {
             $data['staff'] = $staff->all();
         }
+        if (RolePolicy::canAccessModule($role, 'products')) {
+            $branchId = (int) ($currentSession['branch_id'] ?? $payload['branch_id'] ?? 1);
+            $data['admin_products'] = $product->allForAdmin(['branch_id' => $branchId]);
+            $data['admin_categories'] = $product->categories(true);
+        }
 
         return $data;
     }
@@ -365,6 +379,109 @@ final class ApiController extends Controller
         ]);
 
         return $result;
+    }
+
+    private function productList(array $payload): array
+    {
+        return (new Product())->adminPayload(max(1, (int) ($payload['branch_id'] ?? 1)));
+    }
+
+    private function deleteProduct(array $payload): array
+    {
+        $productId = (int) ($payload['id'] ?? $payload['product_id'] ?? 0);
+        $result = (new Product())->softDelete($productId, max(1, (int) ($payload['branch_id'] ?? 1)));
+        $this->logProductAdminAction($payload, 'product_delete', $productId, 'inactive');
+
+        return $result;
+    }
+
+    private function restoreProduct(array $payload): array
+    {
+        $productId = (int) ($payload['id'] ?? $payload['product_id'] ?? 0);
+        $result = (new Product())->restore($productId, max(1, (int) ($payload['branch_id'] ?? 1)));
+        $this->logProductAdminAction($payload, 'product_restore', $productId, 'active');
+
+        return $result;
+    }
+
+    private function uploadProductImage(array $payload): array
+    {
+        $productId = (int) ($payload['product_id'] ?? $payload['id'] ?? 0);
+        if ($productId <= 0) {
+            throw new InvalidArgumentException('Product id is required.');
+        }
+        if (empty($_FILES['image']) || !is_array($_FILES['image'])) {
+            throw new InvalidArgumentException('Image file is required.');
+        }
+
+        $file = $_FILES['image'];
+        if ((int) ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            throw new InvalidArgumentException('Upload failed. Please choose another image.');
+        }
+        if ((int) ($file['size'] ?? 0) > 2 * 1024 * 1024) {
+            throw new InvalidArgumentException('Image must be 2MB or smaller.');
+        }
+
+        $tmpPath = (string) ($file['tmp_name'] ?? '');
+        $finfo = new \finfo(FILEINFO_MIME_TYPE);
+        $mime = $tmpPath !== '' && is_file($tmpPath) ? (string) $finfo->file($tmpPath) : '';
+        $extensions = [
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+        ];
+        if (!isset($extensions[$mime])) {
+            throw new InvalidArgumentException('Only JPG, PNG and WEBP images are allowed.');
+        }
+
+        $uploadDir = APP_ROOT . '/assets/uploads/products';
+        if (!is_dir($uploadDir) && !mkdir($uploadDir, 0775, true) && !is_dir($uploadDir)) {
+            throw new InvalidArgumentException('Cannot create upload directory.');
+        }
+
+        $filename = 'product-' . $productId . '-' . date('YmdHis') . '-' . bin2hex(random_bytes(4)) . '.' . $extensions[$mime];
+        $targetPath = $uploadDir . '/' . $filename;
+        $moved = is_uploaded_file($tmpPath)
+            ? move_uploaded_file($tmpPath, $targetPath)
+            : rename($tmpPath, $targetPath);
+        if (!$moved) {
+            throw new InvalidArgumentException('Cannot save uploaded image.');
+        }
+
+        $relativePath = 'assets/uploads/products/' . $filename;
+        $product = new Product();
+        $product->saveImage(
+            $productId,
+            $relativePath,
+            trim((string) ($payload['alt_text'] ?? '')),
+            ((string) ($payload['is_primary'] ?? '1')) !== '0'
+        );
+
+        $this->logProductAdminAction($payload, 'product_image_upload', $productId, $relativePath);
+
+        return $product->adminPayload(max(1, (int) ($payload['branch_id'] ?? 1))) + [
+            'id' => $productId,
+            'image_path' => $relativePath,
+        ];
+    }
+
+    private function logProductAdminAction(array $payload, string $action, int $productId, string $statusOrNote): void
+    {
+        (new PosSession())->logFromPayload($payload, $action, [
+            'entity_type' => 'product',
+            'entity_id' => $productId,
+            'status_to' => $statusOrNote,
+            'note' => $statusOrNote,
+        ]);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) ($payload['staff_id'] ?? 0),
+            'actor_role' => (string) ($payload['staff_role'] ?? ''),
+            'action' => $action,
+            'entity_type' => 'product',
+            'entity_id' => $productId,
+            'metadata' => ['status_or_note' => $statusOrNote],
+        ]);
     }
 
     private function saveCategory(array $payload): array

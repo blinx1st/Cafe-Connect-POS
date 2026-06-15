@@ -4095,6 +4095,53 @@ body {
   background: var(--brown-700);
 }
 
+.pos-body .product-admin-layout {
+  grid-template-columns: minmax(300px, 390px) minmax(0, 1fr);
+}
+
+.pos-body .product-admin-form .panel-head {
+  margin: -14px -14px 12px;
+}
+
+.pos-body .form-two,
+.pos-body .category-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pos-body .product-admin-filters {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) minmax(150px, 190px) minmax(140px, 170px);
+  gap: 8px;
+  width: min(100%, 620px);
+}
+
+.pos-body .product-admin-thumb {
+  width: 58px;
+  height: 44px;
+  display: block;
+  border-radius: 6px;
+  object-fit: cover;
+  background: var(--cream-100);
+}
+
+.pos-body .data-table td strong,
+.pos-body .data-table td small {
+  display: block;
+}
+
+.pos-body .data-table td small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pos-body .row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .pos-body .status {
   color: var(--brown-800);
   background: #f3dfd3;
@@ -4126,6 +4173,12 @@ body {
   .pos-body .campaign-layout,
   .pos-body .crm-grid,
   .pos-body .dashboard-columns {
+    grid-template-columns: 1fr;
+  }
+
+  .pos-body .product-admin-filters,
+  .pos-body .form-two,
+  .pos-body .category-admin-grid {
     grid-template-columns: 1fr;
   }
 

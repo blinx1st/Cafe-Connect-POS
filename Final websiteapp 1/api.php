@@ -45,6 +45,10 @@ $legacyActionMap = [
     'order_status_update' => '/api/order-status-update',
     'receipt_print_log' => '/api/receipt-print-log',
     'reports_export' => '/api/reports-export',
+    'product_list' => '/api/product-list',
+    'product_delete' => '/api/product-delete',
+    'product_restore' => '/api/product-restore',
+    'product_image_upload' => '/api/product-image-upload',
     'category_save' => '/api/category-save',
     'content_save' => '/api/content-save',
 ];
