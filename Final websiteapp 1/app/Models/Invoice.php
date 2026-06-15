@@ -45,10 +45,10 @@ final class Invoice extends Model
         $voucherId = isset($data['voucher_id']) && $data['voucher_id'] !== '' ? (int) $data['voucher_id'] : null;
         $paymentMethod = in_array(($data['payment_method'] ?? 'cash'), ['cash', 'card', 'e_wallet'], true) ? $data['payment_method'] : 'cash';
         $salesChannel = in_array(($data['sales_channel'] ?? 'pos'), ['pos', 'website', 'delivery'], true) ? $data['sales_channel'] : 'pos';
-        $posSessionId = $salesChannel === 'website' ? null : (int) ($data['pos_session_id'] ?? 0);
         $billStartedAt = $this->dateTimeOrNow((string) ($data['bill_started_at'] ?? ($order['created_at'] ?? '')));
         $now = date('Y-m-d H:i:s');
         $isWebsiteOrder = in_array($salesChannel, ['website', 'delivery'], true);
+        $posSessionId = $isWebsiteOrder ? null : (int) ($data['pos_session_id'] ?? 0);
         $isPendingCod = $isWebsiteOrder && $paymentMethod === 'cash';
         $invoiceStatus = $isPendingCod ? 'pending' : 'paid';
         $paymentStatus = $isPendingCod ? 'pending' : 'paid';
@@ -81,16 +81,23 @@ final class Invoice extends Model
             ];
         }
 
-        $customer = $customerId ? $this->customerForUpdate($customerId) : null;
-        $membershipDiscount = $customer ? round($subtotal * ((float) $customer['discount_rate'] / 100), 0) : 0.0;
         $voucherModel = new Voucher();
-        $voucher = $voucherModel->validateForCheckout($voucherId, $customerId);
-        $voucherDiscount = $voucher ? $voucherModel->discount($voucher, max(0, $subtotal - $membershipDiscount)) : 0.0;
-        $total = max(0, $subtotal - $membershipDiscount - $voucherDiscount);
-        $points = ($customerId && $invoiceStatus === 'paid') ? (int) floor($total / 10000) : 0;
+        $customer = null;
+        $voucher = null;
+        $membershipDiscount = 0.0;
+        $voucherDiscount = 0.0;
+        $total = $subtotal;
+        $points = 0;
 
         $this->db->beginTransaction();
         try {
+            $customer = $customerId ? $this->customerForUpdate($customerId) : null;
+            $membershipDiscount = $customer ? round($subtotal * ((float) $customer['discount_rate'] / 100), 0) : 0.0;
+            $voucher = $voucherModel->validateForCheckout($voucherId, $customerId, $salesChannel, true);
+            $voucherDiscount = $voucher ? $voucherModel->discount($voucher, max(0, $subtotal - $membershipDiscount)) : 0.0;
+            $total = max(0, $subtotal - $membershipDiscount - $voucherDiscount);
+            $points = ($customerId && $invoiceStatus === 'paid') ? (int) floor($total / 10000) : 0;
+
             $this->db->prepare(
                 "INSERT INTO invoices (
                     branch_id, staff_id, pos_session_id, service_order_id, customer_id, voucher_id, sales_channel,
@@ -288,6 +295,8 @@ final class Invoice extends Model
             $amount = isset($data['refund_amount']) && (float) $data['refund_amount'] > 0
                 ? min((float) $data['refund_amount'], (float) $invoice['total_amount'])
                 : (float) $invoice['total_amount'];
+            $isFullRefund = $amount >= ((float) $invoice['total_amount'] - 0.01);
+            $restoredVoucherStatus = null;
 
             $this->db->prepare(
                 "INSERT INTO invoice_refunds (invoice_id, staff_id, pos_session_id, refund_amount, reason, status, created_at)
@@ -304,6 +313,9 @@ final class Invoice extends Model
             $this->db->prepare("UPDATE invoices SET status = 'refunded' WHERE id = :id")->execute(['id' => $invoiceId]);
             $this->db->prepare("UPDATE payments SET status = 'refunded' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
             $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
+            if ($isFullRefund && !empty($invoice['voucher_id'])) {
+                $restoredVoucherStatus = (new Voucher())->restoreIfAvailable((int) $invoice['voucher_id']);
+            }
 
             if (!empty($invoice['customer_id'])) {
                 $points = (int) $invoice['points_earned'];
@@ -347,7 +359,12 @@ final class Invoice extends Model
                 'action' => 'invoice_refund',
                 'entity_type' => 'invoice',
                 'entity_id' => $invoiceId,
-                'metadata' => ['refund_amount' => $amount, 'reason' => $reason],
+                'metadata' => [
+                    'refund_amount' => $amount,
+                    'reason' => $reason,
+                    'is_full_refund' => $isFullRefund,
+                    'voucher_status' => $restoredVoucherStatus,
+                ],
             ]);
 
             $this->db->commit();

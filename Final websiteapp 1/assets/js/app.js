@@ -659,7 +659,19 @@ function selectedVoucher(scope) {
   const voucherId = String(state[scope].voucherId || "");
   const customer = state[scope].customer;
   if (!voucherId || !customer || !Array.isArray(customer.vouchers)) return null;
-  return customer.vouchers.find((voucher) => String(voucher.id) === voucherId && voucher.usable) || null;
+  return customer.vouchers.find((voucher) => String(voucher.id) === voucherId && voucherUsableOnScope(voucher, scope)) || null;
+}
+
+function voucherUsableOnScope(voucher, scope) {
+  if (!voucher?.usable) return false;
+  if (scope === "site") {
+    return voucher.usable_on_website !== false;
+  }
+  if (scope === "pos") {
+    return voucher.usable_on_pos !== false;
+  }
+
+  return true;
 }
 
 function totalsFor(scope) {
@@ -736,7 +748,7 @@ function renderVoucherOptions(scope) {
   const select = document.querySelector(scope === "site" ? "[data-site-voucher]" : "[data-pos-voucher]");
   if (!select) return;
 
-  const usable = state[scope].customer?.vouchers?.filter((voucher) => voucher.usable) || [];
+  const usable = state[scope].customer?.vouchers?.filter((voucher) => voucherUsableOnScope(voucher, scope)) || [];
   select.innerHTML = '<option value="">Không dùng voucher</option>' + usable.map((voucher) => {
     const value = voucher.discount_type === "percentage" ? `${Number(voucher.discount_value)}%` : formatMoney(voucher.discount_value);
     return `<option value="${voucher.id}">${escapeHtml(voucher.voucher_code)} · ${value}</option>`;
@@ -758,7 +770,7 @@ function renderMiniMember(scope) {
     return;
   }
 
-  const usableCount = customer.vouchers?.filter((voucher) => voucher.usable).length || 0;
+  const usableCount = customer.vouchers?.filter((voucher) => voucherUsableOnScope(voucher, scope)).length || 0;
   target.innerHTML = `
     <div class="mini-profile">
       <div class="profile-head">
@@ -855,7 +867,7 @@ function renderMemberAccount() {
     return;
   }
 
-  const usableCount = member.vouchers?.filter((voucher) => voucher.usable).length || 0;
+  const usableCount = member.vouchers?.filter((voucher) => voucherUsableOnScope(voucher, "site")).length || 0;
   target.innerHTML = `
     <div class="profile-head">
       <span class="avatar">${escapeHtml((member.customer_name || "?").slice(0, 1))}</span>
@@ -876,9 +888,23 @@ function renderMemberAccount() {
 }
 
 function voucherStatusClass(voucher) {
-  if (voucher.usable) return "good";
-  if (["redeemed", "expired", "cancelled"].includes(voucher.status)) return "bad";
+  const status = voucher.display_status || (voucher.usable ? "usable" : voucher.status);
+  if (status === "usable") return "good";
+  if (["redeemed", "expired", "cancelled"].includes(status)) return "bad";
   return "";
+}
+
+function voucherStatusLabel(voucher) {
+  const status = voucher.display_status || (voucher.usable ? "usable" : voucher.status);
+  return {
+    usable: "Khả dụng",
+    reserved: "Đã giữ cho đơn chờ",
+    redeemed: "Đã dùng",
+    expired: "Hết hạn",
+    cancelled: "Đã hủy",
+    issued: "Đã phát hành",
+    active: "Đang hoạt động",
+  }[status] || status || "Không khả dụng";
 }
 
 function renderProfile(targetName, customer) {
@@ -915,7 +941,7 @@ function renderProfile(targetName, customer) {
       <td>${escapeHtml(voucher.promotion_name)}</td>
       <td>${voucher.discount_type === "percentage" ? Number(voucher.discount_value) + "%" : formatMoney(voucher.discount_value)}</td>
       <td>${escapeHtml(voucher.expiration_date)}</td>
-      <td><span class="status ${voucherStatusClass(voucher)}">${voucher.usable ? "Khả dụng" : escapeHtml(voucher.status)}</span></td>
+      <td><span class="status ${voucherStatusClass(voucher)}">${escapeHtml(voucherStatusLabel(voucher))}</span></td>
     </tr>
   `).join("");
   const historyRows = (customer.history || []).map((invoice) => `
@@ -2053,10 +2079,10 @@ function renderSiteProducts() {
         <div class="product-body">
           <h3>${escapeHtml(product.product_name)}</h3>
           <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
-          <span class="status ${isOut ? "bad" : "good"}">${isOut ? "Tam het" : "Con hang"}</span>
+          <span class="status ${isOut ? "bad" : "good"}">${isOut ? "Tạm hết" : "Còn hàng"}</span>
           <div class="product-actions">
             <strong>${formatMoney(product.price)}</strong>
-            <a class="secondary-link" href="${url(`product?id=${product.id}`)}">Chi tiet</a>
+            <a class="secondary-link" href="${url(`product?id=${product.id}`)}">Chi tiết</a>
             <button type="button" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Order Now</button>
           </div>
         </div>
@@ -2207,7 +2233,7 @@ function renderPosLogin() {
         <div class="login-workspace">
           <div class="login-step auth-step ${auth ? "is-complete" : ""}">
             <div class="step-head">
-              <span class="step-badge">Buoc 1</span>
+              <span class="step-badge">Bước 1</span>
               <div>
                 <h1>Đăng nhập POS</h1>
               </div>
@@ -2256,7 +2282,7 @@ function renderPosLogin() {
 
           <aside class="login-step pin-step ${auth ? "is-ready" : "is-locked"}">
             <div class="step-head">
-              <span class="step-badge">Buoc 2</span>
+              <span class="step-badge">Bước 2</span>
               <div>
                 <h2>Nhập PIN mở ca</h2>
                 <p>${auth ? `${escapeHtml(auth.staff_code || "")} - ${escapeHtml(roleLabels[auth.staff_role] || auth.staff_role)} - ${escapeHtml(auth.branch_name)}` : ""}</p>

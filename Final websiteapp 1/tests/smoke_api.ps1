@@ -187,6 +187,9 @@ Invoke-CafeApi "member-lookup" @{ identity = $phone } | Out-Null
 $claimed = Invoke-CafeApi "voucher-claim" @{
   promotion_id = 3
 }
+Expect-CafeApiFailure "voucher-claim" @{
+  promotion_id = 3
+} "already"
 
 $websitePaidOrder = Invoke-CafeApi "checkout" @{
   customer_id = $member.member.id
@@ -199,6 +202,16 @@ $websitePaidOrder = Invoke-CafeApi "checkout" @{
     @{ product_id = 4; quantity = 1; size = "M" }
   )
 }
+Expect-CafeApiFailure "checkout" @{
+  customer_id = $member.member.id
+  voucher_id = $claimed.voucher_id
+  payment_method = "e_wallet"
+  sales_channel = "website"
+  fulfillment_type = "pickup"
+  items = @(
+    @{ product_id = 4; quantity = 1; size = "M" }
+  )
+} "Voucher"
 
 Invoke-CafeApi "website-orders" @{} | Out-Null
 Invoke-CafeApi "website-order-detail" @{ invoice_id = $websitePaidOrder.invoice_id } | Out-Null
@@ -324,17 +337,113 @@ Invoke-CafeApi "cancel-order" (Add-Session @{
   reason = "Smoke manager cancel"
 } $manager) | Out-Null
 
-Invoke-CafeApi "create-campaign" (Add-Session @{
+$smokeCampaign = Invoke-CafeApi "create-campaign" (Add-Session @{
   promotion_name = "Smoke Campaign $suffix"
   target_segment = "all"
   discount_type = "percentage"
   discount_value = 5
-  voucher_quantity = 1
+  voucher_quantity = 0
   start_date = (Get-Date).ToString("yyyy-MM-dd")
   end_date = (Get-Date).AddDays(7).ToString("yyyy-MM-dd")
-} $marketing) | Out-Null
+} $marketing)
 
 Expect-CafeApiFailure "inventory" (Add-Session @{} $marketing) "kh"
+
+Expect-CafeApiFailure "checkout" (Add-Session @{
+  branch_id = 1
+  customer_id = 2
+  voucher_id = 7
+  payment_method = "cash"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 1; quantity = 1; size = "M" }
+  )
+} $cashier) "Voucher"
+
+$customerOne = Invoke-CafeApi "member-lookup" @{ identity = "1" }
+$customerFour = Invoke-CafeApi "member-lookup" @{ identity = "4" }
+$customerOneVoucher = $customerOne.vouchers | Where-Object { $_.promotion_name -eq "Smoke Campaign $suffix" -and $_.usable_on_pos } | Select-Object -First 1
+$customerFourVoucher = $customerFour.vouchers | Where-Object { $_.promotion_name -eq "Smoke Campaign $suffix" -and $_.usable_on_pos } | Select-Object -First 1
+if (-not $customerOneVoucher -or -not $customerFourVoucher) {
+  throw "Smoke campaign vouchers were not issued for seeded customers."
+}
+
+$codVoucherOrder = Invoke-CafeApi "checkout" @{
+  customer_id = 1
+  voucher_id = $customerOneVoucher.id
+  payment_method = "cash"
+  sales_channel = "website"
+  fulfillment_type = "pickup"
+  customer_note = "Smoke COD voucher reserve"
+  items = @(
+    @{ product_id = 2; quantity = 1; size = "M" }
+  )
+}
+
+Invoke-CafeApi "order-status-update" (Add-Session @{
+  invoice_id = $codVoucherOrder.invoice_id
+  status = "cancelled"
+} $manager) | Out-Null
+
+$refundableVoucherOrder = Invoke-CafeApi "checkout" (Add-Session @{
+  branch_id = 1
+  customer_id = 1
+  voucher_id = $customerOneVoucher.id
+  payment_method = "cash"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 2; quantity = 1; size = "M" }
+  )
+} $cashier)
+
+Invoke-CafeApi "refund-invoice" (Add-Session @{
+  invoice_id = $refundableVoucherOrder.invoice_id
+  reason = "Smoke full refund restores voucher"
+} $manager) | Out-Null
+
+Invoke-CafeApi "checkout" (Add-Session @{
+  branch_id = 1
+  customer_id = 1
+  voucher_id = $customerOneVoucher.id
+  payment_method = "cash"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 2; quantity = 1; size = "M" }
+  )
+} $cashier) | Out-Null
+
+$partialVoucherOrder = Invoke-CafeApi "checkout" (Add-Session @{
+  branch_id = 1
+  customer_id = 4
+  voucher_id = $customerFourVoucher.id
+  payment_method = "cash"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 3; quantity = 1; size = "M" }
+  )
+} $cashier)
+
+Invoke-CafeApi "refund-invoice" (Add-Session @{
+  invoice_id = $partialVoucherOrder.invoice_id
+  refund_amount = 1000
+  reason = "Smoke partial refund keeps voucher redeemed"
+} $manager) | Out-Null
+
+Expect-CafeApiFailure "checkout" (Add-Session @{
+  branch_id = 1
+  customer_id = 4
+  voucher_id = $customerFourVoucher.id
+  payment_method = "cash"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 3; quantity = 1; size = "M" }
+  )
+} $cashier) "Voucher"
 
 $categoryCode = "smoke_$suffix"
 Invoke-CafeApi "category-save" (Add-Session @{

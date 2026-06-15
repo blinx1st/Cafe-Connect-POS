@@ -205,7 +205,8 @@ final class Customer extends Model
     {
         $stmt = $this->db->prepare(
             "SELECT v.id, v.voucher_code, v.release_date, v.expiration_date, v.status,
-                    p.promotion_name, p.discount_type, p.discount_value
+                    p.promotion_name, p.discount_type, p.discount_value,
+                    p.campaign_channel, p.status AS promotion_status
              FROM vouchers v
              JOIN promotions p ON p.id = v.promotion_id
              WHERE v.customer_id = :customer_id
@@ -215,11 +216,16 @@ final class Customer extends Model
         $stmt->execute(['customer_id' => $customerId]);
 
         $rows = $stmt->fetchAll();
+        $voucherModel = new Voucher();
         foreach ($rows as &$row) {
             $row['discount_value'] = (float) $row['discount_value'];
+            $row['display_status'] = $voucherModel->displayStatus($row);
             $row['usable'] = in_array($row['status'], ['issued', 'active'], true)
                 && $row['release_date'] <= today_sql()
-                && $row['expiration_date'] >= today_sql();
+                && $row['expiration_date'] >= today_sql()
+                && $row['promotion_status'] === 'active';
+            $row['usable_on_website'] = $row['usable'] && $voucherModel->canUseOnChannel($row, 'website');
+            $row['usable_on_pos'] = $row['usable'] && $voucherModel->canUseOnChannel($row, 'pos');
         }
 
         return $rows;

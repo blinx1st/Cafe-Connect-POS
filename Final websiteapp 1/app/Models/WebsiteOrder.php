@@ -74,11 +74,7 @@ final class WebsiteOrder extends Model
                 ->execute(['invoice_id' => $invoiceId]);
 
             if (!empty($invoice['voucher_id'])) {
-                $this->db->prepare(
-                    "UPDATE vouchers
-                     SET status = 'active', used_at = NULL
-                     WHERE id = :id AND status = 'reserved'"
-                )->execute(['id' => (int) $invoice['voucher_id']]);
+                (new Voucher())->restoreIfAvailable((int) $invoice['voucher_id']);
             }
 
             (new AuditLog())->record([

@@ -352,20 +352,7 @@ final class Order extends Model
         }
 
         if (!empty($data['website_order_id']) || !empty($data['invoice_id'])) {
-            $where = !empty($data['website_order_id']) ? 'id = :id' : 'invoice_id = :id';
-            $id = (int) ($data['website_order_id'] ?? $data['invoice_id']);
-            $this->db->prepare("UPDATE website_orders SET order_status = :status WHERE $where")
-                ->execute(['status' => $status, 'id' => $id]);
-            (new AuditLog())->record([
-                'actor_type' => 'staff',
-                'actor_id' => (int) ($data['staff_id'] ?? 0),
-                'action' => 'website_order_status_update',
-                'entity_type' => !empty($data['website_order_id']) ? 'website_order' : 'invoice',
-                'entity_id' => $id,
-                'metadata' => ['status' => $status],
-            ]);
-
-            return ['updated' => true];
+            return $this->updateWebsiteOrderStatus($data, $status);
         }
 
         $orderId = (int) ($data['order_id'] ?? 0);
@@ -385,6 +372,122 @@ final class Order extends Model
         }
 
         return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+    }
+
+    private function updateWebsiteOrderStatus(array $data, string $status): array
+    {
+        $where = !empty($data['website_order_id']) ? 'wo.id = :id' : 'wo.invoice_id = :id';
+        $id = (int) ($data['website_order_id'] ?? $data['invoice_id']);
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Website order id or invoice id is required.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT wo.id AS website_order_id, wo.order_status, i.*
+                 FROM website_orders wo
+                 JOIN invoices i ON i.id = wo.invoice_id
+                 WHERE $where
+                 LIMIT 1
+                 FOR UPDATE"
+            );
+            $stmt->execute(['id' => $id]);
+            $invoice = $stmt->fetch();
+            if (!$invoice) {
+                throw new InvalidArgumentException('Website order not found.');
+            }
+
+            if ($status === 'cancelled') {
+                if (($invoice['status'] ?? '') !== 'pending') {
+                    throw new InvalidArgumentException('Only pending website orders can be cancelled without refund.');
+                }
+                $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE id = :id")
+                    ->execute(['id' => (int) $invoice['website_order_id']]);
+                $this->db->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = :id")
+                    ->execute(['id' => (int) $invoice['id']]);
+                $this->db->prepare("UPDATE payments SET status = 'failed' WHERE invoice_id = :invoice_id AND status = 'pending'")
+                    ->execute(['invoice_id' => (int) $invoice['id']]);
+                if (!empty($invoice['voucher_id'])) {
+                    (new Voucher())->restoreIfAvailable((int) $invoice['voucher_id']);
+                }
+            } elseif ($status === 'paid' && ($invoice['status'] ?? '') === 'pending') {
+                $points = !empty($invoice['customer_id']) ? (int) floor((float) $invoice['total_amount'] / 10000) : 0;
+                $this->db->prepare(
+                    "UPDATE invoices
+                     SET status = 'paid', paid_at = NOW(), points_earned = :points
+                     WHERE id = :id"
+                )->execute(['id' => (int) $invoice['id'], 'points' => $points]);
+                $this->db->prepare(
+                    "UPDATE payments
+                     SET status = 'paid', paid_at = NOW()
+                     WHERE invoice_id = :invoice_id"
+                )->execute(['invoice_id' => (int) $invoice['id']]);
+                $this->db->prepare("UPDATE website_orders SET order_status = 'paid' WHERE id = :id")
+                    ->execute(['id' => (int) $invoice['website_order_id']]);
+
+                if (!empty($invoice['customer_id'])) {
+                    if ($points > 0) {
+                        $this->db->prepare(
+                            "INSERT INTO loyalty_point_transactions (customer_id, invoice_id, transaction_type, points, description, created_at)
+                             VALUES (:customer_id, :invoice_id, 'earn', :points, :description, NOW())"
+                        )->execute([
+                            'customer_id' => (int) $invoice['customer_id'],
+                            'invoice_id' => (int) $invoice['id'],
+                            'points' => $points,
+                            'description' => 'Earned points from COD order #' . (int) $invoice['id'],
+                        ]);
+                    }
+                    $this->db->prepare(
+                        "UPDATE customers
+                         SET current_points = current_points + :points,
+                             total_spending = total_spending + :total,
+                             last_visit_date = CURDATE()
+                         WHERE id = :customer_id"
+                    )->execute([
+                        'points' => $points,
+                        'total' => (float) $invoice['total_amount'],
+                        'customer_id' => (int) $invoice['customer_id'],
+                    ]);
+                    $this->upgradeTier((int) $invoice['customer_id']);
+                }
+                if (!empty($invoice['voucher_id'])) {
+                    (new Voucher())->redeem((int) $invoice['voucher_id']);
+                }
+            } else {
+                $this->db->prepare("UPDATE website_orders SET order_status = :status WHERE id = :id")
+                    ->execute(['status' => $status, 'id' => (int) $invoice['website_order_id']]);
+            }
+
+            (new AuditLog())->record([
+                'actor_type' => 'staff',
+                'actor_id' => (int) ($data['staff_id'] ?? 0),
+                'action' => 'website_order_status_update',
+                'entity_type' => 'website_order',
+                'entity_id' => (int) $invoice['website_order_id'],
+                'metadata' => ['status' => $status, 'invoice_id' => (int) $invoice['id']],
+            ]);
+
+            $this->db->commit();
+            return ['updated' => true];
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
+    private function upgradeTier(int $customerId): void
+    {
+        $this->db->prepare(
+            "UPDATE customers c
+             JOIN membership_tiers mt ON mt.min_total_spending = (
+                SELECT MAX(mt2.min_total_spending)
+                FROM membership_tiers mt2
+                WHERE mt2.min_total_spending <= c.total_spending
+             )
+             SET c.membership_tier_id = mt.id
+             WHERE c.id = :customer_id"
+        )->execute(['customer_id' => $customerId]);
     }
 
     public function kitchenQueue(): array
