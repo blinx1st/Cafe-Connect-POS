@@ -44,6 +44,7 @@ final class Customer extends Model
         $customer['claimable_vouchers'] = $this->claimableVouchers((int) $customer['id'], $customer);
         $customer['history'] = $this->history((int) $customer['id']);
         $customer['favorites'] = $this->favorites((int) $customer['id']);
+        $customer['website_orders'] = (new WebsiteOrder())->forCustomer((int) $customer['id']);
 
         return $customer;
     }

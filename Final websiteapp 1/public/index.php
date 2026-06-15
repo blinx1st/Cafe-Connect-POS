@@ -13,6 +13,7 @@ $router = new Router();
 
 $router->get('/', [WebsiteController::class, 'home']);
 $router->get('/menu', [WebsiteController::class, 'menu']);
+$router->get('/product', [WebsiteController::class, 'product']);
 $router->get('/login', [WebsiteController::class, 'login']);
 $router->get('/register', [WebsiteController::class, 'register']);
 $router->get('/forgot-password', [WebsiteController::class, 'forgotPassword']);
@@ -20,6 +21,7 @@ $router->get('/reset-password', [WebsiteController::class, 'resetPassword']);
 $router->get('/account', [WebsiteController::class, 'account']);
 $router->get('/member', [WebsiteController::class, 'member']);
 $router->get('/checkout', [WebsiteController::class, 'checkout']);
+$router->get('/order', [WebsiteController::class, 'order']);
 
 $router->get('/pos', [PosController::class, 'index']);
 $router->get('/pos/login', [PosController::class, 'login']);
@@ -50,6 +52,10 @@ $apiRoutes = [
     '/api/member-forgot-password',
     '/api/member-reset-password',
     '/api/member-lookup',
+    '/api/product-detail',
+    '/api/website-orders',
+    '/api/website-order-detail',
+    '/api/website-order-cancel',
     '/api/voucher-claim',
     '/api/pos-auth-login',
     '/api/pos-auth-current',
@@ -76,7 +82,9 @@ $apiRoutes = [
     '/api/receipt',
     '/api/receipt-print-log',
     '/api/payment-demo-create',
+    '/api/payment-demo-confirm',
     '/api/checkout-closing',
+    '/api/shift-closing',
     '/api/dashboard',
     '/api/campaigns',
     '/api/create-campaign',
@@ -84,6 +92,8 @@ $apiRoutes = [
     '/api/stock-movement',
     '/api/cash-transaction',
     '/api/product-save',
+    '/api/category-save',
+    '/api/content-save',
     '/api/staff-save',
     '/api/reports',
     '/api/reports-export',

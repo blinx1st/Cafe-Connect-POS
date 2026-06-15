@@ -21,6 +21,7 @@ use App\Models\Product;
 use App\Models\Report;
 use App\Models\Staff;
 use App\Models\StaffAuthSession;
+use App\Models\WebsiteOrder;
 use InvalidArgumentException;
 use Throwable;
 
@@ -53,6 +54,10 @@ final class ApiController extends Controller
                 '/api/member-forgot-password' => $auth->memberForgotPassword($payload),
                 '/api/member-reset-password' => $auth->memberResetPassword($payload),
                 '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
+                '/api/product-detail' => $this->productDetail($payload),
+                '/api/website-orders' => $this->memberOrders(),
+                '/api/website-order-detail' => $this->memberOrderDetail($payload),
+                '/api/website-order-cancel' => $this->memberOrderCancel($payload),
                 '/api/voucher-claim' => $this->claimVoucher($payload),
                 '/api/pos-auth-login' => (new StaffAuthSession())->login($payload),
                 '/api/pos-auth-current' => (new StaffAuthSession())->current($payload),
@@ -79,7 +84,9 @@ final class ApiController extends Controller
                 '/api/receipt' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->receipt((int) ($payload['invoice_id'] ?? 0))),
                 '/api/receipt-print-log' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->logReceiptPrint($payload)),
                 '/api/payment-demo-create' => $this->paymentDemoCreate($payload),
+                '/api/payment-demo-confirm' => $this->paymentDemoConfirm($payload),
                 '/api/checkout-closing' => $this->withEndpoint($route, $auth, $payload, fn () => (new PosSession())->logout($payload)),
+                '/api/shift-closing' => $this->withEndpoint($route, $auth, $payload, fn () => (new PosSession())->logout($payload)),
                 '/api/dashboard' => $this->withEndpoint($route, $auth, $payload, fn () => (new Dashboard())->data()),
                 '/api/campaigns' => $this->withEndpoint($route, $auth, $payload, fn () => ['campaigns' => (new Campaign())->performance()]),
                 '/api/create-campaign' => $this->withEndpoint($route, $auth, $payload, fn () => (new Campaign())->create($payload)),
@@ -87,6 +94,8 @@ final class ApiController extends Controller
                 '/api/stock-movement' => $this->withEndpoint($route, $auth, $payload, fn () => (new Inventory())->createMovement($payload)),
                 '/api/cash-transaction' => $this->withEndpoint($route, $auth, $payload, fn () => $this->createCashTransaction($payload)),
                 '/api/product-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveProduct($payload)),
+                '/api/category-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveCategory($payload)),
+                '/api/content-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveContent($payload)),
                 '/api/staff-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveStaff($payload)),
                 '/api/reports' => $this->withEndpoint($route, $auth, $payload, fn () => (new Report())->data($payload)),
                 '/api/reports-export' => $this->withEndpoint($route, $auth, $payload, fn () => (new Report())->exportCsv($payload)),
@@ -127,6 +136,10 @@ final class ApiController extends Controller
                 'member_forgot_password' => '/api/member-forgot-password',
                 'member_reset_password' => '/api/member-reset-password',
                 'member_lookup' => '/api/member-lookup',
+                'product_detail' => '/api/product-detail',
+                'website_orders' => '/api/website-orders',
+                'website_order_detail' => '/api/website-order-detail',
+                'website_order_cancel' => '/api/website-order-cancel',
                 'voucher_claim' => '/api/voucher-claim',
                 'customer_create' => '/api/customer-create',
                 'checkout' => '/api/checkout',
@@ -146,10 +159,14 @@ final class ApiController extends Controller
                 'void_order_item' => '/api/void-order-item',
                 'cancel_order' => '/api/cancel-order',
                 'checkout_closing' => '/api/checkout-closing',
+                'shift_closing' => '/api/shift-closing',
                 'payment_demo_create' => '/api/payment-demo-create',
+                'payment_demo_confirm' => '/api/payment-demo-confirm',
                 'order_status_update' => '/api/order-status-update',
                 'receipt_print_log' => '/api/receipt-print-log',
                 'reports_export' => '/api/reports-export',
+                'category_save' => '/api/category-save',
+                'content_save' => '/api/content-save',
                 default => '/api/' . str_replace('_', '-', (string) $_GET['action']),
             };
         }
@@ -182,6 +199,9 @@ final class ApiController extends Controller
             '/api/pos-bootstrap',
             '/api/member-session',
             '/api/member-lookup',
+            '/api/product-detail',
+            '/api/website-orders',
+            '/api/website-order-detail',
             '/api/pos-auth-current',
             '/api/pos-session-current',
             '/api/pos-session-report',
@@ -347,6 +367,60 @@ final class ApiController extends Controller
         return $result;
     }
 
+    private function saveCategory(array $payload): array
+    {
+        $result = (new Product())->saveCategory($payload);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) ($payload['staff_id'] ?? 0),
+            'actor_role' => (string) ($payload['staff_role'] ?? ''),
+            'action' => 'category_save',
+            'entity_type' => 'product_category',
+            'entity_id' => (int) ($result['id'] ?? 0),
+            'metadata' => ['category_code' => (string) ($payload['category_code'] ?? '')],
+        ]);
+
+        return $result;
+    }
+
+    private function saveContent(array $payload): array
+    {
+        $allowed = ['home_banner', 'footer_policy', 'hotline', 'address', 'social_links'];
+        $key = (string) ($payload['content_key'] ?? $payload['key'] ?? '');
+        if (!in_array($key, $allowed, true)) {
+            throw new InvalidArgumentException('Content key is not allowed.');
+        }
+
+        $contentDir = APP_ROOT . '/storage/cms';
+        if (!is_dir($contentDir) && !mkdir($contentDir, 0775, true) && !is_dir($contentDir)) {
+            throw new InvalidArgumentException('Cannot create CMS storage directory.');
+        }
+
+        $file = $contentDir . '/site_content.json';
+        $current = is_file($file) ? json_decode((string) file_get_contents($file), true) : [];
+        if (!is_array($current)) {
+            $current = [];
+        }
+        $current[$key] = [
+            'value' => (string) ($payload['content_value'] ?? $payload['value'] ?? ''),
+            'updated_at' => date('Y-m-d H:i:s'),
+            'updated_by' => (int) ($payload['staff_id'] ?? 0),
+        ];
+        file_put_contents($file, json_encode($current, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) ($payload['staff_id'] ?? 0),
+            'actor_role' => (string) ($payload['staff_role'] ?? ''),
+            'action' => 'content_save',
+            'entity_type' => 'site_content',
+            'entity_id' => null,
+            'metadata' => ['content_key' => $key],
+        ]);
+
+        return ['content' => $current];
+    }
+
     private function saveStaff(array $payload): array
     {
         $result = (new Staff())->save($payload);
@@ -384,6 +458,51 @@ final class ApiController extends Controller
         return (new Customer())->claimVoucher($customerId, $promotionId);
     }
 
+    private function productDetail(array $payload): array
+    {
+        $productId = (int) ($payload['id'] ?? $payload['product_id'] ?? 0);
+        $product = (new Product())->detail($productId);
+        if (!$product) {
+            throw new InvalidArgumentException('Product not found.');
+        }
+
+        return ['product' => $product];
+    }
+
+    private function memberOrders(): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Please login to view website orders.');
+        }
+
+        return ['orders' => (new WebsiteOrder())->forCustomer($customerId)];
+    }
+
+    private function memberOrderDetail(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Please login to view this order.');
+        }
+
+        return (new WebsiteOrder())->detailForCustomer($customerId, (int) ($payload['invoice_id'] ?? 0));
+    }
+
+    private function memberOrderCancel(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Please login to cancel this order.');
+        }
+
+        return (new WebsiteOrder())->cancelForCustomer(
+            $customerId,
+            (int) ($payload['invoice_id'] ?? 0),
+            (string) ($payload['reason'] ?? '')
+        );
+    }
+
     private function checkout(array $payload, AuthController $auth): array
     {
         $salesChannel = $payload['sales_channel'] ?? 'pos';
@@ -401,7 +520,7 @@ final class ApiController extends Controller
             throw new InvalidArgumentException('Payment amount is required.');
         }
 
-        $provider = trim((string) ($payload['provider'] ?? 'Cafe Connect Demo Pay'));
+        $provider = trim((string) ($payload['provider'] ?? PAYMENT_DEMO_PROVIDER));
         $status = in_array(($payload['status'] ?? 'paid'), ['pending', 'paid', 'failed'], true)
             ? $payload['status']
             : 'paid';
@@ -413,6 +532,16 @@ final class ApiController extends Controller
             'transaction_reference' => 'DEMO-' . date('YmdHis') . '-' . random_int(100, 999),
             'created_at' => date('Y-m-d H:i:s'),
         ];
+    }
+
+    private function paymentDemoConfirm(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Please login before confirming DemoPay payment.');
+        }
+
+        return (new WebsiteOrder())->confirmDemoPayment($customerId, (int) ($payload['invoice_id'] ?? 0));
     }
 
     private function withEndpoint(string $route, AuthController $auth, array $payload, callable $callback): mixed

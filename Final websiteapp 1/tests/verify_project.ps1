@@ -100,11 +100,13 @@ Write-Step "Route checks"
 $routes = @(
   "/",
   "/menu",
+  "/product?id=1",
   "/login",
   "/register",
   "/forgot-password",
   "/account",
   "/checkout",
+  "/order?invoice_id=1",
   "/member",
   "/pos/login",
   "/pos/checkout",

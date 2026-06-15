@@ -157,6 +157,10 @@ function seed_demo_credentials(): void
 
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     try {
+        if (!APP_ALLOW_SAMPLE_RESET) {
+            throw new RuntimeException('APP_ENV=' . APP_ENV . ' does not allow sample reset from install.php. Use backup and migration workflow.');
+        }
+
         $pdo = Database::pdo(false);
         $schemaPath = __DIR__ . '/database/cafe_connect_schema.sql';
 
@@ -191,11 +195,15 @@ try {
   <body class="install-page">
     <main class="install-card">
       <p class="eyebrow">Cafe Connect MVC</p>
-      <h1>Cài đặt database XAMPP</h1>
+      <h1>Database setup for XAMPP</h1>
       <p>
-        Trang này import <strong>database/cafe_connect_schema.sql</strong> vào MySQL
-        bằng cấu hình mặc định <strong>127.0.0.1 / root / mật khẩu rỗng</strong>.
-        Thao tác import sẽ reset sample data cho Website + POS roles.
+        This page imports <strong>database/cafe_connect_schema.sql</strong>, migrations and seeders
+        into MySQL using <strong><?= e(DB_HOST) ?> / <?= e(DB_USER) ?></strong>.
+        In local mode this action resets the sample Website + POS data.
+      </p>
+      <p>
+        Current environment: <strong><?= e(APP_ENV) ?></strong>.
+        <?= APP_ALLOW_SAMPLE_RESET ? 'Sample reset is enabled.' : 'Sample reset is disabled in this environment.' ?>
       </p>
 
       <?php if ($status): ?>
@@ -208,14 +216,14 @@ try {
 
       <div class="install-status">
         <span>Database</span>
-        <strong><?= $tableCount > 0 ? 'Đã sẵn sàng' : 'Chưa cài đặt' ?></strong>
-        <small><?= $tableCount ?> bảng được phát hiện</small>
+        <strong><?= $tableCount > 0 ? 'Ready' : 'Not installed' ?></strong>
+        <small><?= $tableCount ?> tables detected</small>
       </div>
 
       <form method="post">
-        <button type="submit" class="primary-btn">Import / Reset sample data</button>
-        <a class="secondary-link" href="index.php">Mở website</a>
-        <a class="secondary-link" href="pos.php">Mở POS</a>
+        <button type="submit" class="primary-btn" <?= APP_ALLOW_SAMPLE_RESET ? '' : 'disabled' ?>>Import / Reset sample data</button>
+        <a class="secondary-link" href="index.php">Open website</a>
+        <a class="secondary-link" href="pos.php">Open POS</a>
       </form>
     </main>
   </body>

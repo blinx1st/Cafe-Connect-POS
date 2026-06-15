@@ -64,6 +64,10 @@ function url(path = "") {
   return baseUrl + String(path).replace(/^\/+/, "");
 }
 
+function queryParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
 function loadSiteCart() {
   try {
     const raw = localStorage.getItem("cafe_site_cart");
@@ -140,7 +144,7 @@ function sqlNow() {
 }
 
 function formatDateTime(value) {
-  if (!value) return "Chua co";
+  if (!value) return "Chưa có";
   const normalized = String(value).replace(" ", "T");
   const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return String(value);
@@ -160,7 +164,7 @@ function durationSince(value, closedAt = "") {
 
 const escapeHtml = (value) =>
   String(value ?? "")
-    .replaceAll("&", "&amp;")
+    .replaceAll("&", "&")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
@@ -415,7 +419,7 @@ async function navigateWebsite(href, pushState = true) {
     const html = await response.text();
     const doc = new DOMParser().parseFromString(html, "text/html");
     const nextMain = doc.querySelector("main");
-    if (!nextMain) throw new Error("Trang khong co noi dung main.");
+    if (!nextMain) throw new Error("Trang không có nội dung main.");
 
     document.title = doc.title || document.title;
     currentMain.replaceWith(nextMain);
@@ -532,10 +536,10 @@ function showReceiptDialog(receipt) {
     <div class="receipt-box">
       <button type="button" class="receipt-close" data-receipt-close>x</button>
       <p class="eyebrow">Cafe Connect Receipt</p>
-      <h2>Hoa don #${escapeHtml(invoice.id || "")}</h2>
+      <h2>Hóa đơn #${escapeHtml(invoice.id || "")}</h2>
       <p>${escapeHtml(invoice.branch_name || "")} - ${escapeHtml(formatDateTime(invoice.paid_at || invoice.invoice_date || ""))}</p>
-      ${tableHtml(items, ["Mon", "SL", "Gia", "Tong"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
-      <div class="totals"><p><span>Tong</span><strong>${formatMoney(invoice.total_amount)}</strong></p></div>
+      ${tableHtml(items, ["Món", "SL", "Giá", "Tổng"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
+      <div class="totals"><p><span>Tổng</span><strong>${formatMoney(invoice.total_amount)}</strong></p></div>
       <button type="button" class="primary-btn full" data-receipt-print="${escapeHtml(invoice.id || "")}">In receipt</button>
     </div>
   `;
@@ -861,6 +865,15 @@ function renderProfile(targetName, customer) {
       <td>+${Number(invoice.points_earned || 0)}</td>
     </tr>
   `).join("");
+  const orderRows = (customer.website_orders || []).map((order) => `
+    <tr>
+      <td><a href="${url(`order?invoice_id=${order.invoice_id}`)}">#${escapeHtml(order.invoice_id)}</a></td>
+      <td>${escapeHtml(order.created_at || `${order.invoice_date || ""} ${order.invoice_time || ""}`)}</td>
+      <td>${escapeHtml(order.fulfillment_type || "")}</td>
+      <td><span class="status ${order.order_status === "cancelled" ? "bad" : (order.order_status === "pending" ? "" : "good")}">${escapeHtml(order.order_status || "")}</span></td>
+      <td>${formatMoney(order.total_amount)}</td>
+    </tr>
+  `).join("");
 
   target.innerHTML = `
     <div class="profile-head">
@@ -898,6 +911,17 @@ function renderProfile(targetName, customer) {
       </table>
     </div>
   `;
+  if (orderRows) {
+    target.insertAdjacentHTML("beforeend", `
+      <div class="table-wrap">
+      <h3>Đơn hàng website</h3>
+      <table class="data-table">
+        <thead><tr><th>Đơn</th><th>Thời gian</th><th>Nhận hàng</th><th>Trạng thái</th><th>Tổng</th></tr></thead>
+          <tbody>${orderRows}</tbody>
+        </table>
+      </div>
+    `);
+  }
 }
 
 function legacyRenderSiteProducts() {
@@ -905,9 +929,26 @@ function legacyRenderSiteProducts() {
   if (!target) return;
 
   const limit = Number(target.dataset.productLimit || 0);
-  const rows = limit > 0 ? products.slice(0, limit) : products;
+  const search = (document.querySelector("[data-site-product-search]")?.value || "").trim().toLowerCase();
+  const category = document.querySelector("[data-site-category-filter]")?.value || "";
+  const sort = document.querySelector("[data-site-sort]")?.value || "";
+  let rows = products.filter((product) => {
+    const matchesSearch = !search
+      || String(product.product_name || "").toLowerCase().includes(search)
+      || String(product.take_note || "").toLowerCase().includes(search);
+    const matchesCategory = !category || String(product.category || "") === category;
+    return matchesSearch && matchesCategory;
+  });
+  rows = rows.sort((a, b) => {
+    if (sort === "price_asc") return Number(a.price || 0) - Number(b.price || 0);
+    if (sort === "price_desc") return Number(b.price || 0) - Number(a.price || 0);
+    if (sort === "name_desc") return String(b.product_name || "").localeCompare(String(a.product_name || ""));
+    return 0;
+  });
+  rows = limit > 0 ? rows.slice(0, limit) : rows;
   target.innerHTML = rows.map((product) => {
     const isFavorite = state.site.customer?.favorites?.includes(Number(product.id));
+    const isOut = Boolean(product.is_out_of_stock) || Number(product.stock_quantity || 0) <= 0;
     return `
       <article class="product-card">
         <img src="${escapeHtml(asset(product.image))}" alt="${escapeHtml(product.product_name)}">
@@ -1003,7 +1044,15 @@ async function checkoutScope(scope, extraPayload = {}) {
   if (scope === "site") {
     payload.fulfillment_type = document.querySelector("[data-site-fulfillment]")?.value || "pickup";
     payload.delivery_address = document.querySelector("[data-site-delivery-address]")?.value?.trim() || "";
-    payload.customer_note = document.querySelector("[data-site-customer-note]")?.value?.trim() || "";
+    const receiverPhone = document.querySelector("[data-site-receiver-phone]")?.value?.trim() || "";
+    if (payload.fulfillment_type === "delivery" && !payload.delivery_address) {
+      showToast("Vui lòng nhập địa chỉ giao hàng.");
+      return;
+    }
+    payload.customer_note = [
+      receiverPhone ? `Receiver phone: ${receiverPhone}` : "",
+      document.querySelector("[data-site-customer-note]")?.value?.trim() || "",
+    ].filter(Boolean).join(" | ");
     const requestedAt = document.querySelector("[data-site-requested-at]")?.value || "";
     if (requestedAt) {
       payload.requested_at = requestedAt.replace("T", " ") + ":00";
@@ -1034,7 +1083,68 @@ async function checkoutScope(scope, extraPayload = {}) {
       showReceiptDialog(await api("receipt", { invoice_id: result.invoice_id }));
     } catch {}
   }
+  if (scope === "site" && result.invoice_id) {
+    const statusText = result.status === "pending" ? "Đơn COD đang chờ thanh toán." : "Đơn đã thanh toán DemoPay.";
+    showToast(`${statusText} Đang chuyển sang chi tiết đơn #${result.invoice_id}.`);
+    await navigateWebsite(url(`order?invoice_id=${result.invoice_id}`));
+    return;
+  }
   if (section === "pos") await refreshPosData(false);
+}
+
+function renderWebsiteOrderDetail(receipt) {
+  const target = document.querySelector("[data-order-detail]");
+  if (!target) return;
+
+  const invoice = receipt?.invoice || {};
+  const items = receipt?.items || [];
+  const payments = receipt?.payments || [];
+  const payment = payments[0] || {};
+  const canCancel = invoice.order_status === "pending";
+  target.innerHTML = `
+    <article class="auth-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Order #${escapeHtml(invoice.id || "")}</p>
+          <h2>${escapeHtml(invoice.order_status || invoice.status || "order")}</h2>
+        </div>
+        <span class="status ${invoice.order_status === "cancelled" ? "bad" : (invoice.status === "paid" ? "good" : "")}">${escapeHtml(invoice.status || "")}</span>
+      </div>
+      <div class="receipt-summary-grid">
+        <div class="metric"><strong>${formatMoney(invoice.total_amount)}</strong><small>Tổng tiền</small></div>
+        <div class="metric"><strong>${escapeHtml(invoice.payment_method || "")}</strong><small>Thanh toán</small></div>
+        <div class="metric"><strong>${escapeHtml(payment.status || "")}</strong><small>Trạng thái payment</small></div>
+        <div class="metric"><strong>${escapeHtml(invoice.fulfillment_type || "pickup")}</strong><small>Nhận hàng</small></div>
+      </div>
+      <div class="order-status-line">
+        <span>Dat luc: ${escapeHtml(formatDateTime(invoice.created_at || invoice.bill_started_at || ""))}</span>
+        <span>Thanh toán: ${escapeHtml(formatDateTime(invoice.paid_at || ""))}</span>
+        <span>Chi nhanh: ${escapeHtml(invoice.branch_name || "")}</span>
+      </div>
+      ${invoice.delivery_address ? `<p><strong>Dia chi:</strong> ${escapeHtml(invoice.delivery_address)}</p>` : ""}
+      ${invoice.customer_note ? `<p><strong>Ghi chu:</strong> ${escapeHtml(invoice.customer_note)}</p>` : ""}
+      ${tableHtml(items, ["Món", "SL", "Size", "Giá", "Tổng"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${escapeHtml(row.size || "")}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
+      <div class="order-action-row">
+        <button type="button" class="secondary-btn" data-order-receipt>In / xem receipt</button>
+        ${canCancel ? `<button type="button" class="secondary-btn danger" data-website-order-cancel="${escapeHtml(invoice.id || "")}">Hủy đơn đang chờ</button>` : ""}
+      </div>
+    </article>
+  `;
+}
+
+async function loadWebsiteOrderDetail() {
+  if (!document.querySelector("[data-order-detail]")) return;
+  const invoiceId = Number(queryParam("invoice_id") || 0);
+  if (!invoiceId) {
+    document.querySelector("[data-order-detail]").innerHTML = '<div class="empty-state">Thieu invoice_id.</div>';
+    return;
+  }
+  try {
+    const receipt = await api("website-order-detail", { invoice_id: invoiceId });
+    renderWebsiteOrderDetail(receipt);
+  } catch (error) {
+    document.querySelector("[data-order-detail]").innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 function allowedModules(user = state.pos.user) {
@@ -1325,7 +1435,7 @@ function renderOrdersModule() {
       <footer>
         <strong>${formatMoney(order.subtotal_amount)}</strong>
         ${canCheckout ? `<button type="button" class="primary-btn" data-order-checkout="${order.id}">Thanh toán</button>` : ""}
-        ${canCancel ? `<button type="button" class="ghost-btn" data-cancel-order="${order.id}">Huy order</button>` : ""}
+        ${canCancel ? `<button type="button" class="ghost-btn" data-cancel-order="${order.id}">Hủy order</button>` : ""}
       </footer>
     </article>
   `).join("");
@@ -1333,15 +1443,15 @@ function renderOrdersModule() {
   if (!canCreate) {
     return `
       <section class="panel">
-        <div class="panel-head"><h2>Order dang mo</h2><p>${canCheckout ? "Thu ngan xem order de thanh toan." : "Role nay chi duoc xem order theo quyen duoc cap."}</p></div>
-        ${canCheckout ? `<label class="field order-payment">Thanh toan
+        <div class="panel-head"><h2>Order đang mở</h2><p>${canCheckout ? "Thu ngân xem order để thanh toán." : "Role này chỉ được xem order theo quyền được cấp."}</p></div>
+        ${canCheckout ? `<label class="field order-payment">Thanh toán
           <select data-pos-payment>
             <option value="cash">Tien mat</option>
             <option value="card">The</option>
             <option value="e_wallet">Vi dien tu</option>
           </select>
         </label>` : ""}
-        <div class="order-list">${orderCards || '<div class="empty-state">Khong co order dang mo.</div>'}</div>
+        <div class="order-list">${orderCards || '<div class="empty-state">Không có order đang mở.</div>'}</div>
       </section>
     `;
   }
@@ -1515,7 +1625,7 @@ function cashTable() {
 
 function sessionReportsTable() {
   const rows = cafeApp.reports?.session_reports || cafeApp.session_reports || [];
-  return tableHtml(rows, ["Nhan vien", "Role", "Ca", "Thoi luong", "Doanh thu", "Bill", "Order", "Mon pha", "Thu/chi", "Log"], (row) => `
+  return tableHtml(rows, ["Nhân viên", "Role", "Ca", "Thời lượng", "Doanh thu", "Bill", "Order", "Món pha", "Thu/chi", "Log"], (row) => `
     <tr>
       <td>${escapeHtml(row.staff_name)}</td>
       <td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td>
@@ -1528,13 +1638,13 @@ function sessionReportsTable() {
       <td>${formatMoney(row.cash_in)} / ${formatMoney(row.cash_out)}</td>
       <td><small>${escapeHtml(row.main_actions || `${Number(row.activity_count || 0)} thao tac`)}</small></td>
     </tr>
-  `, "Chua co phien lam viec.");
+  `, "Chưa có phiên làm việc.");
 }
 
 function renderReportsModule() {
   const reports = cafeApp.reports || {};
   const recentInvoices = cafeApp.dashboard?.recent_invoices || [];
-  const invoiceActions = tableHtml(recentInvoices, ["HD", "Khach", "Kenh", "Tong", ""], (row) => `
+  const invoiceActions = tableHtml(recentInvoices, ["HĐ", "Khách", "Kênh", "Tổng", ""], (row) => `
     <tr>
       <td>#${row.id}</td>
       <td>${escapeHtml(row.customer_name || "Khach le")}</td>
@@ -1542,13 +1652,13 @@ function renderReportsModule() {
       <td>${formatMoney(row.total_amount)}</td>
       <td><button type="button" data-receipt-invoice="${row.id}">Receipt</button>${isOverrideRole() ? `<button type="button" data-refund-invoice="${row.id}">Refund</button>` : ""}</td>
     </tr>
-  `, "Chua co hoa don.");
+  `, "Chưa có hóa đơn.");
   return `
     <div class="dashboard-columns">
       <section class="panel span-2"><div class="panel-head"><h2>Report export</h2><button type="button" class="primary-btn" data-report-export>Export CSV</button></div></section>
       <section class="panel"><h2>Doanh thu theo kênh</h2>${tableHtml(reports.revenue_by_channel || [], ["Kênh", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.sales_channel)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
       <section class="panel"><h2>Hiệu suất nhân viên</h2>${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>`)}</section>
-      <section class="panel span-2"><h2>Hoa don gan nhat</h2>${invoiceActions}</section>
+      <section class="panel span-2"><h2>Hóa đơn gần nhất</h2>${invoiceActions}</section>
       <section class="panel span-2"><h2>Phien lam viec POS</h2>${sessionReportsTable()}</section>
       <section class="panel span-2"><h2>Thu chi gần nhất</h2>${cashTable()}</section>
     </div>
@@ -1598,19 +1708,19 @@ function renderStaffModule() {
   return `
     <div class="admin-grid">
       <form class="create-form" data-staff-save>
-        <h2>Nhan vien</h2>
+        <h2>Nhân viên</h2>
         <input type="hidden" name="id">
-        <label>Ma nhan vien <input name="staff_code" placeholder="CASH003"></label>
-        <label>Ten nhan vien <input name="staff_name" required></label>
+        <label>Mã nhân viên <input name="staff_code" placeholder="CASH003"></label>
+        <label>Tên nhân viên <input name="staff_name" required></label>
         <label>Chi nhanh <select name="branch_id">${branchOptions(state.pos.user?.branch_id || 1)}</select></label>
         <label>Role <select name="staff_role">${(cafeApp.roles || Object.keys(roleLabels)).map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabels[role] || role)}</option>`).join("")}</select></label>
         <label>So dien thoai <input name="phone_number"></label>
         <label>Email <input type="email" name="email"></label>
-        <label>Mat khau POS <input name="password" type="password" minlength="6" placeholder="De trong neu khong doi"></label>
-        <label>PIN mo ca <input name="pin" type="password" inputmode="numeric" minlength="4" placeholder="De trong neu khong doi"></label>
-        <button class="primary-btn" type="submit">Luu nhan vien</button>
+        <label>Mật khẩu POS <input name="password" type="password" minlength="6" placeholder="Để trống nếu không đổi"></label>
+        <label>PIN mở ca <input name="pin" type="password" inputmode="numeric" minlength="4" placeholder="Để trống nếu không đổi"></label>
+        <button class="primary-btn" type="submit">Lưu nhân viên</button>
       </form>
-      <section class="panel"><h2>Danh sach nhan vien</h2>${tableHtml(staff, ["Ma", "Ten", "Role", "Chi nhanh", "Email", ""], (row) => `<tr><td>${escapeHtml(row.staff_code || "")}</td><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.email || "")}</td><td><button type="button" data-edit-staff="${row.id}">Sua</button></td></tr>`)}</section>
+      <section class="panel"><h2>Danh sách nhân viên</h2>${tableHtml(staff, ["Mã", "Tên", "Role", "Chi nhánh", "Email", ""], (row) => `<tr><td>${escapeHtml(row.staff_code || "")}</td><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.email || "")}</td><td><button type="button" data-edit-staff="${row.id}">Sửa</button></td></tr>`)}</section>
     </div>
   `;
 }
@@ -1711,7 +1821,7 @@ async function heartbeatPosSession() {
     stopPosHeartbeat();
     savePosUser(null);
     savePosAuth(null);
-    showToast(error.message || "POS session da het han.");
+    showToast(error.message || "POS session đã hết hạn.");
     window.setTimeout(() => {
       window.location.href = url("pos/login");
     }, 900);
@@ -1737,9 +1847,26 @@ function renderSiteProducts() {
   if (!target) return;
 
   const limit = Number(target.dataset.productLimit || 0);
-  const rows = limit > 0 ? products.slice(0, limit) : products;
+  const search = (document.querySelector("[data-site-product-search]")?.value || "").trim().toLowerCase();
+  const category = document.querySelector("[data-site-category-filter]")?.value || "";
+  const sort = document.querySelector("[data-site-sort]")?.value || "";
+  let rows = products.filter((product) => {
+    const matchesSearch = !search
+      || String(product.product_name || "").toLowerCase().includes(search)
+      || String(product.take_note || "").toLowerCase().includes(search);
+    const matchesCategory = !category || String(product.category || "") === category;
+    return matchesSearch && matchesCategory;
+  });
+  rows = rows.sort((a, b) => {
+    if (sort === "price_asc") return Number(a.price || 0) - Number(b.price || 0);
+    if (sort === "price_desc") return Number(b.price || 0) - Number(a.price || 0);
+    if (sort === "name_desc") return String(b.product_name || "").localeCompare(String(a.product_name || ""));
+    return 0;
+  });
+  rows = limit > 0 ? rows.slice(0, limit) : rows;
   target.innerHTML = rows.map((product) => {
     const isFavorite = state.site.customer?.favorites?.includes(Number(product.id));
+    const isOut = Boolean(product.is_out_of_stock) || Number(product.stock_quantity || 0) <= 0;
     return `
       <article class="product-card">
         <div class="product-media">
@@ -1751,9 +1878,11 @@ function renderSiteProducts() {
         <div class="product-body">
           <h3>${escapeHtml(product.product_name)}</h3>
           <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
+          <span class="status ${isOut ? "bad" : "good"}">${isOut ? "Tam het" : "Con hang"}</span>
           <div class="product-actions">
             <strong>${formatMoney(product.price)}</strong>
-            <button type="button" data-site-add="${product.id}">Order Now</button>
+            <a class="secondary-link" href="${url(`product?id=${product.id}`)}">Chi tiet</a>
+            <button type="button" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Order Now</button>
           </div>
         </div>
       </article>
@@ -1876,12 +2005,12 @@ function renderPosLogin() {
             </div>
           </div>
           <div class="session-open-panel">
-            <span class="step-badge">Ca dang mo</span>
-            <h1>San sang lam viec</h1>
-            <p>${escapeHtml(state.pos.user.staff_name)} dang co phien lam viec tu ${escapeHtml(formatDateTime(state.pos.user.session_opened_at))}.</p>
+            <span class="step-badge">Ca đang mở</span>
+            <h1>Sẵn sàng làm việc</h1>
+            <p>${escapeHtml(state.pos.user.staff_name)} đang có phiên làm việc từ ${escapeHtml(formatDateTime(state.pos.user.session_opened_at))}.</p>
             <div class="account-actions">
               <a class="primary-btn" href="${url("pos/checkout")}">Vao POS</a>
-              <button class="secondary-btn" type="button" data-pos-logout>Dong ca va dang xuat</button>
+              <button class="secondary-btn" type="button" data-pos-logout>Đóng ca và đăng xuất</button>
             </div>
           </div>
         </section>
@@ -1906,7 +2035,6 @@ function renderPosLogin() {
               <span class="step-badge">Buoc 1</span>
               <div>
                 <h1>Đăng nhập POS</h1>
-                <p>Su dung ma nhan vien, email hoac so dien thoai va mat khau rieng.</p>
               </div>
             </div>
             ${auth ? `
@@ -1915,26 +2043,26 @@ function renderPosLogin() {
                 <div>
                   <strong>${escapeHtml(auth.staff_name)}</strong>
                   <small>${escapeHtml(auth.staff_code || "")} - ${escapeHtml(roleLabels[auth.staff_role] || auth.staff_role)} - ${escapeHtml(auth.branch_name || "")}</small>
-                  <em>Dang nhap luc ${escapeHtml(formatDateTime(auth.auth_logged_in_at))}</em>
+                  <em>Đăng nhập lúc ${escapeHtml(formatDateTime(auth.auth_logged_in_at))}</em>
                 </div>
-                <button type="button" class="secondary-btn" data-pos-auth-logout>Doi tai khoan</button>
-              </div>
+                <button type="button" class="secondary-btn" data-pos-auth-logout>Đổi tài khoản</button>
+              </div>  
             ` : `
               <form class="pos-auth-form" data-pos-auth-login>
-                <label><span>Ma NV / email / so dien thoai</span><input name="identity" value="${escapeHtml(authIdentity || "CASH001")}" autocomplete="username" required></label>
-                <label><span>Mat khau</span><input name="password" type="password" value="cashier123" autocomplete="current-password" required></label>
-                <button class="primary-btn full" type="submit">Dang nhap</button>
+                <label><span>Mã NV / Email / Số điện thoại</span><input name="identity" value="${escapeHtml(authIdentity || "CASH001")}" autocomplete="username" required></label>
+                <label><span>Mật khẩu</span><input name="password" type="password" value="cashier123" autocomplete="current-password" required></label>
+                <button class="primary-btn full" type="submit">Đăng nhập</button>
               </form>
             `}
             <div class="role-grid demo-role-grid">
               <button type="button" class="role-card ${state.pos.roleFilter === "" ? "active" : ""}" data-login-role="">
                 <strong>Tat ca</strong>
-                <span>${staff.length} nhan vien</span>
+                <span>${staff.length} nhân viên</span>
               </button>
               ${roles.map((role) => `
                 <button type="button" class="role-card ${state.pos.roleFilter === role ? "active" : ""}" data-login-role="${escapeHtml(role)}">
                   <strong>${escapeHtml(roleLabels[role] || role)}</strong>
-                  <span>${escapeHtml(demoByRole[role] || `${staff.filter((member) => member.staff_role === role).length} nhan vien`)}</span>
+                  <span>${escapeHtml(demoByRole[role] || `${staff.filter((member) => member.staff_role === role).length} nhân viên`)}</span>
                 </button>
               `).join("")}
             </div>
@@ -1947,7 +2075,7 @@ function renderPosLogin() {
                     <small>${escapeHtml(member.staff_code || "")} - ${escapeHtml(roleLabels[member.staff_role] || member.staff_role)} - ${escapeHtml(member.branch_name)}</small>
                   </div>
                 </article>
-              `).join("") || '<div class="empty-state">Khong co nhan vien phu hop.</div>'}
+              `).join("") || '<div class="empty-state">Không có nhân viên phù hợp.</div>'}
             </div>
           </div>
 
@@ -1956,12 +2084,12 @@ function renderPosLogin() {
               <span class="step-badge">Buoc 2</span>
               <div>
                 <h2>Nhập PIN mở ca</h2>
-                <p>${auth ? `${escapeHtml(auth.staff_code || "")} - ${escapeHtml(roleLabels[auth.staff_role] || auth.staff_role)} - ${escapeHtml(auth.branch_name)}` : "Dang nhap tai khoan nhan vien truoc khi Mở ca POS."}</p>
+                <p>${auth ? `${escapeHtml(auth.staff_code || "")} - ${escapeHtml(roleLabels[auth.staff_role] || auth.staff_role)} - ${escapeHtml(auth.branch_name)}` : ""}</p>
               </div>
             </div>
             <div class="pin-panel">
               <div class="pin-lock ${auth ? "is-unlocked" : ""}">${auth ? "OK" : "LOCK"}</div>
-              <h3>${auth ? escapeHtml(auth.staff_name) : "Dang khoa"}</h3>
+              <h3>${auth ? escapeHtml(auth.staff_name) : "Đang khoá"}</h3>
               <div class="pin-dots" aria-label="PIN">${pinDots}</div>
               <div class="pin-keypad">
                 ${["1","2","3","4","5","6","7","8","9"].map((digit) => `<button type="button" data-pin-digit="${digit}" ${auth ? "" : "disabled"}>${digit}</button>`).join("")}
@@ -1970,7 +2098,7 @@ function renderPosLogin() {
                 <button type="button" data-pin-backspace ${auth ? "" : "disabled"}>Back</button>
               </div>
               <button type="button" class="primary-btn full" data-pin-submit ${auth && state.pos.loginPin.length >= 4 ? "" : "disabled"}>Mở ca POS</button>
-              <small class="login-hint">PIN chi xac nhan mo ca lam, khong thay the mat khau dang nhap.</small>
+              <small class="login-hint">PIN chỉ xác nhận mở ca làm, không thay thế mật khẩu đăng nhập.</small>
             </div>
           </aside>
         </div>
@@ -2120,6 +2248,8 @@ function wireEvents() {
     const receiptPrint = event.target.closest("[data-receipt-print]");
     const claimVoucher = event.target.closest("[data-claim-voucher]");
     const favorite = event.target.closest("[data-favorite-product]");
+    const websiteOrderCancel = event.target.closest("[data-website-order-cancel]");
+    const websiteOrderReceipt = event.target.closest("[data-order-receipt]");
     const editProduct = event.target.closest("[data-edit-product]");
     const editStaff = event.target.closest("[data-edit-staff]");
     const fillLogin = event.target.closest("[data-fill-login]");
@@ -2215,7 +2345,7 @@ function wireEvents() {
         }
         window.location.href = url(`pos/${allowedModules(openedStaff)[0]?.id || "checkout"}`);
       } else {
-        showToast("Dang nhap tai khoan POS truoc khi mo ca.");
+        showToast("Đăng nhập tài khoản POS trước khi mở ca.");
       }
       return;
     }
@@ -2223,7 +2353,14 @@ function wireEvents() {
       let logoutMessage = "";
       try {
         if (state.pos.user?.session_token) {
-          await api("pos-session-logout");
+          const logoutPayload = {};
+          if (state.pos.user.staff_role === "cashier") {
+            const closingCash = window.prompt("Nhập tiền mặt thực tế khi chốt ca:");
+            if (closingCash === null || closingCash.trim() === "") return;
+            logoutPayload.closing_cash_amount = closingCash.trim();
+            logoutPayload.notes = "Cashier closing shift";
+          }
+          await api("shift-closing", logoutPayload);
         }
       } catch (error) {
         logoutMessage = error.message;
@@ -2310,26 +2447,26 @@ function wireEvents() {
       return;
     }
     if (voidItem) {
-      const reason = window.prompt("Ly do void mon?");
+      const reason = window.prompt("Lý do void món?");
       if (!reason || !reason.trim()) return;
       try {
         const result = await api("void-order-item", { item_id: voidItem.dataset.voidItem, reason: reason.trim() });
         updatePosCollections(result);
         renderPosApp();
-        showToast("Da void mon.");
+        showToast("Đã void món.");
       } catch (error) {
         showToast(error.message);
       }
       return;
     }
     if (cancelOrder) {
-      const reason = window.prompt("Ly do huy order?");
+      const reason = window.prompt("Lý do hủy order?");
       if (!reason || !reason.trim()) return;
       try {
         const result = await api("cancel-order", { order_id: cancelOrder.dataset.cancelOrder, reason: reason.trim() });
         updatePosCollections(result);
         renderPosApp();
-        showToast("Da huy order.");
+        showToast("Đã hủy order.");
       } catch (error) {
         showToast(error.message);
       }
@@ -2353,12 +2490,12 @@ function wireEvents() {
       return;
     }
     if (refundInvoice) {
-      const reason = window.prompt("Ly do hoan tien?");
+      const reason = window.prompt("Lý do hoàn tiền?");
       if (!reason || !reason.trim()) return;
       try {
         await api("refund-invoice", { invoice_id: refundInvoice.dataset.refundInvoice, reason: reason.trim() });
         await refreshPosData(false);
-        showToast("Da hoan tien hoa don.");
+        showToast("Đã hoàn tiền hóa đơn.");
       } catch (error) {
         showToast(error.message);
       }
@@ -2368,7 +2505,7 @@ function wireEvents() {
       try {
         const result = await api("reports-export");
         downloadTextFile(result.filename || "cafe-connect-report.csv", result.csv || "");
-        showToast("Da xuat CSV.");
+        showToast("Đã xuất CSV.");
       } catch (error) {
         showToast(error.message);
       }
@@ -2385,6 +2522,35 @@ function wireEvents() {
         showToast(error.message);
       }
       window.print();
+      return;
+    }
+    if (websiteOrderReceipt) {
+      try {
+        const receipt = await api("website-order-detail", { invoice_id: Number(queryParam("invoice_id") || 0) });
+        showReceiptDialog(receipt);
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (websiteOrderCancel) {
+      const reason = window.prompt("Lý do hủy đơn?");
+      if (!reason || !reason.trim()) return;
+      try {
+        const receipt = await api("website-order-cancel", {
+          invoice_id: websiteOrderCancel.dataset.websiteOrderCancel,
+          reason: reason.trim(),
+        });
+        renderWebsiteOrderDetail(receipt);
+        if (state.site.customer) {
+          const refreshed = await api("member-lookup", { identity: state.site.customer.id });
+          setSiteMember(refreshed);
+          renderProfile("account", refreshed);
+        }
+        showToast("Đã hủy đơn đang chờ.");
+      } catch (error) {
+        showToast(error.message);
+      }
       return;
     }
     if (claimVoucher) {
@@ -2486,7 +2652,7 @@ function wireEvents() {
         savePosUser(null);
         state.pos.loginPin = "";
         renderPosLogin();
-        showToast("Da dang nhap tai khoan POS. Nhap PIN de mo ca.");
+        showToast("Đã đăng nhập tài khoản POS. Nhập PIN để mở ca.");
       } catch (error) {
         showToast(error.message);
       }
@@ -2707,6 +2873,7 @@ function wireEvents() {
     const siteVoucher = event.target.closest("[data-site-voucher]");
     const posVoucher = event.target.closest("[data-pos-voucher]");
     const tableSelect = event.target.closest("[data-table-select]");
+    const siteFilter = event.target.closest("[data-site-category-filter], [data-site-sort]");
     if (siteVoucher) {
       state.site.voucherId = siteVoucher.value;
       renderTotals("site");
@@ -2720,14 +2887,22 @@ function wireEvents() {
     if (tableSelect) {
       state.pos.tableId = tableSelect.value;
       renderPosApp();
+      return;
+    }
+    if (siteFilter) {
+      renderSiteProducts();
     }
   });
 
   document.addEventListener("input", (event) => {
     const productSearch = event.target.closest("[data-product-search]");
+    const siteProductSearch = event.target.closest("[data-site-product-search]");
     if (productSearch) {
       state.pos.productFilter = productSearch.value;
       renderPosProducts();
+    }
+    if (siteProductSearch) {
+      renderSiteProducts();
     }
   });
 }
@@ -2741,6 +2916,7 @@ function initialRender() {
   renderSiteProducts();
   renderReviews();
   renderCart("site");
+  loadWebsiteOrderDetail();
   if (state.site.customer) {
     renderMiniMember("site");
     renderVoucherOptions("site");

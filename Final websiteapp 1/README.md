@@ -1,5 +1,32 @@
 # Cafe Connect POS + Website MVC
 
+## Cập nhật triển khai nội bộ v1
+
+Bản hiện tại đã được nâng từ demo sang hướng vận hành nội bộ trên XAMPP:
+
+- `config/app.php` có `APP_ENV=local|production_internal`. Mặc định là `local`.
+- `install.php` chỉ cho reset sample data khi `APP_ENV=local`. Khi chạy `production_internal`, installer chỉ hiển thị trạng thái và chặn reset mẫu.
+- `config/payment.php` cấu hình tên nhà cung cấp `Cafe Connect DemoPay` và `Cash on Delivery`.
+- `scripts/backup_database.ps1` export MySQL ra `storage/backups/cafe_connect_crm-yyyyMMdd-HHmmss.sql`.
+- `/menu` có search/filter/sort và hiển thị trạng thái tồn kho.
+- `/product?id=...` là trang chi tiết sản phẩm.
+- `/checkout` hỗ trợ pickup/delivery, COD pending và DemoPay paid.
+- Sau checkout website, hệ thống chuyển sang `/order?invoice_id=...` để xem order detail, receipt và hủy đơn nếu còn `pending`.
+- `/account` hiển thị thêm danh sách website orders của member.
+- POS cashier khi đóng ca trên UI phải nhập closing cash; API mới `shift-closing` dùng chung RolePolicy.
+
+Lệnh backup nội bộ:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "scripts/backup_database.ps1"
+```
+
+Khi chuyển sang vận hành nội bộ, đặt biến môi trường trước khi start Apache:
+
+```powershell
+$env:APP_ENV = "production_internal"
+```
+
 Ứng dụng PHP thuần chạy bằng XAMPP/Apache/MySQL, không dùng framework. Code nghiệp vụ được tách theo MVC trong `app/`, giao diện website và POS đã tách thành nhiều trang theo module.
 
 ## Cấu trúc chính
@@ -63,7 +90,7 @@ Website member đăng nhập bằng số điện thoại hoặc email kèm mật
 
 POS đăng nhập bằng tài khoản nhân viên riêng, sau đó nhập PIN riêng để mở ca làm:
 
-- Cap nhat: POS co 2 lop xac thuc. Dang nhap bang tai khoan nhan vien, sau do nhap PIN rieng de mo ca.
+- Cập nhật: POS có 2 lớp xác thực. Đăng nhập bằng tài khoản nhân viên, sau đó nhập PIN riêng để mở ca.
 - `WAIT001 / waiter123`, PIN `1111`.
 - `CASH001 / cashier123`, PIN `2222`.
 - `BAR001 / barista123`, PIN `3333`.
@@ -110,7 +137,7 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 
 ## Dữ liệu demo
 
-- Tra thành viên `0900000001`: Nguyen An, Gold member, có voucher khả dụng và lịch sử website order.
+- Tra thành viên `0900000001`: Nguyễn An, Gold member, có voucher khả dụng và lịch sử website order.
 - Website checkout lưu `sales_channel = website`.
 - POS tạo khách bằng SĐT để tra cứu/checkout tại quầy; khách cần đăng ký mật khẩu trên `/register` để đăng nhập website.
 - Waiter tạo service order, barista cập nhật trạng thái món, cashier checkout thành invoice.
@@ -149,26 +176,26 @@ Script sẽ lấy CSRF token, kiểm tra thiếu CSRF bị chặn, tạo member 
 
 ## Audit hoan thien
 
-Xem `PROJECT_COMPLETION_AUDIT.md` de biet du an hien da co nhung gi, con thieu gi de len muc san pham van hanh that, va roadmap nang cap A-Z theo tung phase.
+Xem `PROJECT_COMPLETION_AUDIT.md` để biết dự án hiện đã có những gì, còn thiếu gì để lên mức sản phẩm vận hành thật, và roadmap nâng cấp A-Z theo từng phase.
 
 ## Verification gate
 
-Co the chay mot lenh kiem tra tong hop sau khi bat Apache:
+Có thể chạy một lệnh kiểm tra tổng hợp sau khi bật Apache:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File "tests/verify_project.ps1"
 ```
 
-Script nay se lint PHP, check JS, dam bao MySQL dang chay, reset database mau, check route, chay smoke API va reset database lai sach sau khi test.
+Script này sẽ lint PHP, check JS, đảm bảo MySQL đang chạy, reset database mẫu, check route, chạy smoke API và reset database lại sạch sau khi test.
 
 ## Security baseline
 
-- Mat khau member, mat khau staff va PIN POS duoc luu bang `password_hash()`.
+- Mật khẩu member, mật khẩu staff và PIN POS được lưu bằng `password_hash()`.
 - PHP session dung cookie `HttpOnly`, `SameSite=Lax` va `Secure` khi chay HTTPS.
 - Session id duoc regenerate sau login/register/adopt/logout/reset password.
 - Cac diem auth nhay cam co rate limit co ban va DB lockout: member login/register/forgot/reset, POS staff login va PIN mo ca.
 - Cac API ghi du lieu co CSRF header `X-CSRF-Token`.
-- Audit log dung chung duoc luu trong `audit_logs`; loi he thong ghi vao `storage/logs/app.log`.
+- Audit log dùng chung được lưu trong `audit_logs`; lỗi hệ thống ghi vào `storage/logs/app.log`.
 - Cac API POS ghi du lieu van bat buoc `staff_id`, role hop le, `pos_session_id` va `session_token`.
 
 ## Role matrix POS chuan hoa
@@ -177,20 +204,20 @@ Quyen POS hien duoc khai bao tap trung trong `app/Core/RolePolicy.php` va duoc d
 
 | Role | Module duoc xem | Thao tac chinh | API chinh |
 | --- | --- | --- | --- |
-| `waiter` | `orders`, `kitchen` | Tao order ban, gui mon xuong bep, danh dau mon `ready -> served`, void mon chua ready/served co ly do | `orders`, `create-order`, `update-order-item`, `void-order-item` |
+| `waiter` | `orders`, `kitchen` | Tạo order bàn, gửi món xuống bếp, đánh dấu món `ready -> served`, void món chưa ready/served có lý do | `orders`, `create-order`, `update-order-item`, `void-order-item` |
 | `barista` | `kitchen` | Xem kitchen queue, chuyen mon `waiting/preparing -> preparing/ready` | `kitchen`, `update-order-item` |
-| `cashier` | `checkout`, `orders`, `customers`, `cash` | Ban hang tai quay, checkout service order, lookup/tao khach, ap voucher, thu chi, xem/in receipt | `checkout`, `checkout-order`, `customer-create`, `cash-transaction`, `receipt` |
+| `cashier` | `checkout`, `orders`, `customers`, `cash` | Bán hàng tại quầy, checkout service order, lookup/tạo khách, áp voucher, thu chi, xem/in receipt | `checkout`, `checkout-order`, `customer-create`, `cash-transaction`, `receipt` |
 | `marketing` | `customers`, `campaigns` | CRM, campaign/voucher/newsletter, xem hieu qua campaign | `customer-create`, `campaigns`, `create-campaign` |
-| `manager` | `dashboard`, `reports`, `inventory`, `products`, `campaigns`, `cash`, `orders`, `kitchen` | Bao cao, kho, san pham, refund invoice, cancel order, void override, export CSV | `dashboard`, `reports`, `reports-export`, `inventory`, `product-save`, `refund-invoice`, `cancel-order` |
-| `owner` | Nhu manager + `staff` | Van hanh va nhan su | Toan bo API quan ly, gom `staff-save` |
-| `admin` | Toan quyen POS | Quan tri he thong, nhan su, du lieu van hanh | Toan bo API POS noi bo |
+| `manager` | `dashboard`, `reports`, `inventory`, `products`, `campaigns`, `cash`, `orders`, `kitchen` | Báo cáo, kho, sản phẩm, refund invoice, cancel order, void override, export CSV | `dashboard`, `reports`, `reports-export`, `inventory`, `product-save`, `refund-invoice`, `cancel-order` |
+| `owner` | Như manager + `staff` | Vận hành và nhân sự | Toàn bộ API quản lý, gồm `staff-save` |
+| `admin` | Toàn quyền POS | Quản trị hệ thống, nhân sự, dữ liệu vận hành | Toàn bộ API POS nội bộ |
 
 API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `inventory`, `reports`, `reports-export`, `receipt`, `checkout`, `checkout-order`, `refund-invoice`, `void-order-item`, `cancel-order`, `stock-movement`, `cash-transaction`, `product-save`, `staff-save` deu bat buoc `staff_id`, `pos_session_id`, `session_token` va role hop le.
 
 ## Claim voucher member
 
-- Member dang nhap co the vao `/account` de xem muc `Voucher co the nhan`.
+- Member đăng nhập có thể vào `/account` để xem mục `Voucher có thể nhận`.
 - Danh sach nay lay tu campaign `active`, con han, kenh `website/omnichannel`, dung segment cua khach va con so luong.
-- Bam `Nhan voucher` goi API `voucher-claim` voi payload `{ "promotion_id": 3 }`.
-- He thong tao voucher rieng trong bang `vouchers` gan voi `customer_id`; voucher moi lap tuc hien o ho so va dropdown checkout.
-- Khi thanh toan co chon voucher, `Invoice::checkout()` validate voucher va tu chuyen voucher sang `redeemed`.
+- Bấm `Nhận voucher` gọi API `voucher-claim` với payload `{ "promotion_id": 3 }`.
+- Hệ thống tạo voucher riêng trong bảng `vouchers` gắn với `customer_id`; voucher mới lập tức hiện ở hồ sơ và dropdown checkout.
+- Khi thanh toán có chọn voucher, `Invoice::checkout()` validate voucher và tự chuyển voucher sang `redeemed`.

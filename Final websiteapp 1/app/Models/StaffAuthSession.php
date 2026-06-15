@@ -25,7 +25,7 @@ final class StaffAuthSession extends Model
         $staff = $staffModel->verifyPassword($identity, $password);
         if (!$staff) {
             $lockout->recordFailure('pos-auth-login', $identity);
-            throw new InvalidArgumentException('Tai khoan POS hoac mat khau khong dung.');
+            throw new InvalidArgumentException('Tài khoản POS hoặc mật khẩu không đúng.');
         }
 
         $this->closeStaleSessions();
@@ -52,7 +52,7 @@ final class StaffAuthSession extends Model
         $staffModel->touchLogin((int) $staff['id']);
         $session = $this->findByToken($token);
         if (!$session) {
-            throw new InvalidArgumentException('Khong the tao phien dang nhap POS.');
+            throw new InvalidArgumentException('Không thể tạo phiên đăng nhập POS.');
         }
 
         $lockout->clear('pos-auth-login', $identity);

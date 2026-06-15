@@ -19,13 +19,13 @@ final class Mailer
 
     public function sendPasswordReset(string $toEmail, string $toName, string $resetUrl): void
     {
-        $subject = 'Dat lai mat khau Cafe Connect';
+        $subject = 'Đặt lại mật khẩu Cafe Connect';
         $safeName = $toName !== '' ? $toName : 'thanh vien';
         $body = "Xin chao {$safeName},\n\n"
-            . "Ban vua yeu cau dat lai mat khau Cafe Connect.\n"
-            . "Vui long mo lien ket sau trong 30 phut de tao mat khau moi:\n\n"
+            . "Bạn vừa yêu cầu đặt lại mật khẩu Cafe Connect.\n"
+            . "Vui lòng mở liên kết sau trong 30 phút để tạo mật khẩu mới:\n\n"
             . $resetUrl . "\n\n"
-            . "Neu ban khong yeu cau thao tac nay, hay bo qua email nay.\n\n"
+            . "Nếu bạn không yêu cầu thao tác này, hãy bỏ qua email này.\n\n"
             . "Cafe Connect";
 
         $this->send($toEmail, $toName, $subject, $body);
@@ -43,7 +43,7 @@ final class Mailer
 
         $this->socket = @stream_socket_client($remote, $errno, $errstr, $timeout, STREAM_CLIENT_CONNECT);
         if (!$this->socket) {
-            throw new RuntimeException('Khong the ket noi SMTP: ' . $errstr);
+            throw new RuntimeException('Không thể kết nối SMTP: ' . $errstr);
         }
         stream_set_timeout($this->socket, $timeout);
 
@@ -54,7 +54,7 @@ final class Mailer
             if ($encryption === 'tls') {
                 $this->command('STARTTLS', [220]);
                 if (!stream_socket_enable_crypto($this->socket, true, STREAM_CRYPTO_METHOD_TLS_CLIENT)) {
-                    throw new RuntimeException('Khong the bat TLS cho SMTP.');
+                    throw new RuntimeException('Không thể bật TLS cho SMTP.');
                 }
                 $this->command('EHLO localhost', [250]);
             }

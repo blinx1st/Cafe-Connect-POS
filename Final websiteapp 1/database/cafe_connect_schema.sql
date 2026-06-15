@@ -745,9 +745,9 @@ INSERT INTO membership_tiers (tier_name, min_total_spending, discount_rate, desc
 ('Gold', 3000000, 10.00, 'High-value member tier with stronger checkout discount.');
 
 INSERT INTO branches (branch_name, address, district) VALUES
-('Cau Giay', '144 Xuan Thuy, Cau Giay, Hanoi', 'Cau Giay'),
-('Hoan Kiem', '25 Hang Bai, Hoan Kiem, Hanoi', 'Hoan Kiem'),
-('Tay Ho', '45 Xuan Dieu, Tay Ho, Hanoi', 'Tay Ho');
+('Cầu Giấy', '144 Xuân Thủy, Cầu Giấy, Hà Nội', 'Cầu Giấy'),
+('Hoàn Kiếm', '25 Hàng Bài, Hoàn Kiếm, Hà Nội', 'Hoàn Kiếm'),
+('Tây Hồ', '45 Xuân Diệu, Tây Hồ, Hà Nội', 'Tây Hồ');
 
 INSERT INTO staff (branch_id, staff_code, staff_name, staff_role, phone_number, email) VALUES
 (1, 'WAIT001', 'Lan Waiter', 'waiter', '0911000001', 'waiter.cg@cafeconnect.test'),
@@ -822,12 +822,12 @@ INSERT INTO customers (
     membership_tier_id, customer_name, phone_number, email, gender, birth_date, address,
     preferred_channel, last_visit_date, current_points, total_spending, status
 ) VALUES
-(3, 'Nguyen An', '0900000001', 'nguyen.an@example.test', 'male', '1997-05-20', 'Cau Giay, Hanoi', 'website', '2026-05-10', 420, 4200000, 'active'),
-(2, 'Tran Binh', '0900000002', 'tran.binh@example.test', 'male', '1995-08-12', 'Hoan Kiem, Hanoi', 'pos', '2026-05-11', 180, 1850000, 'active'),
-(1, 'Le Chi', '0900000003', 'le.chi@example.test', 'female', '2000-01-04', 'Tay Ho, Hanoi', 'pos', '2026-05-08', 60, 650000, 'active'),
-(3, 'Pham Dung', '0900000004', 'pham.dung@example.test', 'female', '1991-05-02', 'Dong Da, Hanoi', 'email', '2026-05-05', 510, 5300000, 'active'),
-(2, 'Hoang Gia', '0900000005', 'hoang.gia@example.test', 'other', '1998-05-29', 'Thanh Xuan, Hanoi', 'zalo', '2026-04-01', 140, 1450000, 'active'),
-(1, 'Vu Hoa', '0900000006', 'vu.hoa@example.test', 'female', '1993-11-18', 'Cau Giay, Hanoi', 'sms', '2026-03-25', 30, 320000, 'inactive');
+(3, 'Nguyễn An', '0900000001', 'nguyen.an@example.test', 'male', '1997-05-20', 'Cầu Giấy, Hà Nội', 'website', '2026-05-10', 420, 4200000, 'active'),
+(2, 'Trần Bình', '0900000002', 'tran.binh@example.test', 'male', '1995-08-12', 'Hoàn Kiếm, Hà Nội', 'pos', '2026-05-11', 180, 1850000, 'active'),
+(1, 'Lê Chi', '0900000003', 'le.chi@example.test', 'female', '2000-01-04', 'Tây Hồ, Hà Nội', 'pos', '2026-05-08', 60, 650000, 'active'),
+(3, 'Phạm Dung', '0900000004', 'pham.dung@example.test', 'female', '1991-05-02', 'Đống Đa, Hà Nội', 'email', '2026-05-05', 510, 5300000, 'active'),
+(2, 'Hoàng Gia', '0900000005', 'hoang.gia@example.test', 'other', '1998-05-29', 'Thanh Xuân, Hà Nội', 'zalo', '2026-04-01', 140, 1450000, 'active'),
+(1, 'Vũ Hoa', '0900000006', 'vu.hoa@example.test', 'female', '1993-11-18', 'Cầu Giấy, Hà Nội', 'sms', '2026-03-25', 30, 320000, 'inactive');
 
 INSERT INTO customer_segment_memberships (customer_id, segment_id, source) VALUES
 (1, 2, 'auto'),
@@ -1001,10 +1001,10 @@ INSERT INTO customer_favorites (customer_id, product_id) VALUES
 (4, 8);
 
 INSERT INTO newsletter_subscribers (email, subscriber_name, status) VALUES
-('nguyen.an@example.test', 'Nguyen An', 'active'),
+('nguyen.an@example.test', 'Nguyễn An', 'active'),
 ('marketing.demo@example.test', 'Demo Subscriber', 'active');
 
 INSERT INTO customer_reviews (customer_name, customer_title, rating, review_text, avatar_path, status, created_at) VALUES
-('Nguyen An', 'Gold member', 5, 'Member lookup, voucher and website checkout are connected in one flow.', 'assets/images/avatar-1.png', 'published', '2026-05-12 10:00:00'),
-('Tran Binh', 'Morning regular', 5, 'Cashier can apply points and see order history quickly.', 'assets/images/avatar-2.png', 'published', '2026-05-11 16:00:00'),
-('Pham Dung', 'Remote worker', 4, 'The website menu and in-store POS use the same product data.', 'assets/images/avatar-3.png', 'published', '2026-05-10 15:00:00');
+('Nguyễn An', 'Gold member', 5, 'Member lookup, voucher và website checkout đã kết nối trong cùng một luồng.', 'assets/images/avatar-1.png', 'published', '2026-05-12 10:00:00'),
+('Trần Bình', 'Khách quen buổi sáng', 5, 'Thu ngân áp điểm và xem lịch sử đơn hàng rất nhanh.', 'assets/images/avatar-2.png', 'published', '2026-05-11 16:00:00'),
+('Phạm Dung', 'Remote worker', 4, 'Menu website và POS tại quầy dùng chung dữ liệu sản phẩm.', 'assets/images/avatar-3.png', 'published', '2026-05-10 15:00:00');

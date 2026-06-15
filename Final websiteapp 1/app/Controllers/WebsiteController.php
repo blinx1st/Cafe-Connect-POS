@@ -20,6 +20,11 @@ final class WebsiteController extends Controller
         $this->renderWebsite('website/menu', 'Cafe Connect | Menu', 'website-menu');
     }
 
+    public function product(): void
+    {
+        $this->renderWebsite('website/product', 'Cafe Connect | Product Detail', 'website-product');
+    }
+
     public function login(): void
     {
         $this->renderWebsite('website/login', 'Cafe Connect | Member Login', 'website-login');
@@ -42,12 +47,17 @@ final class WebsiteController extends Controller
 
     public function account(): void
     {
-        $this->renderWebsite('website/account', 'Cafe Connect | Ho so thanh vien', 'website-account');
+        $this->renderWebsite('website/account', 'Cafe Connect | Hồ sơ thành viên', 'website-account');
     }
 
     public function checkout(): void
     {
         $this->renderWebsite('website/checkout', 'Cafe Connect | Checkout', 'website-checkout');
+    }
+
+    public function order(): void
+    {
+        $this->renderWebsite('website/order', 'Cafe Connect | Order Detail', 'website-order');
     }
 
     public function member(): void

@@ -47,9 +47,14 @@ final class Invoice extends Model
         $salesChannel = in_array(($data['sales_channel'] ?? 'pos'), ['pos', 'website', 'delivery'], true) ? $data['sales_channel'] : 'pos';
         $posSessionId = $salesChannel === 'website' ? null : (int) ($data['pos_session_id'] ?? 0);
         $billStartedAt = $this->dateTimeOrNow((string) ($data['bill_started_at'] ?? ($order['created_at'] ?? '')));
-        $paidAt = date('Y-m-d H:i:s');
-        $invoiceDate = substr($paidAt, 0, 10);
-        $invoiceTime = substr($paidAt, 11, 8);
+        $now = date('Y-m-d H:i:s');
+        $isWebsiteOrder = in_array($salesChannel, ['website', 'delivery'], true);
+        $isPendingCod = $isWebsiteOrder && $paymentMethod === 'cash';
+        $invoiceStatus = $isPendingCod ? 'pending' : 'paid';
+        $paymentStatus = $isPendingCod ? 'pending' : 'paid';
+        $paidAt = $invoiceStatus === 'paid' ? $now : null;
+        $invoiceDate = substr($now, 0, 10);
+        $invoiceTime = substr($now, 11, 8);
 
         $productModel = new Product();
         $productIds = array_map(static fn ($item) => (int) ($item['product_id'] ?? 0), $items);
@@ -82,7 +87,7 @@ final class Invoice extends Model
         $voucher = $voucherModel->validateForCheckout($voucherId, $customerId);
         $voucherDiscount = $voucher ? $voucherModel->discount($voucher, max(0, $subtotal - $membershipDiscount)) : 0.0;
         $total = max(0, $subtotal - $membershipDiscount - $voucherDiscount);
-        $points = $customerId ? (int) floor($total / 10000) : 0;
+        $points = ($customerId && $invoiceStatus === 'paid') ? (int) floor($total / 10000) : 0;
 
         $this->db->beginTransaction();
         try {
@@ -94,7 +99,7 @@ final class Invoice extends Model
                  ) VALUES (
                     :branch_id, :staff_id, :pos_session_id, :service_order_id, :customer_id, :voucher_id, :sales_channel,
                     :invoice_date, :invoice_time, :bill_started_at, :paid_at, :subtotal_amount, :membership_discount_amount,
-                    :voucher_discount_amount, :total_amount, :points_earned, :payment_method, 'paid'
+                    :voucher_discount_amount, :total_amount, :points_earned, :payment_method, :status
                  )"
             )->execute([
                 'branch_id' => $branchId,
@@ -114,6 +119,7 @@ final class Invoice extends Model
                 'total_amount' => $total,
                 'points_earned' => $points,
                 'payment_method' => $paymentMethod,
+                'status' => $invoiceStatus,
             ]);
             $invoiceId = (int) $this->db->lastInsertId();
 
@@ -135,21 +141,24 @@ final class Invoice extends Model
 
             $this->db->prepare(
                 "INSERT INTO payments (invoice_id, payment_method, payment_provider, amount, paid_at, transaction_reference, status)
-                 VALUES (:invoice_id, :payment_method, :provider, :amount, :paid_at, :ref, 'paid')"
+                 VALUES (:invoice_id, :payment_method, :provider, :amount, :paid_at, :ref, :status)"
             )->execute([
                 'invoice_id' => $invoiceId,
                 'payment_method' => $paymentMethod,
-                'provider' => $paymentMethod === 'cash' ? null : 'Demo ' . $paymentMethod,
+                'provider' => $paymentMethod === 'cash' ? PAYMENT_COD_PROVIDER : PAYMENT_DEMO_PROVIDER,
                 'amount' => $total,
-                'paid_at' => $paidAt,
+                'paid_at' => $paidAt ?? $now,
                 'ref' => strtoupper($salesChannel) . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
+                'status' => $paymentStatus,
             ]);
 
-            if (in_array($salesChannel, ['website', 'delivery'], true)) {
+            $websiteOrderId = null;
+            $websiteOrderStatus = null;
+            if ($isWebsiteOrder) {
                 $fulfillmentType = in_array(($data['fulfillment_type'] ?? 'pickup'), ['pickup', 'delivery'], true)
                     ? $data['fulfillment_type']
                     : 'pickup';
-                $orderStatus = $paymentMethod === 'cash' ? 'pending' : 'paid';
+                $orderStatus = $invoiceStatus === 'pending' ? 'pending' : 'paid';
                 $this->db->prepare(
                     "INSERT INTO website_orders (
                         invoice_id, customer_id, fulfillment_type, order_status, delivery_address, customer_note, requested_at
@@ -165,6 +174,8 @@ final class Invoice extends Model
                     'customer_note' => trim((string) ($data['customer_note'] ?? $data['note'] ?? '')) ?: null,
                     'requested_at' => $this->dateTimeOrNull((string) ($data['requested_at'] ?? '')),
                 ]);
+                $websiteOrderId = (int) $this->db->lastInsertId();
+                $websiteOrderStatus = $orderStatus;
             }
 
             if ($customerId) {
@@ -185,12 +196,22 @@ final class Invoice extends Model
                          total_spending = total_spending + :total,
                          last_visit_date = CURDATE()
                      WHERE id = :customer_id"
-                )->execute(['points' => $points, 'total' => $total, 'customer_id' => $customerId]);
-                $this->upgradeTier($customerId);
+                )->execute([
+                    'points' => $points,
+                    'total' => $invoiceStatus === 'paid' ? $total : 0,
+                    'customer_id' => $customerId,
+                ]);
+                if ($invoiceStatus === 'paid') {
+                    $this->upgradeTier($customerId);
+                }
             }
 
             if ($voucher) {
-                $voucherModel->redeem((int) $voucherId);
+                if ($invoiceStatus === 'paid') {
+                    $voucherModel->redeem((int) $voucherId);
+                } else {
+                    $voucherModel->reserve((int) $voucherId);
+                }
             }
             if ($orderId > 0) {
                 (new Order())->markPaid($orderId, $staffId);
@@ -209,7 +230,7 @@ final class Invoice extends Model
             (new AuditLog())->record([
                 'actor_type' => $posSessionId ? 'staff' : ($customerId ? 'customer' : 'guest'),
                 'actor_id' => $posSessionId ? $staffId : $customerId,
-                'action' => 'checkout_paid',
+                'action' => $invoiceStatus === 'paid' ? 'checkout_paid' : 'checkout_pending',
                 'entity_type' => 'invoice',
                 'entity_id' => $invoiceId,
                 'metadata' => [
@@ -230,6 +251,9 @@ final class Invoice extends Model
                 'points_earned' => $points,
                 'bill_started_at' => $billStartedAt,
                 'paid_at' => $paidAt,
+                'status' => $invoiceStatus,
+                'website_order_id' => $websiteOrderId,
+                'order_status' => $websiteOrderStatus,
                 'pos_session_id' => $posSessionId,
                 'customer' => $customerId ? (new Customer())->lookup((string) $customerId) : null,
             ];

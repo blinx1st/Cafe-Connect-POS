@@ -15,6 +15,10 @@ $legacyActionMap = [
     'member_forgot_password' => '/api/member-forgot-password',
     'member_reset_password' => '/api/member-reset-password',
     'member_lookup' => '/api/member-lookup',
+    'product_detail' => '/api/product-detail',
+    'website_orders' => '/api/website-orders',
+    'website_order_detail' => '/api/website-order-detail',
+    'website_order_cancel' => '/api/website-order-cancel',
     'voucher_claim' => '/api/voucher-claim',
     'customer_create' => '/api/customer-create',
     'pos_auth_login' => '/api/pos-auth-login',
@@ -35,10 +39,14 @@ $legacyActionMap = [
     'void_order_item' => '/api/void-order-item',
     'cancel_order' => '/api/cancel-order',
     'checkout_closing' => '/api/checkout-closing',
+    'shift_closing' => '/api/shift-closing',
     'payment_demo_create' => '/api/payment-demo-create',
+    'payment_demo_confirm' => '/api/payment-demo-confirm',
     'order_status_update' => '/api/order-status-update',
     'receipt_print_log' => '/api/receipt-print-log',
     'reports_export' => '/api/reports-export',
+    'category_save' => '/api/category-save',
+    'content_save' => '/api/content-save',
 ];
 
 if (isset($_GET['endpoint'])) {

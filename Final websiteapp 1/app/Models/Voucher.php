@@ -61,4 +61,11 @@ final class Voucher extends Model
             "UPDATE vouchers SET status = 'redeemed', used_at = NOW() WHERE id = :id"
         )->execute(['id' => $voucherId]);
     }
+
+    public function reserve(int $voucherId): void
+    {
+        $this->db->prepare(
+            "UPDATE vouchers SET status = 'reserved' WHERE id = :id AND status IN ('issued', 'active')"
+        )->execute(['id' => $voucherId]);
+    }
 }

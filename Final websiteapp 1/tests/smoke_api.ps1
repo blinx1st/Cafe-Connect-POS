@@ -142,7 +142,7 @@ $claimed = Invoke-CafeApi "voucher-claim" @{
   promotion_id = 3
 }
 
-Invoke-CafeApi "checkout" @{
+$websitePaidOrder = Invoke-CafeApi "checkout" @{
   customer_id = $member.member.id
   voucher_id = $claimed.voucher_id
   payment_method = "e_wallet"
@@ -152,6 +152,29 @@ Invoke-CafeApi "checkout" @{
   items = @(
     @{ product_id = 4; quantity = 1; size = "M" }
   )
+}
+
+Invoke-CafeApi "website-orders" @{} | Out-Null
+Invoke-CafeApi "website-order-detail" @{ invoice_id = $websitePaidOrder.invoice_id } | Out-Null
+Invoke-CafeApi "payment-demo-confirm" @{ invoice_id = $websitePaidOrder.invoice_id } | Out-Null
+
+$websiteCodOrder = Invoke-CafeApi "checkout" @{
+  customer_id = $member.member.id
+  payment_method = "cash"
+  sales_channel = "website"
+  fulfillment_type = "delivery"
+  delivery_address = "Smoke delivery address"
+  customer_note = "Smoke COD pending"
+  items = @(
+    @{ product_id = 5; quantity = 1; size = "M" }
+  )
+}
+if ($websiteCodOrder.status -ne "pending" -or $websiteCodOrder.order_status -ne "pending") {
+  throw "Website COD checkout should create pending invoice/order."
+}
+Invoke-CafeApi "website-order-cancel" @{
+  invoice_id = $websiteCodOrder.invoice_id
+  reason = "Smoke customer cancel pending COD"
 } | Out-Null
 
 $cashier = New-PosSession -Identity "CASH001" -Password "cashier123" -Pin "2222" -OpeningCash 1000000
@@ -277,7 +300,11 @@ Invoke-CafeApi "pos-session-report" (Add-Session @{} $manager) | Out-Null
 Invoke-CafeApi "reports-export" (Add-Session @{} $manager) | Out-Null
 
 foreach ($staff in @($cashier, $waiter, $barista, $marketing, $manager)) {
-  Invoke-CafeApi "pos-session-logout" (Add-Session @{} $staff) | Out-Null
+  if ($staff.staff_role -eq "cashier") {
+    Invoke-CafeApi "shift-closing" (Add-Session @{ closing_cash_amount = 1000000 } $staff) | Out-Null
+  } else {
+    Invoke-CafeApi "pos-session-logout" (Add-Session @{} $staff) | Out-Null
+  }
   Invoke-CafeApi "pos-auth-logout" (Add-Auth @{} $staff) | Out-Null
 }
 
