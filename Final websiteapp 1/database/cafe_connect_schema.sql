@@ -140,6 +140,47 @@ CREATE TABLE branches (
     UNIQUE KEY uq_branches_name (branch_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE schema_migrations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    migration_name VARCHAR(150) NOT NULL,
+    applied_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_schema_migrations_name (migration_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE auth_lockouts (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    scope VARCHAR(60) NOT NULL,
+    identity_hash CHAR(64) NOT NULL,
+    identity_label VARCHAR(160) NULL,
+    ip_address VARCHAR(64) NULL,
+    user_agent VARCHAR(255) NULL,
+    failed_attempts INT NOT NULL DEFAULT 0,
+    locked_until DATETIME NULL,
+    last_failed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_auth_lockouts_scope_identity (scope, identity_hash),
+    KEY idx_auth_lockouts_locked_until (locked_until),
+    KEY idx_auth_lockouts_scope_updated (scope, updated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE audit_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    actor_type ENUM('customer', 'staff', 'system', 'guest') NOT NULL DEFAULT 'system',
+    actor_id INT NULL,
+    actor_role VARCHAR(40) NULL,
+    action VARCHAR(80) NOT NULL,
+    entity_type VARCHAR(80) NULL,
+    entity_id INT NULL,
+    ip_address VARCHAR(64) NULL,
+    user_agent VARCHAR(255) NULL,
+    metadata_json TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_audit_logs_actor (actor_type, actor_id, created_at),
+    KEY idx_audit_logs_entity (entity_type, entity_id),
+    KEY idx_audit_logs_action_date (action, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE staff (
     id INT AUTO_INCREMENT PRIMARY KEY,
     branch_id INT NOT NULL,
@@ -385,7 +426,7 @@ CREATE TABLE service_order_items (
     topping VARCHAR(100) NULL,
     note VARCHAR(255) NULL,
     line_total DECIMAL(12,2) NOT NULL,
-    kitchen_status ENUM('waiting', 'preparing', 'ready', 'served') NOT NULL DEFAULT 'waiting',
+    kitchen_status ENUM('waiting', 'preparing', 'ready', 'served', 'cancelled') NOT NULL DEFAULT 'waiting',
     preparing_started_at DATETIME NULL,
     ready_at DATETIME NULL,
     served_at DATETIME NULL,
@@ -479,6 +520,78 @@ CREATE TABLE payments (
         FOREIGN KEY (invoice_id) REFERENCES invoices(id)
         ON UPDATE CASCADE
         ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE website_orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    customer_id INT NULL,
+    fulfillment_type ENUM('pickup', 'delivery') NOT NULL DEFAULT 'pickup',
+    order_status ENUM('pending', 'paid', 'preparing', 'ready', 'delivering', 'completed', 'cancelled') NOT NULL DEFAULT 'paid',
+    delivery_address VARCHAR(255) NULL,
+    customer_note VARCHAR(255) NULL,
+    requested_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_website_orders_invoice (invoice_id),
+    KEY idx_website_orders_customer_status (customer_id, order_status),
+    KEY idx_website_orders_status_created (order_status, created_at),
+    CONSTRAINT fk_website_orders_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_website_orders_customer
+        FOREIGN KEY (customer_id) REFERENCES customers(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE invoice_refunds (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    staff_id INT NOT NULL,
+    pos_session_id INT NULL,
+    refund_amount DECIMAL(12,2) NOT NULL,
+    reason VARCHAR(255) NOT NULL,
+    status ENUM('approved', 'rejected') NOT NULL DEFAULT 'approved',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    KEY idx_invoice_refunds_invoice (invoice_id),
+    KEY idx_invoice_refunds_staff_date (staff_id, created_at),
+    CONSTRAINT fk_invoice_refunds_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_invoice_refunds_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_invoice_refunds_session
+        FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE receipt_print_logs (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    invoice_id INT NOT NULL,
+    staff_id INT NULL,
+    pos_session_id INT NULL,
+    receipt_type ENUM('html', 'pdf', 'thermal') NOT NULL DEFAULT 'html',
+    printed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    note VARCHAR(255) NULL,
+    KEY idx_receipt_print_logs_invoice (invoice_id, printed_at),
+    CONSTRAINT fk_receipt_print_logs_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_receipt_print_logs_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_receipt_print_logs_session
+        FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE invoice_details (
@@ -626,6 +739,7 @@ CREATE TABLE inventory_materials (
     unit VARCHAR(30) NOT NULL,
     stock_quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
     min_stock_level DECIMAL(12,2) NOT NULL DEFAULT 0,
+    unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
     supplier_name VARCHAR(150) NULL,
     last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
@@ -641,7 +755,11 @@ CREATE TABLE stock_movements (
     pos_session_id INT NULL,
     movement_type ENUM('import', 'sales_export', 'waste_export') NOT NULL,
     quantity DECIMAL(12,2) NOT NULL,
+    unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
     total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
+    supplier_name VARCHAR(150) NULL,
+    batch_code VARCHAR(80) NULL,
+    expiry_date DATE NULL,
     note VARCHAR(255) NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY uq_stock_movements_code (movement_code),
@@ -660,6 +778,38 @@ CREATE TABLE stock_movements (
         ON DELETE RESTRICT,
     CONSTRAINT fk_stock_movements_session
         FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
+        ON UPDATE CASCADE
+        ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE recipes (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    recipe_name VARCHAR(160) NOT NULL,
+    yield_quantity DECIMAL(12,2) NOT NULL DEFAULT 1,
+    status ENUM('active', 'inactive') NOT NULL DEFAULT 'active',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_recipes_product (product_id),
+    CONSTRAINT fk_recipes_product
+        FOREIGN KEY (product_id) REFERENCES products(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE recipe_items (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    recipe_id INT NOT NULL,
+    material_id INT NOT NULL,
+    quantity_per_unit DECIMAL(12,4) NOT NULL,
+    UNIQUE KEY uq_recipe_items_recipe_material (recipe_id, material_id),
+    KEY idx_recipe_items_material (material_id),
+    CONSTRAINT fk_recipe_items_recipe
+        FOREIGN KEY (recipe_id) REFERENCES recipes(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_recipe_items_material
+        FOREIGN KEY (material_id) REFERENCES inventory_materials(id)
         ON UPDATE CASCADE
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -748,9 +898,10 @@ INSERT INTO membership_tiers (tier_name, min_total_spending, discount_rate, desc
 ('Gold', 3000000, 10.00, 'High-value member tier with stronger checkout discount.');
 
 INSERT INTO branches (branch_name, address, district) VALUES
-('Cầu Giấy', '144 Xuân Thủy, Cầu Giấy, Hà Nội', 'Cầu Giấy'),
-('Hoàn Kiếm', '25 Hàng Bài, Hoàn Kiếm, Hà Nội', 'Hoàn Kiếm'),
-('Tây Hồ', '45 Xuân Diệu, Tây Hồ, Hà Nội', 'Tây Hồ');
+('Coffee Connect - Cầu Giấy', '144 Xuân Thủy, Cầu Giấy, Hà Nội', 'Cầu Giấy'),
+('Coffee Connect - Hoàn Kiếm', '25 Hàng Bài, Hoàn Kiếm, Hà Nội', 'Hoàn Kiếm'),
+('Coffee Connect - Tây Hồ', '45 Xuân Diệu, Tây Hồ, Hà Nội', 'Tây Hồ'),
+('Coffee Connect - Số 1', 'Số 1 Trịnh Văn Bô, Nam Từ Liêm, Hà Nội', 'Trịnh Văn Bô');
 
 INSERT INTO staff (branch_id, staff_code, staff_name, staff_role, phone_number, email) VALUES
 (1, 'WAIT001', 'Lan Waiter', 'waiter', '0911000001', 'waiter.cg@cafeconnect.test'),

@@ -72,11 +72,42 @@ function queryParam(name) {
   return new URLSearchParams(window.location.search).get(name);
 }
 
+function newCartLineId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `line-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function normalizeSize(size) {
+  return ["S", "M", "L"].includes(String(size || "").toUpperCase()) ? String(size).toUpperCase() : "M";
+}
+
+function normalizeCartNote(note) {
+  return String(note || "").trim().replace(/\s+/g, " ");
+}
+
+function siteCartMergeKey(item) {
+  return [
+    Number(item.product_id || 0),
+    normalizeSize(item.size),
+    normalizeCartNote(item.topping).toLowerCase(),
+  ].join("|");
+}
+
+function normalizeSiteCartItem(item) {
+  return {
+    line_id: item.line_id || item.cart_key || newCartLineId(),
+    product_id: Number(item.product_id || 0),
+    quantity: Math.max(1, Number(item.quantity || 1)),
+    size: normalizeSize(item.size),
+    topping: normalizeCartNote(item.topping),
+  };
+}
+
 function loadSiteCart() {
   try {
     const raw = localStorage.getItem("cafe_site_cart");
     const cart = raw ? JSON.parse(raw) : [];
-    return Array.isArray(cart) ? cart : [];
+    return Array.isArray(cart) ? cart.map(normalizeSiteCartItem).filter((item) => item.product_id > 0) : [];
   } catch {
     return [];
   }
@@ -629,9 +660,97 @@ function persistCart(scope) {
   if (scope === "site") saveSiteCart();
 }
 
-function addToCart(scope, productId) {
+function availableProductQuantity(product) {
+  if (!product) return 0;
+  if (!Object.prototype.hasOwnProperty.call(product, "stock_quantity")) return Number.MAX_SAFE_INTEGER;
+  return Math.max(0, Math.floor(Number(product.stock_quantity || 0)));
+}
+
+function isProductSellable(product) {
+  return Boolean(product)
+    && product.status !== "inactive"
+    && !product.is_out_of_stock
+    && availableProductQuantity(product) > 0;
+}
+
+function sanitizeSiteCart(options = {}) {
+  const { persist = false, notify = false } = options;
+  const merged = new Map();
+  let changed = false;
+
+  for (const rawItem of state.site.cart) {
+    const item = normalizeSiteCartItem(rawItem);
+    const product = productMap.get(Number(item.product_id));
+    if (!isProductSellable(product)) {
+      changed = true;
+      continue;
+    }
+
+    const key = siteCartMergeKey(item);
+    const existing = merged.get(key);
+    if (existing) {
+      existing.quantity += item.quantity;
+      changed = true;
+    } else {
+      merged.set(key, item);
+    }
+  }
+
+  const clean = [];
+  for (const item of merged.values()) {
+    const product = productMap.get(Number(item.product_id));
+    const available = availableProductQuantity(product);
+    const quantity = Math.min(Math.max(1, Number(item.quantity || 1)), available);
+    if (quantity !== item.quantity) changed = true;
+    if (quantity > 0) clean.push({ ...item, quantity });
+  }
+
+  if (changed || persist) {
+    state.site.cart = clean;
+    saveSiteCart();
+    if (changed && notify) {
+      showToast("Giỏ hàng đã được cập nhật theo tồn kho hiện tại.");
+    }
+  }
+
+  return state.site.cart;
+}
+
+function addToCart(scope, productId, options = {}) {
   const product = productMap.get(Number(productId));
-  if (!product) return;
+  if (!product) return false;
+
+  if (scope === "site") {
+    if (!isProductSellable(product)) {
+      showToast("Sản phẩm đang tạm hết hoặc ngừng bán.");
+      return false;
+    }
+
+    sanitizeSiteCart();
+    const newItem = normalizeSiteCartItem({
+      product_id: Number(productId),
+      quantity: 1,
+      size: options.size || "M",
+      topping: options.topping || "",
+    });
+    const key = siteCartMergeKey(newItem);
+    const existing = state.site.cart.find((item) => siteCartMergeKey(item) === key);
+    const available = availableProductQuantity(product);
+
+    if (existing) {
+      if (existing.quantity >= available) {
+        showToast(`Chỉ còn ${available} phần ${product.product_name}.`);
+        return false;
+      }
+      existing.quantity += 1;
+    } else {
+      state.site.cart.push(newItem);
+    }
+    saveSiteCart();
+    renderCart("site");
+    showToast(`Đã thêm ${product.product_name} vào giỏ hàng.`);
+    return true;
+  }
 
   const cart = cartFor(scope);
   if (scope === "pos" && !cart.length && !state.pos.billStartedAt) {
@@ -645,16 +764,41 @@ function addToCart(scope, productId) {
   }
   persistCart(scope);
   renderCart(scope);
+  return true;
 }
 
-function updateQuantity(scope, productId, delta) {
+async function orderNowSiteProduct(productId) {
+  if (addToCart("site", productId)) {
+    await navigateWebsite(url("checkout"));
+  }
+}
+
+function updateQuantity(scope, identifier, delta) {
+  if (scope === "site") {
+    const item = state.site.cart.find((entry) => String(entry.line_id) === String(identifier));
+    if (!item) return;
+
+    const product = productMap.get(Number(item.product_id));
+    const available = availableProductQuantity(product);
+    item.quantity += Number(delta);
+    if (item.quantity <= 0) {
+      state.site.cart = state.site.cart.filter((entry) => String(entry.line_id) !== String(identifier));
+    } else if (item.quantity > available) {
+      item.quantity = available;
+      showToast(`Chỉ còn ${available} phần ${product?.product_name || "sản phẩm này"}.`);
+    }
+    saveSiteCart();
+    renderCart("site");
+    return;
+  }
+
   const cart = cartFor(scope);
-  const item = cart.find((entry) => entry.product_id === Number(productId));
+  const item = cart.find((entry) => entry.product_id === Number(identifier));
   if (!item) return;
 
   item.quantity += Number(delta);
   if (item.quantity <= 0) {
-    state[scope].cart = cart.filter((entry) => entry.product_id !== Number(productId));
+    state[scope].cart = cart.filter((entry) => entry.product_id !== Number(identifier));
   }
   if (scope === "pos" && !state.pos.cart.length) {
     state.pos.billStartedAt = "";
@@ -663,13 +807,62 @@ function updateQuantity(scope, productId, delta) {
   renderCart(scope);
 }
 
-function removeItem(scope, productId) {
-  state[scope].cart = cartFor(scope).filter((entry) => entry.product_id !== Number(productId));
+function removeItem(scope, identifier) {
+  if (scope === "site") {
+    state.site.cart = state.site.cart.filter((entry) => String(entry.line_id) !== String(identifier));
+    saveSiteCart();
+    renderCart("site");
+    return;
+  }
+
+  state[scope].cart = cartFor(scope).filter((entry) => entry.product_id !== Number(identifier));
   if (scope === "pos" && !state.pos.cart.length) {
     state.pos.billStartedAt = "";
   }
   persistCart(scope);
   renderCart(scope);
+}
+
+function clearSiteCart() {
+  state.site.cart = [];
+  state.site.voucherId = "";
+  saveSiteCart();
+  renderCart("site");
+  renderVoucherOptions("site");
+}
+
+function duplicateSiteCartLine(lineId) {
+  const item = state.site.cart.find((entry) => String(entry.line_id) === String(lineId));
+  if (!item) return;
+  const product = productMap.get(Number(item.product_id));
+  if (!isProductSellable(product)) return;
+
+  const available = availableProductQuantity(product);
+  const currentQuantity = state.site.cart
+    .filter((entry) => Number(entry.product_id) === Number(item.product_id))
+    .reduce((sum, entry) => sum + Number(entry.quantity || 0), 0);
+  if (currentQuantity >= available) {
+    showToast(`Chỉ còn ${available} phần ${product.product_name}.`);
+    return;
+  }
+
+  state.site.cart.push({
+    ...item,
+    line_id: newCartLineId(),
+    quantity: 1,
+    topping: item.topping ? `${item.topping} - riêng` : "Ghi chú riêng",
+  });
+  saveSiteCart();
+  renderCart("site");
+}
+
+function updateSiteCartOption(lineId, field, value) {
+  const item = state.site.cart.find((entry) => String(entry.line_id) === String(lineId));
+  if (!item) return;
+  if (field === "size") item.size = normalizeSize(value);
+  if (field === "topping") item.topping = normalizeCartNote(value).slice(0, 160);
+  saveSiteCart();
+  renderTotals("site");
 }
 
 function selectedVoucher(scope) {
@@ -710,7 +903,131 @@ function totalsFor(scope) {
   return { subtotal, membershipDiscount, voucherDiscount, total, points };
 }
 
+function selectedSiteFulfillment() {
+  const checked = document.querySelector("[data-site-fulfillment]:checked");
+  const fallback = document.querySelector("[data-site-fulfillment]");
+  return (checked || fallback)?.value || "pickup";
+}
+
+function cartItemCount(scope) {
+  return cartFor(scope).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+}
+
+function renderSiteBranchInfo() {
+  const target = document.querySelector("[data-site-branch-info]");
+  if (!target) return;
+
+  const branchId = Number(document.querySelector("[data-site-branch]")?.value || cafeApp.branches?.[0]?.id || 0);
+  const branch = (cafeApp.branches || []).find((item) => Number(item.id) === branchId);
+  if (!branch) {
+    target.textContent = "";
+    return;
+  }
+
+  target.textContent = [branch.branch_name, branch.address, branch.district]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function renderCheckoutState() {
+  const root = document.querySelector("[data-site-checkout-page]");
+  if (!root) return;
+
+  const fulfillment = selectedSiteFulfillment();
+  const isDelivery = fulfillment === "delivery";
+  root.dataset.fulfillment = fulfillment;
+
+  document.querySelectorAll("[data-delivery-only]").forEach((node) => {
+    node.hidden = !isDelivery;
+  });
+  document.querySelectorAll("[data-pickup-only]").forEach((node) => {
+    node.hidden = isDelivery;
+  });
+
+  const count = cartItemCount("site");
+  document.querySelectorAll("[data-site-cart-count]").forEach((node) => {
+    node.textContent = String(count);
+  });
+
+  const checkoutButton = document.querySelector("[data-site-checkout]");
+  if (checkoutButton) checkoutButton.disabled = !cafeInstalled || count <= 0;
+
+  const payment = document.querySelector("[data-site-payment]")?.value || "e_wallet";
+  const paymentHint = document.querySelector("[data-site-payment-hint]");
+  if (paymentHint) {
+    paymentHint.textContent = payment === "cash"
+      ? "COD sẽ tạo đơn chờ thanh toán. Voucher được giữ cho đơn này đến khi đơn bị hủy hoặc được xác nhận thanh toán."
+      : "DemoPay nội bộ ghi nhận thanh toán ngay và đơn sẽ chuyển sang trạng thái đã thanh toán.";
+  }
+  renderSiteBranchInfo();
+}
+
+function renderSiteCart() {
+  const target = document.querySelector("[data-site-cart]");
+  if (!target) return;
+
+  const cart = sanitizeSiteCart({ persist: true });
+  if (!cart.length) {
+    target.innerHTML = `
+      <div class="empty-state cart-empty">
+        <h3>Giỏ hàng đang trống</h3>
+        <p>Chọn món trong menu để bắt đầu đặt hàng.</p>
+        <a class="primary-btn" href="${url("menu")}">Xem menu</a>
+      </div>
+    `;
+    renderSiteTotals();
+    renderCheckoutState();
+    return;
+  }
+
+  target.innerHTML = cart.map((item) => {
+    const product = productMap.get(Number(item.product_id));
+    const price = Number(product?.price || item.unit_price || 0);
+    const lineTotal = price * Number(item.quantity || 0);
+    const available = availableProductQuantity(product);
+    const lineId = escapeHtml(item.line_id);
+    return `
+      <article class="site-cart-item">
+        <img src="${escapeHtml(asset(product?.image || "assets/images/coffee-1.png"))}" alt="${escapeHtml(product?.product_name || "Sản phẩm")}">
+        <div class="site-cart-main">
+          <div class="site-cart-title">
+            <div>
+              <h3>${escapeHtml(product?.product_name || "Sản phẩm")}</h3>
+              <p>${formatMoney(price)} · còn ${available === Number.MAX_SAFE_INTEGER ? "nhiều" : available} phần</p>
+            </div>
+            <strong>${formatMoney(lineTotal)}</strong>
+          </div>
+          <div class="site-cart-controls">
+            <label>Size
+              <select data-site-cart-size data-cart-id="${lineId}">
+                ${["S", "M", "L"].map((size) => `<option value="${size}" ${normalizeSize(item.size) === size ? "selected" : ""}>${size}</option>`).join("")}
+              </select>
+            </label>
+            <label class="site-cart-note">Ghi chú món
+              <input type="text" data-site-cart-note data-cart-id="${lineId}" value="${escapeHtml(item.topping || "")}" placeholder="Ít đá, ít ngọt...">
+            </label>
+            <div class="qty-control site-qty">
+              <button type="button" data-cart-scope="site" data-cart-id="${lineId}" data-delta="-1">-</button>
+              <strong>${Number(item.quantity || 0)}</strong>
+              <button type="button" data-cart-scope="site" data-cart-id="${lineId}" data-delta="1">+</button>
+            </div>
+            <button type="button" class="ghost-btn compact" data-site-cart-duplicate="${lineId}">Thêm dòng khác</button>
+            <button type="button" class="ghost-btn compact danger" data-cart-scope="site" data-cart-id="${lineId}" data-remove>Xóa</button>
+          </div>
+        </div>
+      </article>
+    `;
+  }).join("");
+
+  renderSiteTotals();
+  renderCheckoutState();
+}
+
 function renderCart(scope) {
+  if (scope === "site") {
+    renderSiteCart();
+    return;
+  }
   const target = document.querySelector(scope === "site" ? "[data-site-cart]" : "[data-pos-cart]");
   if (!target) return;
 
@@ -746,7 +1063,26 @@ function renderCart(scope) {
   renderTotals(scope);
 }
 
+function renderSiteTotals() {
+  const target = document.querySelector("[data-site-totals]");
+  if (!target) return;
+
+  const totals = totalsFor("site");
+  target.innerHTML = `
+    <div class="total-row"><span>Tạm tính</span><strong>${formatMoney(totals.subtotal)}</strong></div>
+    <div class="total-row"><span>Giảm hạng thành viên</span><strong>-${formatMoney(totals.membershipDiscount)}</strong></div>
+    <div class="total-row"><span>Giảm voucher</span><strong>-${formatMoney(totals.voucherDiscount)}</strong></div>
+    <div class="total-row final"><span>Thanh toán</span><strong>${formatMoney(totals.total)}</strong></div>
+    <div class="total-row"><span>Điểm nhận được</span><strong>+${totals.points}</strong></div>
+  `;
+  renderCheckoutState();
+}
+
 function renderTotals(scope) {
+  if (scope === "site") {
+    renderSiteTotals();
+    return;
+  }
   const target = document.querySelector(scope === "site" ? "[data-site-totals]" : "[data-pos-totals]");
   if (!target) return;
 
@@ -766,6 +1102,19 @@ function renderVoucherOptions(scope) {
   if (!select) return;
 
   const usable = state[scope].customer?.vouchers?.filter((voucher) => voucherUsableOnScope(voucher, scope)) || [];
+  if (scope === "site") {
+    select.innerHTML = '<option value="">Không dùng voucher</option>' + usable.map((voucher) => {
+      const value = voucher.discount_type === "percentage" ? `${Number(voucher.discount_value)}%` : formatMoney(voucher.discount_value);
+      return `<option value="${voucher.id}">${escapeHtml(voucher.voucher_code)} · ${value}</option>`;
+    }).join("");
+    if (!usable.some((voucher) => String(voucher.id) === String(state.site.voucherId))) {
+      state.site.voucherId = "";
+    }
+    select.value = state.site.voucherId;
+    renderSiteTotals();
+    renderCheckoutState();
+    return;
+  }
   select.innerHTML = '<option value="">Không dùng voucher</option>' + usable.map((voucher) => {
     const value = voucher.discount_type === "percentage" ? `${Number(voucher.discount_value)}%` : formatMoney(voucher.discount_value);
     return `<option value="${voucher.id}">${escapeHtml(voucher.voucher_code)} · ${value}</option>`;
@@ -798,12 +1147,29 @@ function renderMiniMember(scope) {
         </div>
       </div>
       <div class="mini-stats">
-        <span><strong>${escapeHtml(customer.tier_name)}</strong><small>Hạng</small></span>
+        <span class="tier-stat">${tierBadge(customer.tier_name, true)}<small>Hạng</small></span>
         <span><strong>${Number(customer.current_points || 0).toLocaleString("vi-VN")}</strong><small>Điểm</small></span>
         <span><strong>${usableCount}</strong><small>Voucher</small></span>
       </div>
     </div>
   `;
+}
+
+function tierClassName(tierName) {
+  const normalized = String(tierName || "member").trim().toLowerCase();
+  if (normalized.includes("gold") || normalized.includes("vàng")) return "gold";
+  if (normalized.includes("silver") || normalized.includes("bạc")) return "silver";
+  if (normalized.includes("bronze") || normalized.includes("đồng")) return "bronze";
+  if (normalized.includes("diamond") || normalized.includes("kim cương")) return "diamond";
+  if (normalized.includes("platinum") || normalized.includes("bạch kim")) return "platinum";
+  if (normalized.includes("vip")) return "vip";
+  return "member";
+}
+
+function tierBadge(tierName, compact = false) {
+  const label = escapeHtml(tierName || "Member");
+  const tier = tierClassName(tierName);
+  return `<span class="tier-badge tier-${tier}${compact ? " compact" : ""}"><span>${label}</span></span>`;
 }
 
 function setSiteMember(member) {
@@ -893,7 +1259,8 @@ function renderMemberAccount() {
         <p>${escapeHtml(member.phone_number)} · ${escapeHtml(member.email || "Chưa có email")}</p>
       </div>
     </div>
-    <div class="metric-grid two">
+    <div class="metric-grid">
+      <div class="metric tier-metric">${tierBadge(member.tier_name)}<small>Hạng thành viên</small></div>
       <div class="metric"><strong>${Number(member.current_points || 0).toLocaleString("vi-VN")}</strong><small>Điểm</small></div>
       <div class="metric"><strong>${usableCount}</strong><small>Voucher khả dụng</small></div>
     </div>
@@ -989,7 +1356,7 @@ function renderProfile(targetName, customer) {
       </div>
     </div>
     <div class="metric-grid">
-      <div class="metric"><strong>${escapeHtml(customer.tier_name)}</strong><small>Hạng thành viên</small></div>
+      <div class="metric tier-metric">${tierBadge(customer.tier_name)}<small>Hạng thành viên</small></div>
       <div class="metric"><strong>${Number(customer.current_points || 0).toLocaleString("vi-VN")}</strong><small>Điểm hiện có</small></div>
       <div class="metric"><strong>${formatMoney(customer.total_spending)}</strong><small>Tổng chi tiêu</small></div>
     </div>
@@ -1132,7 +1499,7 @@ async function lookupMember(scope, identity) {
 }
 
 async function checkoutScope(scope, extraPayload = {}) {
-  const cart = cartFor(scope);
+  const cart = scope === "site" ? sanitizeSiteCart({ persist: true, notify: true }) : cartFor(scope);
   if (!cart.length && !extraPayload.order_id) {
     showToast("Giỏ hàng đang rỗng.");
     return;
@@ -1148,7 +1515,7 @@ async function checkoutScope(scope, extraPayload = {}) {
   const payload = {
     sales_channel: scope === "site" ? "website" : "pos",
     staff_id: scope === "site" ? cafeApp.staff?.find((item) => item.staff_role === "cashier")?.id || 2 : user.id || 2,
-    branch_id: scope === "site" ? cafeApp.branches?.[0]?.id || 1 : user.branch_id || 1,
+    branch_id: scope === "site" ? Number(document.querySelector("[data-site-branch]")?.value || cafeApp.branches?.[0]?.id || 1) : user.branch_id || 1,
     customer_id: state[scope].customer?.id || null,
     voucher_id: state[scope].voucherId || null,
     payment_method: paymentSelect?.value || "cash",
@@ -1156,15 +1523,20 @@ async function checkoutScope(scope, extraPayload = {}) {
     ...extraPayload,
   };
   if (scope === "site") {
-    payload.fulfillment_type = document.querySelector("[data-site-fulfillment]")?.value || "pickup";
+    payload.fulfillment_type = selectedSiteFulfillment();
+    payload.sales_channel = payload.fulfillment_type === "delivery" ? "delivery" : "website";
     payload.delivery_address = document.querySelector("[data-site-delivery-address]")?.value?.trim() || "";
     const receiverPhone = document.querySelector("[data-site-receiver-phone]")?.value?.trim() || "";
+    if (payload.fulfillment_type === "delivery" && !receiverPhone) {
+      showToast("Vui lòng nhập số điện thoại nhận hàng.");
+      return;
+    }
     if (payload.fulfillment_type === "delivery" && !payload.delivery_address) {
       showToast("Vui lòng nhập địa chỉ giao hàng.");
       return;
     }
     payload.customer_note = [
-      receiverPhone ? `Receiver phone: ${receiverPhone}` : "",
+      receiverPhone ? `SĐT nhận hàng: ${receiverPhone}` : "",
       document.querySelector("[data-site-customer-note]")?.value?.trim() || "",
     ].filter(Boolean).join(" | ");
     const requestedAt = document.querySelector("[data-site-requested-at]")?.value || "";
@@ -2192,7 +2564,8 @@ function renderSiteProducts() {
           <div class="product-actions">
             <strong>${formatMoney(product.price)}</strong>
             <a class="secondary-link" href="${url(`product?id=${product.id}`)}">Chi tiết</a>
-            <button type="button" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Order Now</button>
+            <button type="button" class="cart-add-btn" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Thêm vào giỏ hàng</button>
+            <button type="button" class="order-now-btn" data-site-order-now="${product.id}" ${isOut ? "disabled" : ""}>Order now</button>
           </div>
         </div>
       </article>
@@ -2543,9 +2916,12 @@ function wireEvents() {
     const pinBackspace = event.target.closest("[data-pin-backspace]");
     const pinSubmit = event.target.closest("[data-pin-submit]");
     const siteAdd = event.target.closest("[data-site-add]");
+    const siteOrderNow = event.target.closest("[data-site-order-now]");
     const posAdd = event.target.closest("[data-pos-add]");
     const quantity = event.target.closest("[data-cart-scope][data-delta]");
     const remove = event.target.closest("[data-cart-scope][data-remove]");
+    const clearSiteCartButton = event.target.closest("[data-site-cart-clear]");
+    const duplicateSiteLine = event.target.closest("[data-site-cart-duplicate]");
     const tableCard = event.target.closest("[data-select-table]");
     const updateItem = event.target.closest("[data-update-item]");
     const voidItem = event.target.closest("[data-void-item]");
@@ -2743,9 +3119,20 @@ function wireEvents() {
       }
       return;
     }
+    if (clearSiteCartButton) {
+      clearSiteCart();
+      return;
+    }
+    if (duplicateSiteLine) {
+      duplicateSiteCartLine(duplicateSiteLine.dataset.siteCartDuplicate);
+      return;
+    }
     if (siteAdd) {
       addToCart("site", siteAdd.dataset.siteAdd);
-      showToast("Đã thêm món vào giỏ website.");
+      return;
+    }
+    if (siteOrderNow) {
+      await orderNowSiteProduct(siteOrderNow.dataset.siteOrderNow);
       return;
     }
     if (posAdd) {
@@ -2753,11 +3140,11 @@ function wireEvents() {
       return;
     }
     if (quantity) {
-      updateQuantity(quantity.dataset.cartScope, quantity.dataset.productId, quantity.dataset.delta);
+      updateQuantity(quantity.dataset.cartScope, quantity.dataset.cartId || quantity.dataset.productId, quantity.dataset.delta);
       return;
     }
     if (remove) {
-      removeItem(remove.dataset.cartScope, remove.dataset.productId);
+      removeItem(remove.dataset.cartScope, remove.dataset.cartId || remove.dataset.productId);
       return;
     }
     if (tableCard) {
@@ -3368,6 +3755,10 @@ function wireEvents() {
     const posVoucher = event.target.closest("[data-pos-voucher]");
     const tableSelect = event.target.closest("[data-table-select]");
     const siteFilter = event.target.closest("[data-site-category-filter], [data-site-sort]");
+    const siteFulfillment = event.target.closest("[data-site-fulfillment]");
+    const sitePayment = event.target.closest("[data-site-payment]");
+    const siteBranch = event.target.closest("[data-site-branch]");
+    const siteCartSize = event.target.closest("[data-site-cart-size]");
     const adminStatusFilter = event.target.closest("[data-admin-product-status]");
     const adminCategoryFilter = event.target.closest("[data-admin-product-category]");
     if (siteVoucher) {
@@ -3389,6 +3780,15 @@ function wireEvents() {
       renderSiteProducts();
       return;
     }
+    if (siteFulfillment || sitePayment || siteBranch) {
+      renderCheckoutState();
+      renderSiteTotals();
+      return;
+    }
+    if (siteCartSize) {
+      updateSiteCartOption(siteCartSize.dataset.cartId, "size", siteCartSize.value);
+      return;
+    }
     if (adminStatusFilter) {
       state.pos.adminProductStatus = adminStatusFilter.value || "all";
       renderPosApp();
@@ -3403,6 +3803,7 @@ function wireEvents() {
   document.addEventListener("input", (event) => {
     const productSearch = event.target.closest("[data-product-search]");
     const siteProductSearch = event.target.closest("[data-site-product-search]");
+    const siteCartNote = event.target.closest("[data-site-cart-note]");
     const adminProductSearch = event.target.closest("[data-admin-product-search]");
     if (productSearch) {
       state.pos.productFilter = productSearch.value;
@@ -3410,6 +3811,10 @@ function wireEvents() {
     }
     if (siteProductSearch) {
       renderSiteProducts();
+      return;
+    }
+    if (siteCartNote) {
+      updateSiteCartOption(siteCartNote.dataset.cartId, "topping", siteCartNote.value);
       return;
     }
     if (adminProductSearch) {

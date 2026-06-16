@@ -92,9 +92,11 @@ require VIEW_PATH . '/website/partials/header.php';
 
             <div class="section-actions product-actions">
               <button type="button" class="primary-btn" data-site-add="<?= e((string) $product['id']) ?>" <?= !empty($product['is_out_of_stock']) ? 'disabled' : '' ?>>
-                Thêm vào giỏ
+                Thêm vào giỏ hàng
               </button>
-              <a class="secondary-link" href="<?= e(base_url('checkout')) ?>">Mở giỏ hàng</a>
+              <button type="button" class="primary-btn order-now-btn" data-site-order-now="<?= e((string) $product['id']) ?>" <?= !empty($product['is_out_of_stock']) ? 'disabled' : '' ?>>
+                Order now
+              </button>
               <a class="secondary-link" href="<?= e(base_url('menu')) ?>">Xem menu</a>
             </div>
           </article>
@@ -158,7 +160,8 @@ require VIEW_PATH . '/website/partials/header.php';
                 <strong><?= e(money((float) $related['price'])) ?></strong>
                 <div class="card-actions">
                   <a class="secondary-link" href="<?= e(base_url('product?id=' . (int) $related['id'])) ?>">Chi tiết</a>
-                  <button type="button" data-site-add="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Thêm</button>
+                  <button type="button" data-site-add="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Thêm vào giỏ hàng</button>
+                  <button type="button" class="order-now-btn" data-site-order-now="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Order now</button>
                 </div>
               </footer>
             </article>

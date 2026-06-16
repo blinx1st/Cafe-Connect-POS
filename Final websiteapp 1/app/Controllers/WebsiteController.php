@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Controller;
 use App\Core\Database;
 use App\Models\Product;
+use App\Models\Staff;
 
 final class WebsiteController extends Controller
 {
@@ -98,6 +99,7 @@ final class WebsiteController extends Controller
         $data['products'] = $product->active();
         $data['categories'] = $product->categories();
         $data['reviews'] = (new \App\Models\Customer())->reviews();
+        $data['branches'] = (new Staff())->branches();
 
         $authState = (new AuthController())->memberSession();
         $data['member'] = $authState['member'] ?? null;

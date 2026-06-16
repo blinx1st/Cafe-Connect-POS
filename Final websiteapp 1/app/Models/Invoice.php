@@ -91,6 +91,7 @@ final class Invoice extends Model
 
         $this->db->beginTransaction();
         try {
+            $this->assertStockAvailable($prepared, $branchId);
             $customer = $customerId ? $this->customerForUpdate($customerId) : null;
             $membershipDiscount = $customer ? round($subtotal * ((float) $customer['discount_rate'] / 100), 0) : 0.0;
             $voucher = $voucherModel->validateForCheckout($voucherId, $customerId, $salesChannel, true);
@@ -471,6 +472,55 @@ final class Invoice extends Model
             throw new InvalidArgumentException('Customer not found.');
         }
         return $customer;
+    }
+
+    private function assertStockAvailable(array $items, int $branchId): void
+    {
+        $required = [];
+        foreach ($items as $item) {
+            $productId = (int) ($item['product_id'] ?? 0);
+            if ($productId <= 0) {
+                continue;
+            }
+            $required[$productId] = ($required[$productId] ?? 0) + max(1, (int) ($item['quantity'] ?? 1));
+        }
+
+        if (!$required) {
+            throw new InvalidArgumentException('Cart is empty.');
+        }
+
+        $ids = array_keys($required);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->prepare(
+            "SELECT p.id, p.product_name, p.status, COALESCE(bi.stock_quantity, 0) AS stock_quantity
+             FROM products p
+             LEFT JOIN branch_inventory bi ON bi.product_id = p.id AND bi.branch_id = ?
+             WHERE p.id IN ($placeholders)
+             FOR UPDATE"
+        );
+        $stmt->execute(array_merge([$branchId], $ids));
+
+        $stockRows = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $stockRows[(int) $row['id']] = $row;
+        }
+
+        foreach ($required as $productId => $quantity) {
+            $row = $stockRows[$productId] ?? null;
+            if (!$row || ($row['status'] ?? '') !== 'active') {
+                throw new InvalidArgumentException('Sản phẩm trong giỏ không còn bán.');
+            }
+
+            $available = (float) ($row['stock_quantity'] ?? 0);
+            if ($available < $quantity) {
+                throw new InvalidArgumentException(sprintf(
+                    'Không đủ tồn kho cho %s. Còn %.0f, cần %d.',
+                    (string) $row['product_name'],
+                    $available,
+                    $quantity
+                ));
+            }
+        }
     }
 
     private function upgradeTier(int $customerId): void

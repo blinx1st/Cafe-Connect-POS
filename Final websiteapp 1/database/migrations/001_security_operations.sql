@@ -130,13 +130,13 @@ ALTER TABLE service_order_items
     MODIFY kitchen_status ENUM('waiting', 'preparing', 'ready', 'served', 'cancelled') NOT NULL DEFAULT 'waiting';
 
 ALTER TABLE inventory_materials
-    ADD COLUMN unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER min_stock_level;
+    ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER min_stock_level;
 
 ALTER TABLE stock_movements
-    ADD COLUMN unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER quantity,
-    ADD COLUMN supplier_name VARCHAR(150) NULL AFTER total_amount,
-    ADD COLUMN batch_code VARCHAR(80) NULL AFTER supplier_name,
-    ADD COLUMN expiry_date DATE NULL AFTER batch_code;
+    ADD COLUMN IF NOT EXISTS unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER quantity,
+    ADD COLUMN IF NOT EXISTS supplier_name VARCHAR(150) NULL AFTER total_amount,
+    ADD COLUMN IF NOT EXISTS batch_code VARCHAR(80) NULL AFTER supplier_name,
+    ADD COLUMN IF NOT EXISTS expiry_date DATE NULL AFTER batch_code;
 
 CREATE TABLE recipes (
     id INT AUTO_INCREMENT PRIMARY KEY,

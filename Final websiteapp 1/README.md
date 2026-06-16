@@ -38,6 +38,7 @@ $env:APP_ENV = "production_internal"
 - `app/Views/website`: trang chủ, menu, login, register, forgot/reset password, hồ sơ, checkout, member portal.
 - `app/Views/pos`: đăng nhập POS và trang module POS.
 - `database/cafe_connect_schema.sql`: schema + sample data cho Website + POS roles.
+- `database/manual_pre_run_setup.sql`: SQL import thủ công sau schema để tạo/bù bảng vận hành, mật khẩu/PIN demo, recipe/BOM và website order seed.
 - `database/migrations`: migration bổ sung cho audit, CSRF/lockout support, website order, refund, receipt, recipe/BOM.
 - `database/seeders`: sample seed riêng cho recipe, unit cost và website order status.
 - `storage/logs/app.log`: nơi ghi lỗi backend an toàn cho API.
@@ -51,6 +52,13 @@ $env:APP_ENV = "production_internal"
 5. Mở POS login: `http://localhost/C%C3%A1c%20h%E1%BB%87%20th%E1%BB%91ng%20th%C3%B4ng%20tin%20doanh%20nghi%E1%BB%87p/Cafe-Connect-POS/Final%20websiteapp%201/pos/login`.
 
 Nếu Apache chưa bật rewrite, dùng fallback dạng `index.php?route=/menu` hoặc `index.php?route=/pos/checkout`.
+
+Nếu muốn import MySQL thủ công thay vì dùng `install.php`, import theo thứ tự:
+
+1. `database/cafe_connect_schema.sql`
+2. `database/manual_pre_run_setup.sql`
+
+File `manual_pre_run_setup.sql` có thể chạy lại nhiều lần để bù dữ liệu thiếu trước khi mở website/POS.
 
 ## Website routes
 
