@@ -2228,7 +2228,7 @@ function renderReportsModule() {
       <section class="panel"><h2>Doanh thu theo kênh</h2>${tableHtml(reports.revenue_by_channel || [], ["Kênh", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.sales_channel)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
       <section class="panel"><h2>Hiệu suất nhân viên</h2>${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>`)}</section>
       <section class="panel span-2"><h2>Hóa đơn gần nhất</h2>${invoiceActions}</section>
-      <section class="panel span-2"><h2>Phien lam viec POS</h2>${sessionReportsTable()}</section>
+      <section class="panel span-2"><h2>Phiên làm việc POS</h2>${sessionReportsTable()}</section>
       <section class="panel span-2"><h2>Thu chi gần nhất</h2>${cashTable()}</section>
     </div>
   `;
