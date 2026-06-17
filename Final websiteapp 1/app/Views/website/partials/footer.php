@@ -1,3 +1,4 @@
+<?php $canAccessCustomerCrm = !empty($appData['can_access_customer_crm']); ?>
 <footer class="footer">
   <a class="footer-brand" href="<?= e(base_url()) ?>">Coffee</a>
   <div class="footer-column">
@@ -6,7 +7,11 @@
     <a href="<?= e(base_url('register')) ?>">Member register</a>
     <a href="<?= e(base_url('account')) ?>">Member profile</a>
     <a href="<?= e(base_url('forgot-password')) ?>">Forgot password</a>
-    <a href="<?= e(base_url('member')) ?>">Member portal</a>
+    <span data-crm-footer-slot>
+      <?php if ($canAccessCustomerCrm): ?>
+        <a href="<?= e(base_url('member')) ?>" data-crm-member-link>CRM khách hàng</a>
+      <?php endif; ?>
+    </span>
     <a href="<?= e(base_url('feedback')) ?>">Member feedback</a>
     <a href="<?= e(base_url('checkout')) ?>">Checkout</a>
   </div>
@@ -19,7 +24,11 @@
   <div class="footer-column">
     <h2>About Us</h2>
     <a href="<?= e(base_url()) ?>">Our story</a>
-    <a href="<?= e(base_url('member')) ?>">CRM rewards</a>
+    <span data-crm-footer-slot>
+      <?php if ($canAccessCustomerCrm): ?>
+        <a href="<?= e(base_url('member')) ?>" data-crm-member-link>CRM khách hàng</a>
+      <?php endif; ?>
+    </span>
     <a href="<?= e(base_url('pos/login')) ?>">POS system</a>
   </div>
   <div class="footer-column social-column">

@@ -57,7 +57,7 @@ final class ApiController extends Controller
                 '/api/member-forgot-password' => $auth->memberForgotPassword($payload),
                 '/api/member-reset-password' => $auth->memberResetPassword($payload),
                 '/api/member-feedback' => $this->memberFeedback($payload),
-                '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
+                '/api/member-lookup' => $this->memberLookup($payload, $auth),
                 '/api/product-detail' => $this->productDetail($payload),
                 '/api/website-orders' => $this->memberOrders(),
                 '/api/website-order-detail' => $this->memberOrderDetail($payload),
@@ -222,7 +222,6 @@ final class ApiController extends Controller
             '/api/website-bootstrap',
             '/api/pos-bootstrap',
             '/api/member-session',
-            '/api/member-lookup',
             '/api/product-detail',
             '/api/website-orders',
             '/api/website-order-detail',
@@ -334,6 +333,47 @@ final class ApiController extends Controller
         }
 
         return $data;
+    }
+
+    private function memberLookup(array $payload, AuthController $auth): ?array
+    {
+        $identity = require_field($payload, 'identity', 'Phone or email');
+        $crmRoles = RolePolicy::MODULES['customers']['roles'];
+        $hasPosCrmAccess = false;
+
+        if ((int) ($payload['staff_id'] ?? 0) > 0 && !empty($payload['pos_session_id']) && !empty($payload['session_token'])) {
+            try {
+                $auth->requireStaffRole($payload, $crmRoles);
+                $hasPosCrmAccess = true;
+            } catch (InvalidArgumentException) {
+                throw new InvalidArgumentException('Bạn không có quyền tra cứu hồ sơ khách hàng.');
+            }
+        }
+
+        $session = $auth->memberSession();
+        $member = $session['member'] ?? null;
+        $webStaff = $session['web_staff'] ?? null;
+        $hasWebCrmAccess = is_array($webStaff)
+            && RolePolicy::canAccessCustomerCrm((string) ($webStaff['staff_role'] ?? ''));
+
+        if (!$hasPosCrmAccess && !$hasWebCrmAccess && !$member) {
+            throw new InvalidArgumentException('Vui lòng đăng nhập nhân viên có quyền CRM hoặc tài khoản thành viên của bạn.');
+        }
+
+        $customer = (new Customer())->lookup($identity);
+        if (!$customer) {
+            return null;
+        }
+
+        if ($hasPosCrmAccess || $hasWebCrmAccess) {
+            return $customer;
+        }
+
+        if ((int) ($customer['id'] ?? 0) === (int) ($member['id'] ?? 0)) {
+            return $customer;
+        }
+
+        throw new InvalidArgumentException('Bạn chỉ được xem hồ sơ cá nhân của mình.');
     }
 
     private function createCashTransaction(array $payload): array
@@ -788,7 +828,7 @@ final class ApiController extends Controller
     private function checkout(array $payload, AuthController $auth): array
     {
         $salesChannel = $payload['sales_channel'] ?? 'pos';
-        if ($salesChannel !== 'website' || !empty($payload['order_id'])) {
+        if (!in_array($salesChannel, ['website', 'delivery'], true) || !empty($payload['order_id'])) {
             $auth->requireStaffRole($payload, RolePolicy::rolesForEndpoint('/api/checkout') ?? ['cashier', 'manager', 'owner', 'admin']);
         }
 

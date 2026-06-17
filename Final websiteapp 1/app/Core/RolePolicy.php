@@ -84,6 +84,11 @@ final class RolePolicy
         return isset(self::MODULES[$module]) && in_array($role, self::MODULES[$module]['roles'], true);
     }
 
+    public static function canAccessCustomerCrm(string $role): bool
+    {
+        return self::canAccessModule($role, 'customers');
+    }
+
     public static function rolesForEndpoint(string $endpoint): ?array
     {
         return self::ENDPOINT_ROLES[$endpoint] ?? null;

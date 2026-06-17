@@ -131,6 +131,8 @@ final class Product extends Model
             $row['is_out_of_stock'] = $row['stock_quantity'] <= 0;
         }
 
+        $this->attachBranchInventory($rows);
+
         return $rows;
     }
 
@@ -184,7 +186,7 @@ final class Product extends Model
         }
 
         $branchInventory = $this->db->prepare(
-            "SELECT b.branch_name, b.district, COALESCE(bi.stock_quantity, 0) AS stock_quantity,
+            "SELECT b.id AS branch_id, b.branch_name, b.district, COALESCE(bi.stock_quantity, 0) AS stock_quantity,
                     COALESCE(bi.min_stock_level, 0) AS min_stock_level,
                     COALESCE(bi.last_updated, b.created_at) AS last_updated
              FROM branches b
@@ -196,6 +198,7 @@ final class Product extends Model
         $product['branch_inventory'] = array_map(static function (array $row): array {
             $stock = (float) $row['stock_quantity'];
             $min = (float) $row['min_stock_level'];
+            $row['branch_id'] = (int) $row['branch_id'];
             $row['stock_quantity'] = $stock;
             $row['min_stock_level'] = $min;
             $row['stock_status'] = $stock <= 0 ? 'out' : ($min > 0 && $stock <= $min ? 'low' : 'available');
@@ -227,6 +230,46 @@ final class Product extends Model
         }, $related->fetchAll());
 
         return $product;
+    }
+
+    private function attachBranchInventory(array &$rows): void
+    {
+        $productIds = array_values(array_unique(array_map(static fn (array $row): int => (int) $row['id'], $rows)));
+        if (!$productIds) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+        $stmt = $this->db->prepare(
+            "SELECT p.id AS product_id, b.id AS branch_id, b.branch_name, b.district,
+                    COALESCE(bi.stock_quantity, 0) AS stock_quantity,
+                    COALESCE(bi.min_stock_level, 0) AS min_stock_level
+             FROM products p
+             JOIN branches b ON b.status = 'active'
+             LEFT JOIN branch_inventory bi ON bi.product_id = p.id AND bi.branch_id = b.id
+             WHERE p.id IN ($placeholders)
+             ORDER BY p.id, b.id"
+        );
+        $stmt->execute($productIds);
+
+        $byProduct = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $productId = (int) $row['product_id'];
+            $stock = (float) $row['stock_quantity'];
+            $min = (float) $row['min_stock_level'];
+            $byProduct[$productId][] = [
+                'branch_id' => (int) $row['branch_id'],
+                'branch_name' => $row['branch_name'],
+                'district' => $row['district'],
+                'stock_quantity' => $stock,
+                'min_stock_level' => $min,
+                'stock_status' => $stock <= 0 ? 'out' : ($min > 0 && $stock <= $min ? 'low' : 'available'),
+            ];
+        }
+
+        foreach ($rows as &$row) {
+            $row['branch_inventory'] = $byProduct[(int) $row['id']] ?? [];
+        }
     }
 
     public function byIds(array $ids): array

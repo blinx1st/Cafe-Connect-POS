@@ -4051,6 +4051,11 @@ body {
   line-height: 1.55;
 }
 
+.checkout-note.danger {
+  color: #9f1d1d;
+  font-weight: 700;
+}
+
 .checkout-summary-card {
   position: relative;
   overflow: hidden;

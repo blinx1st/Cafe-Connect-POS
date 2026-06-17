@@ -1,6 +1,7 @@
 <?php
 $member = $appData['member'] ?? null;
 $webStaff = $appData['web_staff'] ?? null;
+$canAccessCustomerCrm = !empty($appData['can_access_customer_crm']);
 ?>
 
 <header class="site-header" data-header>
@@ -12,7 +13,9 @@ $webStaff = $appData['web_staff'] ?? null;
     <a href="<?= e(base_url()) ?>">Trang chủ</a>
     <a href="<?= e(base_url('menu')) ?>">Menu</a>
     <a href="<?= e(base_url('checkout')) ?>">Đặt hàng</a>
-    <a href="<?= e(base_url('member')) ?>">Thành viên</a>
+    <?php if ($canAccessCustomerCrm): ?>
+      <a href="<?= e(base_url('member')) ?>" data-crm-member-link>Thành viên</a>
+    <?php endif; ?>
     <a href="<?= e(base_url('feedback')) ?>">Đánh giá</a>
     <a class="nav-pill pos-header-link" href="<?= e(base_url('pos/login')) ?>" data-pos-header-link <?= $webStaff ? '' : 'hidden' ?>>POS</a>
   </nav>

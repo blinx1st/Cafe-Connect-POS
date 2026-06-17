@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Core\Controller;
 use App\Core\Database;
+use App\Core\RolePolicy;
 use App\Models\Product;
 use App\Models\Staff;
 
@@ -63,7 +64,19 @@ final class WebsiteController extends Controller
 
     public function member(): void
     {
-        $this->renderWebsite('website/member', 'Cafe Connect | Member Portal', 'website-member');
+        $authState = Database::ready() ? (new AuthController())->memberSession() : ['member' => null, 'web_staff' => null];
+        $member = $authState['member'] ?? null;
+        $webStaff = $authState['web_staff'] ?? null;
+        $staffRole = (string) ($webStaff['staff_role'] ?? '');
+
+        if (!$webStaff && !$member) {
+            $this->redirectTo('login');
+        }
+        if ($member || !RolePolicy::canAccessCustomerCrm($staffRole)) {
+            $this->redirectTo('account');
+        }
+
+        $this->renderWebsite('website/member', 'Cafe Connect | CRM khách hàng', 'website-member');
     }
 
     public function feedback(): void
@@ -94,6 +107,7 @@ final class WebsiteController extends Controller
             'branches' => [],
             'member' => null,
             'web_staff' => null,
+            'can_access_customer_crm' => false,
         ];
 
         if (!Database::ready()) {
@@ -109,7 +123,14 @@ final class WebsiteController extends Controller
         $authState = (new AuthController())->memberSession();
         $data['member'] = $authState['member'] ?? null;
         $data['web_staff'] = $authState['web_staff'] ?? null;
+        $data['can_access_customer_crm'] = RolePolicy::canAccessCustomerCrm((string) ($data['web_staff']['staff_role'] ?? ''));
 
         return $data;
+    }
+
+    private function redirectTo(string $path): never
+    {
+        header('Location: ' . base_url($path));
+        exit;
     }
 }

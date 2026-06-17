@@ -80,7 +80,7 @@ File `manual_pre_run_setup.sql` có thể chạy lại nhiều lần để bù d
 - `/reset-password?token=...`: đặt mật khẩu mới từ link email, token dùng một lần và hết hạn sau 30 phút.
 - `/account`: hồ sơ cá nhân, sửa thông tin cơ bản, đổi mật khẩu, xem điểm/voucher/favorite/lịch sử hóa đơn.
 - `/checkout`: giỏ hàng website, voucher, thanh toán và ghi invoice.
-- `/member`: hồ sơ thành viên, điểm, voucher, favorite, lịch sử hóa đơn.
+- `/member`: CRM khách hàng nội bộ, chỉ dành cho staff có quyền `cashier`, `marketing`, `manager`, `owner`, `admin`.
 
 - `/feedback`: form feedback riêng cho member, gửi nội dung về Gmail quản trị.
 
@@ -132,7 +132,7 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 ## Bảo mật và audit
 
 - Mọi API ghi dữ liệu cần header `X-CSRF-Token`. Layout PHP inject token vào `window.CAFE_CSRF_TOKEN`, và `assets/js/app.js` tự động gửi token này khi gọi API.
-- Endpoint đọc dữ liệu như `member-session`, `member-lookup`, `dashboard`, `inventory`, `reports`, `receipt` được phép bỏ qua CSRF.
+- Endpoint đọc dữ liệu công khai như `member-session` được phép bỏ qua CSRF; `member-lookup` là dữ liệu khách hàng nhạy cảm nên cần session hợp lệ và CSRF.
 - Login member còn lockout cơ bản bằng DB trong bảng `auth_lockouts`. Riêng đăng nhập POS, PIN mở ca và gửi quên mật khẩu không khóa tạm khi nhập nhiều lần.
 - Bảng `audit_logs` ghi các hành động quan trọng: login/logout, register, update profile, đổi/reset password, checkout, refund, receipt print, void/cancel order, product/staff/cash/inventory.
 - Lỗi backend bất ngờ được ghi vào `storage/logs/app.log`; API chỉ trả thông báo an toàn thay vì stack trace nội bộ.
@@ -248,7 +248,7 @@ API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `invento
 - Danh sach nay lay tu campaign `active`, con han, kenh `website/omnichannel`, dung segment cua khach va con so luong.
 - Bấm `Nhận voucher` gọi API `voucher-claim` với payload `{ "promotion_id": 3 }`.
 - Marketing tạo campaign ở `/pos/campaigns` có thể chọn `Claim bằng mã`; hệ thống tự sinh `claim_code` duy nhất như `SUMMER-8F3K`.
-- Member nhập mã này trong form `Nhập mã voucher` ở `/account` hoặc `/member`; frontend gọi API `voucher-claim-code` với payload `{ "claim_code": "SUMMER-8F3K" }`.
+- Member nhập mã này trong form `Nhập mã voucher` ở `/account`; nhân viên CRM có thể hỗ trợ tra cứu tại `/member`. Frontend gọi API `voucher-claim-code` với payload `{ "claim_code": "SUMMER-8F3K" }`.
 - Campaign `Tự phát theo segment` dùng `distribution_type = auto_issue` và tiếp tục phát voucher tự động cho nhóm khách phù hợp như luồng cũ.
 - Hệ thống tạo voucher riêng trong bảng `vouchers` gắn với `customer_id`; voucher mới lập tức hiện ở hồ sơ và dropdown checkout.
 - Khi thanh toán có chọn voucher, `Invoice::checkout()` validate voucher và tự chuyển voucher sang `redeemed`.

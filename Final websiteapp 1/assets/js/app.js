@@ -19,6 +19,8 @@ const roleLabels = {
   admin: "Admin",
 };
 
+const customerCrmRoles = ["cashier", "marketing", "manager", "owner", "admin"];
+
 const fallbackPosModules = [
   { id: "checkout", label: "POS bán hàng", roles: ["cashier", "manager", "owner", "admin"] },
   { id: "orders", label: "Bàn & order", roles: ["waiter", "cashier", "manager", "owner", "admin"] },
@@ -170,6 +172,7 @@ function savePosUser(user) {
     localStorage.removeItem("cafe_pos_user");
   }
   renderHeaderPosLink();
+  renderCustomerCrmLinks();
 }
 
 function loadPosAuth() {
@@ -201,6 +204,7 @@ function savePosAuth(auth) {
     localStorage.removeItem("cafe_pos_auth");
   }
   renderHeaderPosLink();
+  renderCustomerCrmLinks();
 }
 
 const formatMoney = (value) =>
@@ -350,9 +354,41 @@ function setMessage(selector, message, danger = false) {
 }
 
 function activeWebStaff() {
+  if (state.site.customer) return null;
   if (state.site.webStaff) return state.site.webStaff;
   if (section === "website" && state.pos.auth?.auth_token) return state.pos.auth;
   return null;
+}
+
+function canAccessCustomerCrm(staff = activeWebStaff()) {
+  return Boolean(staff?.staff_role && customerCrmRoles.includes(staff.staff_role));
+}
+
+function renderCustomerCrmLinks() {
+  const allowed = canAccessCustomerCrm();
+  document.querySelectorAll("[data-crm-member-link]").forEach((link) => link.remove());
+
+  if (!allowed) {
+    document.querySelectorAll("[data-crm-footer-slot]").forEach((slot) => {
+      slot.innerHTML = "";
+    });
+    return;
+  }
+
+  const nav = document.querySelector("[data-nav]");
+  if (nav) {
+    const posLink = nav.querySelector("[data-pos-header-link]");
+    const memberLinkHtml = `<a href="${url("member")}" data-crm-member-link>Thành viên</a>`;
+    if (posLink) {
+      posLink.insertAdjacentHTML("beforebegin", memberLinkHtml);
+    } else {
+      nav.insertAdjacentHTML("beforeend", memberLinkHtml);
+    }
+  }
+
+  document.querySelectorAll("[data-crm-footer-slot]").forEach((slot) => {
+    slot.innerHTML = `<a href="${url("member")}" data-crm-member-link>CRM khách hàng</a>`;
+  });
 }
 
 function renderAccountState() {
@@ -503,10 +539,10 @@ async function navigateWebsite(href, pushState = true) {
     applyPageAppData(parseCafeApp(doc));
     document.querySelector("[data-nav]")?.classList.remove("is-open");
     updateHeaderState();
-    initialRender();
     if (pushState) {
-      window.history.pushState({ cafePjax: true }, "", href);
+      window.history.pushState({ cafePjax: true }, "", targetUrl.href);
     }
+    initialRender();
     if (targetUrl.hash) {
       document.querySelector(targetUrl.hash)?.scrollIntoView({ behavior: "smooth", block: "start" });
     } else {
@@ -695,10 +731,80 @@ function persistCart(scope) {
   if (scope === "site") saveSiteCart();
 }
 
-function availableProductQuantity(product) {
+function selectedSiteBranchId() {
+  const select = document.querySelector("[data-site-branch]");
+  return select ? Number(select.value || 0) : 0;
+}
+
+function availableProductQuantity(product, branchId = 0) {
   if (!product) return 0;
+  const numericBranchId = Number(branchId || 0);
+  if (numericBranchId > 0 && Array.isArray(product.branch_inventory)) {
+    const branchStock = product.branch_inventory.find((item) => Number(item.branch_id) === numericBranchId);
+    return Math.max(0, Math.floor(Number(branchStock?.stock_quantity || 0)));
+  }
   if (!Object.prototype.hasOwnProperty.call(product, "stock_quantity")) return Number.MAX_SAFE_INTEGER;
   return Math.max(0, Math.floor(Number(product.stock_quantity || 0)));
+}
+
+function cartRequiredByProduct(cart = state.site.cart) {
+  const required = new Map();
+  cart.forEach((item) => {
+    const productId = Number(item.product_id || 0);
+    if (!productId) return;
+    required.set(productId, (required.get(productId) || 0) + Number(item.quantity || 0));
+  });
+  return required;
+}
+
+function siteCartStockIssues(branchId, cart = state.site.cart) {
+  const numericBranchId = Number(branchId || 0);
+  if (!numericBranchId) return [];
+
+  const issues = [];
+  cartRequiredByProduct(cart).forEach((required, productId) => {
+    const product = productMap.get(Number(productId));
+    const available = availableProductQuantity(product, numericBranchId);
+    if (available < required) {
+      issues.push({
+        product_id: productId,
+        product_name: product?.product_name || "Sản phẩm",
+        available,
+        required,
+      });
+    }
+  });
+  return issues;
+}
+
+function branchNameById(branchId) {
+  const branch = (cafeApp.branches || []).find((item) => Number(item.id) === Number(branchId));
+  return branch?.branch_name || "chi nhánh phù hợp";
+}
+
+function bestSiteBranchForCart(cart = state.site.cart) {
+  const selected = selectedSiteBranchId();
+  if (selected && !siteCartStockIssues(selected, cart).length) return selected;
+
+  const branches = Array.isArray(cafeApp.branches) ? cafeApp.branches : [];
+  const candidate = branches.find((branch) => !siteCartStockIssues(Number(branch.id), cart).length);
+  return Number(candidate?.id || selected || branches[0]?.id || 0);
+}
+
+function ensureSiteBranchCanFulfill(options = {}) {
+  const select = document.querySelector("[data-site-branch]");
+  if (!select) return 0;
+
+  const current = selectedSiteBranchId();
+  const best = bestSiteBranchForCart();
+  if (best && current !== best && !siteCartStockIssues(best).length) {
+    select.value = String(best);
+    if (options.notify) {
+      showToast(`Đã chuyển sang ${branchNameById(best)} vì chi nhánh cũ không đủ tồn kho.`);
+    }
+  }
+
+  return selectedSiteBranchId();
 }
 
 function isProductSellable(product) {
@@ -710,6 +816,7 @@ function isProductSellable(product) {
 
 function sanitizeSiteCart(options = {}) {
   const { persist = false, notify = false } = options;
+  const branchId = Number(options.branchId ?? selectedSiteBranchId() ?? 0);
   const merged = new Map();
   let changed = false;
 
@@ -732,12 +839,19 @@ function sanitizeSiteCart(options = {}) {
   }
 
   const clean = [];
+  const remainingByProduct = new Map();
   for (const item of merged.values()) {
     const product = productMap.get(Number(item.product_id));
-    const available = availableProductQuantity(product);
-    const quantity = Math.min(Math.max(1, Number(item.quantity || 1)), available);
+    if (!remainingByProduct.has(Number(item.product_id))) {
+      remainingByProduct.set(Number(item.product_id), availableProductQuantity(product, branchId));
+    }
+    const remaining = remainingByProduct.get(Number(item.product_id)) || 0;
+    const quantity = Math.min(Math.max(1, Number(item.quantity || 1)), remaining);
     if (quantity !== item.quantity) changed = true;
-    if (quantity > 0) clean.push({ ...item, quantity });
+    if (quantity > 0) {
+      clean.push({ ...item, quantity });
+      remainingByProduct.set(Number(item.product_id), remaining - quantity);
+    }
   }
 
   if (changed || persist) {
@@ -770,7 +884,14 @@ function addToCart(scope, productId, options = {}) {
     });
     const key = siteCartMergeKey(newItem);
     const existing = state.site.cart.find((item) => siteCartMergeKey(item) === key);
-    const available = availableProductQuantity(product);
+    const branchId = selectedSiteBranchId();
+    const available = availableProductQuantity(product, branchId);
+    if (available <= 0) {
+      showToast(branchId
+        ? `${product.product_name} đang hết tại ${branchNameById(branchId)}. Hãy chọn chi nhánh khác.`
+        : "Sản phẩm đang tạm hết hoặc ngừng bán.");
+      return false;
+    }
 
     if (existing) {
       if (existing.quantity >= available) {
@@ -825,7 +946,7 @@ function updateQuantity(scope, identifier, delta) {
     if (!item) return;
 
     const product = productMap.get(Number(item.product_id));
-    const available = availableProductQuantity(product);
+    const available = availableProductQuantity(product, selectedSiteBranchId());
     item.quantity += Number(delta);
     if (item.quantity <= 0) {
       state.site.cart = state.site.cart.filter((entry) => String(entry.line_id) !== String(identifier));
@@ -973,16 +1094,21 @@ function renderSiteBranchInfo() {
   const target = document.querySelector("[data-site-branch-info]");
   if (!target) return;
 
-  const branchId = Number(document.querySelector("[data-site-branch]")?.value || cafeApp.branches?.[0]?.id || 0);
+  const branchId = selectedSiteBranchId();
   const branch = (cafeApp.branches || []).find((item) => Number(item.id) === branchId);
   if (!branch) {
     target.textContent = "";
     return;
   }
 
-  target.textContent = [branch.branch_name, branch.address, branch.district]
+  const baseText = [branch.branch_name, branch.address, branch.district]
     .filter(Boolean)
     .join(" · ");
+  const issues = siteCartStockIssues(branchId);
+  target.textContent = issues.length
+    ? `${baseText} · Không đủ tồn kho: ${issues.map((item) => `${item.product_name} còn ${item.available}, cần ${item.required}`).join("; ")}`
+    : baseText;
+  target.classList.toggle("danger", issues.length > 0);
 }
 
 function renderCheckoutState() {
@@ -1006,7 +1132,8 @@ function renderCheckoutState() {
   });
 
   const checkoutButton = document.querySelector("[data-site-checkout]");
-  if (checkoutButton) checkoutButton.disabled = !cafeInstalled || count <= 0;
+  const branchIssues = siteCartStockIssues(selectedSiteBranchId());
+  if (checkoutButton) checkoutButton.disabled = !cafeInstalled || count <= 0 || branchIssues.length > 0;
 
   const payment = document.querySelector("[data-site-payment]")?.value || "e_wallet";
   const paymentHint = document.querySelector("[data-site-payment-hint]");
@@ -1022,7 +1149,9 @@ function renderSiteCart() {
   const target = document.querySelector("[data-site-cart]");
   if (!target) return;
 
-  const cart = sanitizeSiteCart({ persist: true });
+  ensureSiteBranchCanFulfill();
+  const branchId = selectedSiteBranchId();
+  const cart = sanitizeSiteCart({ persist: true, branchId });
   if (!cart.length) {
     target.innerHTML = `
       <div class="empty-state cart-empty">
@@ -1040,7 +1169,7 @@ function renderSiteCart() {
     const product = productMap.get(Number(item.product_id));
     const price = Number(product?.price || item.unit_price || 0);
     const lineTotal = price * Number(item.quantity || 0);
-    const available = availableProductQuantity(product);
+    const available = availableProductQuantity(product, branchId);
     const lineId = escapeHtml(item.line_id);
     return `
       <article class="site-cart-item">
@@ -1288,6 +1417,7 @@ function setSiteMember(member) {
   }
   state.site.voucherId = "";
   renderHeaderPosLink();
+  renderCustomerCrmLinks();
   renderMemberNav();
   renderAccountState();
   renderAccountForm();
@@ -1312,6 +1442,7 @@ function setWebStaff(staff, authSession = null) {
     savePosAuth(null);
   }
   renderHeaderPosLink();
+  renderCustomerCrmLinks();
   renderMemberNav();
   renderAccountState();
   renderAccountForm();
@@ -1607,6 +1738,9 @@ async function lookupMember(scope, identity) {
 }
 
 async function checkoutScope(scope, extraPayload = {}) {
+  if (scope === "site") {
+    ensureSiteBranchCanFulfill({ notify: true });
+  }
   const cart = scope === "site" ? sanitizeSiteCart({ persist: true, notify: true }) : cartFor(scope);
   if (!cart.length && !extraPayload.order_id) {
     showToast("Giỏ hàng đang rỗng.");
@@ -1632,6 +1766,12 @@ async function checkoutScope(scope, extraPayload = {}) {
     ...extraPayload,
   };
   if (scope === "site") {
+    const stockIssues = siteCartStockIssues(payload.branch_id, cart);
+    if (stockIssues.length) {
+      showToast(`Chi nhánh ${branchNameById(payload.branch_id)} không đủ tồn kho: ${stockIssues.map((item) => `${item.product_name} còn ${item.available}, cần ${item.required}`).join("; ")}.`);
+      renderCart("site");
+      return;
+    }
     payload.fulfillment_type = selectedSiteFulfillment();
     payload.sales_channel = payload.fulfillment_type === "delivery" ? "delivery" : "website";
     payload.delivery_address = document.querySelector("[data-site-delivery-address]")?.value?.trim() || "";
@@ -1728,17 +1868,18 @@ function renderWebsiteOrderDetail(receipt) {
 }
 
 async function loadWebsiteOrderDetail() {
-  if (!document.querySelector("[data-order-detail]")) return;
+  const target = document.querySelector("[data-order-detail]");
+  if (!target) return;
   const invoiceId = Number(queryParam("invoice_id") || 0);
   if (!invoiceId) {
-    document.querySelector("[data-order-detail]").innerHTML = '<div class="empty-state">Thieu invoice_id.</div>';
+    target.innerHTML = '<div class="empty-state">Thiếu mã hóa đơn. Vui lòng mở lại đơn từ hồ sơ hoặc lịch sử đơn hàng.</div>';
     return;
   }
   try {
     const receipt = await api("website-order-detail", { invoice_id: invoiceId });
     renderWebsiteOrderDetail(receipt);
   } catch (error) {
-    document.querySelector("[data-order-detail]").innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -4066,7 +4207,11 @@ function wireEvents() {
       renderSiteProducts();
       return;
     }
-    if (siteFulfillment || sitePayment || siteBranch) {
+    if (siteBranch) {
+      renderCart("site");
+      return;
+    }
+    if (siteFulfillment || sitePayment) {
       renderCheckoutState();
       renderSiteTotals();
       return;
@@ -4133,6 +4278,7 @@ function wireEvents() {
 
 function initialRender() {
   renderHeaderPosLink();
+  renderCustomerCrmLinks();
   renderMemberNav();
   renderAccountState();
   renderAccountForm();
