@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Controller;
 use App\Core\AppLogger;
 use App\Core\Database;
+use App\Core\Mailer;
 use App\Core\RolePolicy;
 use App\Core\Session;
 use App\Models\Campaign;
@@ -27,6 +28,8 @@ use Throwable;
 
 final class ApiController extends Controller
 {
+    private const MEMBER_FEEDBACK_EMAIL = 'blinx1st@gmail.com';
+
     public function handle(): void
     {
         $route = '/api/bootstrap';
@@ -53,6 +56,7 @@ final class ApiController extends Controller
                 '/api/member-change-password' => $auth->memberChangePassword($payload),
                 '/api/member-forgot-password' => $auth->memberForgotPassword($payload),
                 '/api/member-reset-password' => $auth->memberResetPassword($payload),
+                '/api/member-feedback' => $this->memberFeedback($payload),
                 '/api/member-lookup' => (new Customer())->lookup(require_field($payload, 'identity', 'Phone or email')),
                 '/api/product-detail' => $this->productDetail($payload),
                 '/api/website-orders' => $this->memberOrders(),
@@ -146,6 +150,7 @@ final class ApiController extends Controller
                 'member_change_password' => '/api/member-change-password',
                 'member_forgot_password' => '/api/member-forgot-password',
                 'member_reset_password' => '/api/member-reset-password',
+                'member_feedback' => '/api/member-feedback',
                 'member_lookup' => '/api/member-lookup',
                 'product_detail' => '/api/product-detail',
                 'website_orders' => '/api/website-orders',
@@ -570,6 +575,94 @@ final class ApiController extends Controller
         ]);
 
         return $result;
+    }
+
+    private function memberFeedback(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        if ($customerId <= 0) {
+            throw new InvalidArgumentException('Vui lòng đăng nhập thành viên để gửi phản hồi.');
+        }
+
+        $member = (new Customer())->lookup((string) $customerId);
+        if (!$member) {
+            Session::forget('member_customer_id');
+            throw new InvalidArgumentException('Phiên đăng nhập thành viên không còn hợp lệ.');
+        }
+
+        $topicLabels = [
+            'service' => 'Dịch vụ',
+            'product' => 'Sản phẩm',
+            'delivery' => 'Giao hàng',
+            'website' => 'Website / đặt hàng',
+            'loyalty' => 'Thành viên / voucher',
+            'other' => 'Khác',
+        ];
+        $topic = (string) ($payload['topic'] ?? 'other');
+        if (!isset($topicLabels[$topic])) {
+            $topic = 'other';
+        }
+
+        $rating = (int) ($payload['rating'] ?? 5);
+        if ($rating < 1 || $rating > 5) {
+            throw new InvalidArgumentException('Vui lòng chọn mức đánh giá từ 1 đến 5.');
+        }
+
+        $message = trim((string) ($payload['message'] ?? ''));
+        $message = preg_replace("/[ \t]+/", ' ', $message) ?? $message;
+        if (strlen($message) < 10) {
+            throw new InvalidArgumentException('Vui lòng nhập phản hồi ít nhất 10 ký tự.');
+        }
+        if (strlen($message) > 2000) {
+            throw new InvalidArgumentException('Phản hồi tối đa 2000 ký tự.');
+        }
+
+        $subject = '[Cafe Connect] Feedback member - ' . $topicLabels[$topic];
+        $body = "Cafe Connect nhận phản hồi mới từ member.\n\n"
+            . "Khách hàng: " . (string) ($member['customer_name'] ?? '') . "\n"
+            . "Mã khách hàng: " . (int) ($member['id'] ?? $customerId) . "\n"
+            . "Số điện thoại: " . (string) ($member['phone_number'] ?? '') . "\n"
+            . "Email: " . (string) ($member['email'] ?? '') . "\n"
+            . "Hạng: " . (string) ($member['membership_tier'] ?? '') . "\n"
+            . "Chủ đề: " . $topicLabels[$topic] . "\n"
+            . "Đánh giá: " . $rating . "/5\n"
+            . "Thời gian: " . date('Y-m-d H:i:s') . "\n\n"
+            . "Nội dung phản hồi:\n"
+            . $message . "\n";
+
+        try {
+            (new Mailer())->send(
+                self::MEMBER_FEEDBACK_EMAIL,
+                'Cafe Connect Admin',
+                $subject,
+                $body
+            );
+        } catch (\RuntimeException $exception) {
+            AppLogger::error($exception, [
+                'action' => 'member_feedback_mail',
+                'customer_id' => $customerId,
+                'recipient' => self::MEMBER_FEEDBACK_EMAIL,
+            ]);
+            throw new InvalidArgumentException('Không thể gửi phản hồi qua Gmail. Vui lòng kiểm tra cấu hình SMTP.');
+        }
+
+        (new AuditLog())->record([
+            'actor_type' => 'customer',
+            'actor_id' => $customerId,
+            'action' => 'member_feedback',
+            'entity_type' => 'customer',
+            'entity_id' => $customerId,
+            'metadata' => [
+                'topic' => $topic,
+                'rating' => $rating,
+                'recipient' => self::MEMBER_FEEDBACK_EMAIL,
+            ],
+        ]);
+
+        return [
+            'sent' => true,
+            'recipient' => self::MEMBER_FEEDBACK_EMAIL,
+        ];
     }
 
     private function deleteStaff(array $payload): array

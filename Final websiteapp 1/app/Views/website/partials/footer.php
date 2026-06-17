@@ -7,6 +7,7 @@
     <a href="<?= e(base_url('account')) ?>">Member profile</a>
     <a href="<?= e(base_url('forgot-password')) ?>">Forgot password</a>
     <a href="<?= e(base_url('member')) ?>">Member portal</a>
+    <a href="<?= e(base_url('feedback')) ?>">Member feedback</a>
     <a href="<?= e(base_url('checkout')) ?>">Checkout</a>
   </div>
   <div class="footer-column">

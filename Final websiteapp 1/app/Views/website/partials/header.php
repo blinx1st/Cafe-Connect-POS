@@ -13,6 +13,7 @@ $webStaff = $appData['web_staff'] ?? null;
     <a href="<?= e(base_url('menu')) ?>">Menu</a>
     <a href="<?= e(base_url('checkout')) ?>">Đặt hàng</a>
     <a href="<?= e(base_url('member')) ?>">Thành viên</a>
+    <a href="<?= e(base_url('feedback')) ?>">Đánh giá</a>
     <a class="nav-pill pos-header-link" href="<?= e(base_url('pos/login')) ?>" data-pos-header-link <?= $webStaff ? '' : 'hidden' ?>>POS</a>
   </nav>
   <div class="site-actions member-nav" data-member-nav>
@@ -22,6 +23,7 @@ $webStaff = $appData['web_staff'] ?? null;
         <span>▾</span>
       </button>
       <div class="member-dropdown" data-member-menu hidden>
+        <a href="<?= e(base_url('feedback')) ?>">Đánh giá</a>
         <a href="<?= e(base_url('account')) ?>">Thông tin cá nhân</a>
         <a href="<?= e(base_url('account#change-password')) ?>">Thay đổi password</a>
         <button type="button" data-member-logout>Đăng xuất</button>

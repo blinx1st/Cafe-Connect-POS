@@ -66,6 +66,11 @@ final class WebsiteController extends Controller
         $this->renderWebsite('website/member', 'Cafe Connect | Member Portal', 'website-member');
     }
 
+    public function feedback(): void
+    {
+        $this->renderWebsite('website/feedback', 'Cafe Connect | Member Feedback', 'website-feedback');
+    }
+
     private function renderWebsite(string $view, string $title, string $page): void
     {
         $this->view($view, [

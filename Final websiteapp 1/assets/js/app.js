@@ -282,6 +282,7 @@ function renderMemberNav() {
       <span>▾</span>
     </button>
     <div class="member-dropdown" data-member-menu hidden>
+      <a href="${url("feedback")}">Feedback</a>
       <a href="${url("account")}">Thông tin cá nhân</a>
       <a href="${url("account#change-password")}">Thay đổi password</a>
       <button type="button" data-member-logout>Đăng xuất</button>
@@ -3697,6 +3698,7 @@ function wireEvents() {
     const memberForgotForm = event.target.closest("[data-member-forgot-password]");
     const memberResetForm = event.target.closest("[data-member-reset-password]");
     const voucherClaimCodeForm = event.target.closest("[data-voucher-claim-code]");
+    const memberFeedbackForm = event.target.closest("[data-member-feedback]");
     const createForm = event.target.closest("[data-customer-create]");
     const newsletterForm = event.target.closest("[data-newsletter-form]");
     const offerLoginForm = event.target.closest("[data-offer-login-form]");
@@ -3830,6 +3832,29 @@ function wireEvents() {
         showToast(`Đã claim voucher ${result.voucher_code}.`);
       } catch (error) {
         showToast(error.message);
+      }
+      return;
+    }
+    if (memberFeedbackForm) {
+      event.preventDefault();
+      if (!state.site.customer) {
+        setMessage("[data-feedback-message]", "Vui lòng đăng nhập thành viên trước khi gửi phản hồi.", true);
+        showToast("Vui lòng đăng nhập để gửi feedback.");
+        await navigateWebsite(url("login"));
+        return;
+      }
+      const submitButton = memberFeedbackForm.querySelector("button[type='submit']");
+      if (submitButton) submitButton.disabled = true;
+      try {
+        const result = await api("member-feedback", Object.fromEntries(new FormData(memberFeedbackForm)));
+        memberFeedbackForm.reset();
+        setMessage("[data-feedback-message]", `Đã gửi đánh giá tới ${result.recipient}. Cafe Connect sẽ kiểm tra sớm.`);
+        showToast("Đã gửi đánh giá.");
+      } catch (error) {
+        setMessage("[data-feedback-message]", error.message, true);
+        showToast(error.message);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
       }
       return;
     }

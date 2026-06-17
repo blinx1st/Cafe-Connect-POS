@@ -82,6 +82,8 @@ File `manual_pre_run_setup.sql` có thể chạy lại nhiều lần để bù d
 - `/checkout`: giỏ hàng website, voucher, thanh toán và ghi invoice.
 - `/member`: hồ sơ thành viên, điểm, voucher, favorite, lịch sử hóa đơn.
 
+- `/feedback`: form feedback riêng cho member, gửi nội dung về Gmail quản trị.
+
 ## POS routes
 
 - `/pos/login`: chọn nhân viên/role từ database.
@@ -169,7 +171,7 @@ Gọi `POST api.php?endpoint=...` với JSON body. API ghi dữ liệu cần th�
 { "ok": true, "data": {}, "message": "" }
 ```
 
-Endpoint chính: `csrf-refresh`, `member-login`, `member-register`, `member-logout`, `member-profile-update`, `member-change-password`, `member-forgot-password`, `member-reset-password`, `member-lookup`, `customer-create`, `checkout`, `create-order`, `update-order-item`, `void-order-item`, `cancel-order`, `refund-invoice`, `receipt`, `receipt-print-log`, `dashboard`, `create-campaign`, `stock-movement`, `reports-export`.
+Endpoint chính: `csrf-refresh`, `member-login`, `member-register`, `member-logout`, `member-profile-update`, `member-change-password`, `member-forgot-password`, `member-reset-password`, `member-feedback`, `member-lookup`, `customer-create`, `checkout`, `create-order`, `update-order-item`, `void-order-item`, `cancel-order`, `refund-invoice`, `receipt`, `receipt-print-log`, `dashboard`, `create-campaign`, `stock-movement`, `reports-export`.
 
 - `member-login`: `{ "identity": "0900000001", "password": "123456" }`.
 - `member-register`: `{ "customer_name": "...", "phone_number": "...", "email": "...", "password": "123456", "password_confirm": "123456" }`.

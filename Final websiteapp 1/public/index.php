@@ -22,6 +22,7 @@ $router->get('/account', [WebsiteController::class, 'account']);
 $router->get('/member', [WebsiteController::class, 'member']);
 $router->get('/checkout', [WebsiteController::class, 'checkout']);
 $router->get('/order', [WebsiteController::class, 'order']);
+$router->get('/feedback', [WebsiteController::class, 'feedback']);
 
 $router->get('/pos', [PosController::class, 'index']);
 $router->get('/pos/login', [PosController::class, 'login']);
@@ -51,6 +52,7 @@ $apiRoutes = [
     '/api/member-change-password',
     '/api/member-forgot-password',
     '/api/member-reset-password',
+    '/api/member-feedback',
     '/api/member-lookup',
     '/api/product-detail',
     '/api/website-orders',
