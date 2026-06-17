@@ -104,7 +104,10 @@ final class ApiController extends Controller
                 '/api/product-image-upload' => $this->withEndpoint($route, $auth, $payload, fn () => $this->uploadProductImage($payload)),
                 '/api/category-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveCategory($payload)),
                 '/api/content-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveContent($payload)),
+                '/api/staff-list' => $this->withEndpoint($route, $auth, $payload, fn () => ['staff' => (new Staff())->allForAdmin()]),
                 '/api/staff-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveStaff($payload)),
+                '/api/staff-delete' => $this->withEndpoint($route, $auth, $payload, fn () => $this->deleteStaff($payload)),
+                '/api/staff-restore' => $this->withEndpoint($route, $auth, $payload, fn () => $this->restoreStaff($payload)),
                 '/api/reports' => $this->withEndpoint($route, $auth, $payload, fn () => (new Report())->data($payload)),
                 '/api/reports-export' => $this->withEndpoint($route, $auth, $payload, fn () => (new Report())->exportCsv($payload)),
                 default => throw new InvalidArgumentException('Unknown API route: ' . $route),
@@ -251,11 +254,13 @@ final class ApiController extends Controller
         $currentSession = null;
         $currentAuthSession = null;
         $role = '';
+        $branchId = max(1, (int) ($payload['branch_id'] ?? 1));
 
         if (!empty($payload['pos_session_id']) && !empty($payload['session_token'])) {
             try {
                 $currentSession = $posSession->requireOpen($payload);
                 $role = (string) ($currentSession['staff_role'] ?? '');
+                $branchId = max(1, (int) ($currentSession['branch_id'] ?? $branchId));
             } catch (Throwable $exception) {
                 throw new InvalidArgumentException('POS session is invalid or expired.');
             }
@@ -269,7 +274,7 @@ final class ApiController extends Controller
         }
 
         $data = [
-            'products' => $product->active(),
+            'products' => $product->active($role !== '' ? ['branch_id' => $branchId] : []),
             'categories' => $product->categories(),
             'staff' => [],
             'branches' => $staff->branches(),
@@ -316,10 +321,9 @@ final class ApiController extends Controller
             $data['session_reports'] = $sessionReports;
         }
         if (RolePolicy::canAccessModule($role, 'staff')) {
-            $data['staff'] = $staff->all();
+            $data['staff'] = $staff->allForAdmin();
         }
         if (RolePolicy::canAccessModule($role, 'products')) {
-            $branchId = (int) ($currentSession['branch_id'] ?? $payload['branch_id'] ?? 1);
             $data['admin_products'] = $product->allForAdmin(['branch_id' => $branchId]);
             $data['admin_categories'] = $product->categories(true);
         }
@@ -563,6 +567,51 @@ final class ApiController extends Controller
             'entity_type' => 'staff',
             'entity_id' => (int) ($result['id'] ?? $payload['id'] ?? 0),
             'metadata' => ['staff_name' => (string) ($payload['staff_name'] ?? '')],
+        ]);
+
+        return $result;
+    }
+
+    private function deleteStaff(array $payload): array
+    {
+        $id = (int) ($payload['id'] ?? 0);
+        $result = (new Staff())->deactivate($id, (int) ($payload['staff_id'] ?? 0));
+        (new PosSession())->logFromPayload($payload, 'staff_delete', [
+            'entity_type' => 'staff',
+            'entity_id' => $id,
+            'status_to' => 'inactive',
+            'note' => (string) ($payload['reason'] ?? 'Staff deactivated'),
+        ]);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) ($payload['staff_id'] ?? 0),
+            'actor_role' => (string) ($payload['staff_role'] ?? ''),
+            'action' => 'staff_delete',
+            'entity_type' => 'staff',
+            'entity_id' => $id,
+            'metadata' => ['reason' => (string) ($payload['reason'] ?? '')],
+        ]);
+
+        return $result;
+    }
+
+    private function restoreStaff(array $payload): array
+    {
+        $id = (int) ($payload['id'] ?? 0);
+        $result = (new Staff())->restore($id);
+        (new PosSession())->logFromPayload($payload, 'staff_restore', [
+            'entity_type' => 'staff',
+            'entity_id' => $id,
+            'status_to' => 'active',
+            'note' => 'Staff restored',
+        ]);
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) ($payload['staff_id'] ?? 0),
+            'actor_role' => (string) ($payload['staff_role'] ?? ''),
+            'action' => 'staff_restore',
+            'entity_type' => 'staff',
+            'entity_id' => $id,
         ]);
 
         return $result;

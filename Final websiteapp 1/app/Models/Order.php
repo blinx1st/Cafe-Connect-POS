@@ -123,9 +123,9 @@ final class Order extends Model
                     'product_id' => $productId,
                     'quantity' => $quantity,
                     'unit_price' => $unitPrice,
-                    'size' => in_array(($item['size'] ?? 'M'), ['S', 'M', 'L'], true) ? $item['size'] : 'M',
-                    'topping' => trim((string) ($item['topping'] ?? '')) ?: null,
-                    'note' => trim((string) ($item['note'] ?? '')) ?: null,
+                    'size' => in_array(strtoupper((string) ($item['size'] ?? 'M')), ['S', 'M', 'L'], true) ? strtoupper((string) ($item['size'] ?? 'M')) : 'M',
+                    'topping' => substr(trim((string) ($item['topping'] ?? '')), 0, 100) ?: null,
+                    'note' => substr(trim((string) ($item['note'] ?? '')), 0, 255) ?: null,
                     'line_total' => $lineTotal,
                 ]);
             }

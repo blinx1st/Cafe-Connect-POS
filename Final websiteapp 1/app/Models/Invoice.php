@@ -75,8 +75,8 @@ final class Invoice extends Model
                 'product_id' => $productId,
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
-                'size' => in_array(($item['size'] ?? 'M'), ['S', 'M', 'L'], true) ? $item['size'] : 'M',
-                'topping' => trim((string) ($item['topping'] ?? '')) ?: null,
+                'size' => in_array(strtoupper((string) ($item['size'] ?? 'M')), ['S', 'M', 'L'], true) ? strtoupper((string) ($item['size'] ?? 'M')) : 'M',
+                'topping' => substr(trim((string) ($item['topping'] ?? '')), 0, 100) ?: null,
                 'line_total' => $lineTotal,
             ];
         }

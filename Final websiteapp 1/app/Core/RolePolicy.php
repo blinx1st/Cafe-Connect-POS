@@ -53,7 +53,10 @@ final class RolePolicy
         '/api/product-image-upload' => ['manager', 'owner', 'admin'],
         '/api/category-save' => ['manager', 'owner', 'admin'],
         '/api/content-save' => ['manager', 'owner', 'admin'],
+        '/api/staff-list' => ['owner', 'admin'],
         '/api/staff-save' => ['owner', 'admin'],
+        '/api/staff-delete' => ['owner', 'admin'],
+        '/api/staff-restore' => ['owner', 'admin'],
         '/api/reports' => ['manager', 'owner', 'admin'],
         '/api/reports-export' => ['manager', 'owner', 'admin'],
     ];

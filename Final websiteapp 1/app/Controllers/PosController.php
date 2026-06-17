@@ -145,7 +145,7 @@ final class PosController extends Controller
 
         $product = new Product();
         $staff = new Staff();
-        $data['products'] = $product->active();
+        $data['products'] = [];
         $data['categories'] = $product->categories();
         $data['branches'] = $staff->branches();
 

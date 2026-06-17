@@ -77,6 +77,7 @@ final class Product extends Model
     {
         $where = ["p.status = 'active'"];
         $params = [];
+        $branchId = (int) ($filters['branch_id'] ?? 0);
 
         $search = trim((string) ($filters['search'] ?? ''));
         if ($search !== '') {
@@ -98,6 +99,17 @@ final class Product extends Model
             default => 'COALESCE(c.display_order, 99), p.product_name',
         };
 
+        if ($branchId > 0) {
+            $stockJoin = "LEFT JOIN branch_inventory stock ON stock.product_id = p.id AND stock.branch_id = :branch_id";
+            $params['branch_id'] = $branchId;
+        } else {
+            $stockJoin = "LEFT JOIN (
+                SELECT product_id, SUM(stock_quantity) AS stock_quantity
+                FROM branch_inventory
+                GROUP BY product_id
+              ) stock ON stock.product_id = p.id";
+        }
+
         $stmt = $this->db->prepare(
             "SELECT p.id, p.product_name, p.category, p.price, p.take_note, p.status,
                     c.category_name,
@@ -106,11 +118,7 @@ final class Product extends Model
              FROM products p
              LEFT JOIN product_categories c ON c.category_code = p.category
              LEFT JOIN product_images pi ON pi.product_id = p.id AND pi.is_primary = 1
-             LEFT JOIN (
-                SELECT product_id, SUM(stock_quantity) AS stock_quantity
-                FROM branch_inventory
-                GROUP BY product_id
-             ) stock ON stock.product_id = p.id
+             $stockJoin
              WHERE " . implode(' AND ', $where) . "
              ORDER BY $orderBy"
         );

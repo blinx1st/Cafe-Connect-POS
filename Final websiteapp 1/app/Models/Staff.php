@@ -23,6 +23,20 @@ final class Staff extends Model
         )->fetchAll();
     }
 
+    public function allForAdmin(): array
+    {
+        return $this->db->query(
+            "SELECT s.id, s.staff_code, s.staff_name, s.staff_role, s.phone_number, s.email, s.status,
+                    s.branch_id, b.branch_name, sh.shift_name
+             FROM staff s
+             JOIN branches b ON b.id = s.branch_id
+             LEFT JOIN staff_shifts sh ON sh.staff_id = s.id AND sh.status = 'active'
+             ORDER BY FIELD(s.status, 'active', 'inactive'),
+                      FIELD(s.staff_role, 'admin', 'owner', 'manager', 'cashier', 'waiter', 'barista', 'marketing'),
+                      s.staff_name"
+        )->fetchAll();
+    }
+
     public function branches(): array
     {
         return $this->db->query(
@@ -149,36 +163,111 @@ final class Staff extends Model
             'status' => in_array(($data['status'] ?? 'active'), ['active', 'inactive'], true) ? $data['status'] : 'active',
         ];
 
-        if ($id > 0) {
-            $payload['id'] = $id;
-            $this->db->prepare(
-                "UPDATE staff
-                 SET branch_id = :branch_id, staff_code = :staff_code, staff_name = :staff_name, staff_role = :staff_role,
-                     phone_number = :phone_number, email = :email, status = :status
-                 WHERE id = :id"
-            )->execute($payload);
-            if (trim((string) ($data['password'] ?? '')) !== '') {
-                $this->db->prepare("UPDATE staff SET password_hash = :password_hash WHERE id = :id")
-                    ->execute(['password_hash' => password_hash((string) $data['password'], PASSWORD_DEFAULT), 'id' => $id]);
+        try {
+            if ($id > 0) {
+                $payload['id'] = $id;
+                $this->db->prepare(
+                    "UPDATE staff
+                     SET branch_id = :branch_id, staff_code = :staff_code, staff_name = :staff_name, staff_role = :staff_role,
+                         phone_number = :phone_number, email = :email, status = :status
+                     WHERE id = :id"
+                )->execute($payload);
+                if (trim((string) ($data['password'] ?? '')) !== '') {
+                    $this->db->prepare("UPDATE staff SET password_hash = :password_hash WHERE id = :id")
+                        ->execute(['password_hash' => password_hash((string) $data['password'], PASSWORD_DEFAULT), 'id' => $id]);
+                }
+                if (trim((string) ($data['pin'] ?? '')) !== '') {
+                    $this->db->prepare("UPDATE staff SET pin_hash = :pin_hash WHERE id = :id")
+                        ->execute(['pin_hash' => password_hash((string) $data['pin'], PASSWORD_DEFAULT), 'id' => $id]);
+                }
+            } else {
+                $password = trim((string) ($data['password'] ?? ''));
+                $pin = trim((string) ($data['pin'] ?? ''));
+                if ($password === '') {
+                    throw new \InvalidArgumentException('Mật khẩu POS là bắt buộc khi tạo nhân viên mới.');
+                }
+                if (strlen($password) < 6) {
+                    throw new \InvalidArgumentException('Mật khẩu POS phải có ít nhất 6 ký tự.');
+                }
+                if ($pin === '' || strlen($pin) < 4) {
+                    throw new \InvalidArgumentException('PIN mở ca phải có ít nhất 4 ký tự khi tạo nhân viên mới.');
+                }
+                $payload['password_hash'] = password_hash($password, PASSWORD_DEFAULT);
+                $payload['pin_hash'] = password_hash($pin, PASSWORD_DEFAULT);
+                $this->db->prepare(
+                    "INSERT INTO staff (branch_id, staff_code, staff_name, staff_role, phone_number, email, password_hash, pin_hash, status)
+                     VALUES (:branch_id, :staff_code, :staff_name, :staff_role, :phone_number, :email, :password_hash, :pin_hash, :status)"
+                )->execute($payload);
+                $id = (int) $this->db->lastInsertId();
             }
-            if (trim((string) ($data['pin'] ?? '')) !== '') {
-                $this->db->prepare("UPDATE staff SET pin_hash = :pin_hash WHERE id = :id")
-                    ->execute(['pin_hash' => password_hash((string) $data['pin'], PASSWORD_DEFAULT), 'id' => $id]);
+        } catch (\PDOException $exception) {
+            if ($exception->getCode() === '23000') {
+                throw new \InvalidArgumentException('Mã nhân viên hoặc email đã tồn tại.');
             }
-        } else {
-            $payload['password_hash'] = trim((string) ($data['password'] ?? '')) !== ''
-                ? password_hash((string) $data['password'], PASSWORD_DEFAULT)
-                : null;
-            $payload['pin_hash'] = trim((string) ($data['pin'] ?? '')) !== ''
-                ? password_hash((string) $data['pin'], PASSWORD_DEFAULT)
-                : null;
-            $this->db->prepare(
-                "INSERT INTO staff (branch_id, staff_code, staff_name, staff_role, phone_number, email, password_hash, pin_hash, status)
-                 VALUES (:branch_id, :staff_code, :staff_name, :staff_role, :phone_number, :email, :password_hash, :pin_hash, :status)"
-            )->execute($payload);
-            $id = (int) $this->db->lastInsertId();
+            throw $exception;
         }
 
-        return ['id' => $id, 'staff' => $this->all()];
+        return ['id' => $id, 'staff' => $this->allForAdmin()];
+    }
+
+    public function deactivate(int $id, int $actorId = 0): array
+    {
+        if ($id <= 0) {
+            throw new \InvalidArgumentException('Nhân viên không hợp lệ.');
+        }
+        if ($actorId > 0 && $id === $actorId) {
+            throw new \InvalidArgumentException('Không thể ngừng hoạt động chính tài khoản đang đăng nhập.');
+        }
+
+        $staff = $this->findAny($id);
+        if (!$staff) {
+            throw new \InvalidArgumentException('Không tìm thấy nhân viên.');
+        }
+        if (in_array((string) $staff['staff_role'], ['owner', 'admin'], true) && $this->activeAdminCount() <= 1) {
+            throw new \InvalidArgumentException('Phải giữ lại ít nhất một tài khoản owner/admin đang hoạt động.');
+        }
+
+        $this->db->prepare("UPDATE staff SET status = 'inactive' WHERE id = :id")
+            ->execute(['id' => $id]);
+        $this->db->prepare("UPDATE staff_login_sessions SET status = 'logged_out', logged_out_at = NOW() WHERE staff_id = :id AND status = 'active'")
+            ->execute(['id' => $id]);
+        $this->db->prepare("UPDATE pos_sessions SET status = 'closed', closed_at = NOW(), closed_reason = 'staff_deactivated' WHERE staff_id = :id AND status = 'open'")
+            ->execute(['id' => $id]);
+
+        return ['id' => $id, 'staff' => $this->allForAdmin()];
+    }
+
+    public function restore(int $id): array
+    {
+        if ($id <= 0) {
+            throw new \InvalidArgumentException('Nhân viên không hợp lệ.');
+        }
+        $this->db->prepare("UPDATE staff SET status = 'active' WHERE id = :id")
+            ->execute(['id' => $id]);
+
+        return ['id' => $id, 'staff' => $this->allForAdmin()];
+    }
+
+    private function findAny(int $id): ?array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT s.id, s.staff_code, s.staff_name, s.staff_role, s.phone_number, s.email, s.status,
+                    s.branch_id, b.branch_name
+             FROM staff s
+             JOIN branches b ON b.id = s.branch_id
+             WHERE s.id = :id
+             LIMIT 1"
+        );
+        $stmt->execute(['id' => $id]);
+        $staff = $stmt->fetch();
+
+        return $staff ?: null;
+    }
+
+    private function activeAdminCount(): int
+    {
+        return (int) $this->db
+            ->query("SELECT COUNT(*) FROM staff WHERE status = 'active' AND staff_role IN ('owner', 'admin')")
+            ->fetchColumn();
     }
 }

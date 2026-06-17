@@ -103,6 +103,38 @@ function normalizeSiteCartItem(item) {
   };
 }
 
+function normalizePosCartItem(item) {
+  return {
+    line_id: item.line_id || item.cart_key || newCartLineId(),
+    product_id: Number(item.product_id || 0),
+    quantity: Math.max(1, Number(item.quantity || 1)),
+    size: normalizeSize(item.size),
+    topping: normalizeCartNote(item.topping).slice(0, 100),
+    note: normalizeCartNote(item.note).slice(0, 180),
+  };
+}
+
+function posCartMergeKey(item) {
+  return [
+    Number(item.product_id || 0),
+    normalizeSize(item.size),
+    normalizeCartNote(item.topping).toLowerCase(),
+    normalizeCartNote(item.note).toLowerCase(),
+  ].join("|");
+}
+
+function posCartItemForInvoice(item) {
+  const topping = [normalizeCartNote(item.topping), normalizeCartNote(item.note)]
+    .filter(Boolean)
+    .join(" | ")
+    .slice(0, 100);
+  return {
+    ...item,
+    size: normalizeSize(item.size),
+    topping,
+  };
+}
+
 function loadSiteCart() {
   try {
     const raw = localStorage.getItem("cafe_site_cart");
@@ -572,7 +604,7 @@ function appendFormIfMissing(formData, key, value) {
 
 async function apiForm(endpoint, formData) {
   if (!cafeInstalled) {
-    throw new Error("Database chÆ°a sáºµn sÃ ng. HÃ£y cháº¡y install.php trÆ°á»›c.");
+    throw new Error("Database chưa sẵn sàng. Hãy chạy install.php trước.");
   }
 
   const clean = String(endpoint).replace(/^\/?api\/?/, "");
@@ -753,14 +785,25 @@ function addToCart(scope, productId, options = {}) {
   }
 
   const cart = cartFor(scope);
+  if (scope === "pos" && !isProductSellable(product)) {
+    showToast(`${product.product_name} đã hết tồn tại chi nhánh hiện tại.`);
+    return false;
+  }
   if (scope === "pos" && !cart.length && !state.pos.billStartedAt) {
     state.pos.billStartedAt = sqlNow();
   }
-  const existing = cart.find((item) => item.product_id === Number(productId));
+  const newItem = normalizePosCartItem({
+    product_id: Number(productId),
+    quantity: 1,
+    size: options.size || "M",
+    topping: options.topping || "",
+    note: options.note || "",
+  });
+  const existing = cart.find((item) => posCartMergeKey(item) === posCartMergeKey(newItem));
   if (existing) {
     existing.quantity += 1;
   } else {
-    cart.push({ product_id: Number(productId), quantity: 1, size: "M", topping: "" });
+    cart.push(newItem);
   }
   persistCart(scope);
   renderCart(scope);
@@ -793,12 +836,13 @@ function updateQuantity(scope, identifier, delta) {
   }
 
   const cart = cartFor(scope);
-  const item = cart.find((entry) => entry.product_id === Number(identifier));
+  const item = cart.find((entry) => String(entry.line_id) === String(identifier))
+    || cart.find((entry) => entry.product_id === Number(identifier));
   if (!item) return;
 
   item.quantity += Number(delta);
   if (item.quantity <= 0) {
-    state[scope].cart = cart.filter((entry) => entry.product_id !== Number(identifier));
+    state[scope].cart = cart.filter((entry) => String(entry.line_id) !== String(identifier) && entry.product_id !== Number(identifier));
   }
   if (scope === "pos" && !state.pos.cart.length) {
     state.pos.billStartedAt = "";
@@ -815,7 +859,7 @@ function removeItem(scope, identifier) {
     return;
   }
 
-  state[scope].cart = cartFor(scope).filter((entry) => entry.product_id !== Number(identifier));
+  state[scope].cart = cartFor(scope).filter((entry) => String(entry.line_id) !== String(identifier) && entry.product_id !== Number(identifier));
   if (scope === "pos" && !state.pos.cart.length) {
     state.pos.billStartedAt = "";
   }
@@ -863,6 +907,15 @@ function updateSiteCartOption(lineId, field, value) {
   if (field === "topping") item.topping = normalizeCartNote(value).slice(0, 160);
   saveSiteCart();
   renderTotals("site");
+}
+
+function updatePosCartOption(lineId, field, value) {
+  const item = state.pos.cart.find((entry) => String(entry.line_id) === String(lineId));
+  if (!item) return;
+  if (field === "size") item.size = normalizeSize(value);
+  if (field === "topping") item.topping = normalizeCartNote(value).slice(0, 100);
+  if (field === "note") item.note = normalizeCartNote(value).slice(0, 180);
+  renderTotals("pos");
 }
 
 function selectedVoucher(scope) {
@@ -1028,6 +1081,8 @@ function renderCart(scope) {
     renderSiteCart();
     return;
   }
+  renderPosCart(scope);
+  return;
   const target = document.querySelector(scope === "site" ? "[data-site-cart]" : "[data-pos-cart]");
   if (!target) return;
 
@@ -1055,6 +1110,56 @@ function renderCart(scope) {
         <div class="line-total">
           <strong>${formatMoney(lineTotal)}</strong>
           <button type="button" data-cart-scope="${scope}" data-product-id="${item.product_id}" data-remove>×</button>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  renderTotals(scope);
+}
+
+function renderPosCart(scope = "pos") {
+  const target = document.querySelector("[data-pos-cart]");
+  if (!target) return;
+
+  const cart = cartFor(scope);
+  if (!cart.length) {
+    target.innerHTML = '<div class="empty-state">Chưa có món trong giỏ.</div>';
+    renderTotals(scope);
+    return;
+  }
+
+  target.innerHTML = cart.map((item) => {
+    const product = productMap.get(Number(item.product_id));
+    const lineTotal = Number(product?.price || item.unit_price || 0) * Number(item.quantity || 0);
+    const lineId = escapeHtml(item.line_id || item.cart_key || String(item.product_id));
+    return `
+      <div class="cart-row pos-cart-row">
+        <div class="pos-cart-main">
+          <h4>${escapeHtml(product?.product_name || "Sản phẩm")}</h4>
+          <small>${formatMoney(product?.price || item.unit_price || 0)} · Size ${escapeHtml(item.size || "M")}</small>
+          <div class="pos-cart-options">
+            <label>Size
+              <select data-pos-cart-size data-cart-id="${lineId}">
+                ${["S", "M", "L"].map((size) => `<option value="${size}" ${normalizeSize(item.size) === size ? "selected" : ""}>${size}</option>`).join("")}
+              </select>
+            </label>
+            <label>Tùy chọn pha chế
+              <input type="text" data-pos-cart-topping data-cart-id="${lineId}" value="${escapeHtml(item.topping || "")}" placeholder="Ít đá, ít ngọt, không đường">
+            </label>
+            <label>Ghi chú phục vụ
+              <input type="text" data-pos-cart-note data-cart-id="${lineId}" value="${escapeHtml(item.note || "")}" placeholder="Dị ứng, giao trước, tên khách">
+            </label>
+          </div>
+        </div>
+        <div class="qty-control">
+          <button type="button" data-cart-scope="${scope}" data-cart-id="${lineId}" data-delta="-1">-</button>
+          <strong>${Number(item.quantity || 0)}</strong>
+          <button type="button" data-cart-scope="${scope}" data-cart-id="${lineId}" data-delta="1">+</button>
+        </div>
+        <div class="line-total">
+          <strong>${formatMoney(lineTotal)}</strong>
+          <button type="button" data-cart-scope="${scope}" data-cart-id="${lineId}" data-remove>Ẩn</button>
         </div>
       </div>
     `;
@@ -1512,6 +1617,7 @@ async function checkoutScope(scope, extraPayload = {}) {
 
   const user = state.pos.user || {};
   const paymentSelect = document.querySelector(scope === "site" ? "[data-site-payment]" : "[data-pos-payment]");
+  const payloadItems = scope === "pos" && !extraPayload.order_id ? cart.map(posCartItemForInvoice) : cart;
   const payload = {
     sales_channel: scope === "site" ? "website" : "pos",
     staff_id: scope === "site" ? cafeApp.staff?.find((item) => item.staff_role === "cashier")?.id || 2 : user.id || 2,
@@ -1519,7 +1625,7 @@ async function checkoutScope(scope, extraPayload = {}) {
     customer_id: state[scope].customer?.id || null,
     voucher_id: state[scope].voucherId || null,
     payment_method: paymentSelect?.value || "cash",
-    items: cart,
+    items: payloadItems,
     ...extraPayload,
   };
   if (scope === "site") {
@@ -1812,7 +1918,7 @@ function renderModule(moduleId) {
     inventory: renderInventoryModule,
     reports: renderReportsModule,
     products: renderProductsModule,
-    staff: renderStaffModule,
+    staff: renderStaffCrudModule,
     cash: renderCashModule,
   }[moduleId]?.() || '<div class="empty-state">Module chưa khả dụng.</div>';
 }
@@ -1910,6 +2016,7 @@ function renderOrdersModule() {
         ${(order.items || []).map((item) => `
           <div>
             <span>${Number(item.quantity)}× ${escapeHtml(item.product_name)}</span>
+            <em class="order-item-note">${escapeHtml([item.size ? `Size ${item.size}` : "", item.topping, item.note].filter(Boolean).join(" · ") || "Không có ghi chú")}</em>
             <small>${escapeHtml(item.kitchen_status)}</small>
             <div class="mini-actions">
               ${kitchenActionsForRole(item.kitchen_status, role).map((status) => `<button type="button" data-update-item="${item.id}" data-status="${status}">${escapeHtml(status)}</button>`).join("")}
@@ -2405,6 +2512,59 @@ function renderStaffModule() {
   `;
 }
 
+function renderStaffCrudModule() {
+  const staff = cafeApp.staff || [];
+  const roles = cafeApp.roles || Object.keys(roleLabels);
+  return `
+    <div class="admin-grid">
+      <form class="create-form" data-staff-save>
+        <h2>Nhân viên</h2>
+        <input type="hidden" name="id">
+        <label>Mã nhân viên <input name="staff_code" placeholder="CASH003" required></label>
+        <label>Tên nhân viên <input name="staff_name" required></label>
+        <label>Chi nhánh <select name="branch_id">${branchOptions(state.pos.user?.branch_id || 1)}</select></label>
+        <label>Role <select name="staff_role">${roles.map((role) => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabels[role] || role)}</option>`).join("")}</select></label>
+        <label>Trạng thái
+          <select name="status">
+            <option value="active">Đang hoạt động</option>
+            <option value="inactive">Ngừng hoạt động</option>
+          </select>
+        </label>
+        <label>Số điện thoại <input name="phone_number"></label>
+        <label>Email <input type="email" name="email"></label>
+        <label>Mật khẩu POS <input name="password" type="password" minlength="6" placeholder="Bắt buộc khi tạo mới, để trống nếu không đổi"></label>
+        <label>PIN mở ca <input name="pin" type="password" inputmode="numeric" minlength="4" placeholder="Bắt buộc khi tạo mới, để trống nếu không đổi"></label>
+        <div class="form-actions">
+          <button class="primary-btn" type="submit">Lưu nhân viên</button>
+          <button class="secondary-btn" type="button" data-staff-form-reset>Tạo mới</button>
+        </div>
+      </form>
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Danh sách nhân viên</h2>
+          <p>Tạo, sửa, ngừng hoạt động và khôi phục tài khoản POS.</p>
+        </div>
+        ${tableHtml(staff, ["Mã", "Tên", "Role", "Chi nhánh", "Liên hệ", "Trạng thái", ""], (row) => `<tr class="${row.status === "inactive" ? "is-muted" : ""}">
+          <td>${escapeHtml(row.staff_code || "")}</td>
+          <td><strong>${escapeHtml(row.staff_name)}</strong></td>
+          <td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td>
+          <td>${escapeHtml(row.branch_name)}</td>
+          <td>${escapeHtml([row.email, row.phone_number].filter(Boolean).join(" · "))}</td>
+          <td><span class="status ${row.status === "active" ? "good" : "bad"}">${row.status === "active" ? "Đang hoạt động" : "Ngừng hoạt động"}</span></td>
+          <td>
+            <div class="table-actions">
+              <button type="button" class="secondary-btn compact" data-edit-staff="${row.id}">Sửa</button>
+              ${row.status === "active"
+                ? `<button type="button" class="secondary-btn compact danger" data-staff-delete="${row.id}">Ngừng</button>`
+                : `<button type="button" class="secondary-btn compact" data-staff-restore="${row.id}">Khôi phục</button>`}
+            </div>
+          </td>
+        </tr>`)}
+      </section>
+    </div>
+  `;
+}
+
 function renderCashModule() {
   return `
     <div class="campaign-layout">
@@ -2869,19 +3029,22 @@ function renderPosProducts() {
 
   const keyword = state.pos.productFilter.trim().toLowerCase();
   const filtered = products.filter((product) => `${product.product_name} ${product.category} ${product.category_name || ""}`.toLowerCase().includes(keyword));
-  target.innerHTML = filtered.map((product) => `
-    <article class="pos-product-card">
-      <img src="${escapeHtml(asset(product.image))}" alt="${escapeHtml(product.product_name)}">
-      <div class="pos-product-body">
-        <strong class="product-title">${escapeHtml(product.product_name)}</strong>
-        <small>${escapeHtml(product.category_name || product.category)}</small>
-        <div class="product-foot">
-          <span class="price">${formatMoney(product.price)}</span>
-          <button type="button" class="add-btn" data-pos-add="${product.id}">+</button>
+  target.innerHTML = filtered.map((product) => {
+    const isOut = Boolean(product.is_out_of_stock) || Number(product.stock_quantity || 0) <= 0;
+    return `
+      <article class="pos-product-card ${isOut ? "is-out" : ""}">
+        <img src="${escapeHtml(asset(product.image))}" alt="${escapeHtml(product.product_name)}">
+        <div class="pos-product-body">
+          <strong class="product-title">${escapeHtml(product.product_name)}</strong>
+          <small>${escapeHtml(product.category_name || product.category)} · Tồn ${Number(product.stock_quantity || 0)}</small>
+          <div class="product-foot">
+            <span class="price">${formatMoney(product.price)}</span>
+            <button type="button" class="add-btn" data-pos-add="${product.id}" ${isOut ? "disabled" : ""}>${isOut ? "Hết" : "+"}</button>
+          </div>
         </div>
-      </div>
-    </article>
-  `).join("") || '<div class="empty-state">Không có sản phẩm phù hợp.</div>';
+      </article>
+    `;
+  }).join("") || '<div class="empty-state">Không có sản phẩm phù hợp.</div>';
 }
 
 function wireEvents() {
@@ -2947,6 +3110,9 @@ function wireEvents() {
     const editCategory = event.target.closest("[data-edit-category]");
     const productFormReset = event.target.closest("[data-product-form-reset]");
     const editStaff = event.target.closest("[data-edit-staff]");
+    const staffDelete = event.target.closest("[data-staff-delete]");
+    const staffRestore = event.target.closest("[data-staff-restore]");
+    const staffFormReset = event.target.closest("[data-staff-form-reset]");
     const fillLogin = event.target.closest("[data-fill-login]");
     const passwordToggle = event.target.closest("[data-password-toggle]");
     const memberMenuToggle = event.target.closest("[data-member-menu-toggle]");
@@ -3442,11 +3608,50 @@ function wireEvents() {
         form.elements.staff_name.value = staff.staff_name;
         form.elements.branch_id.value = staff.branch_id;
         form.elements.staff_role.value = staff.staff_role;
+        if (form.elements.status) form.elements.status.value = staff.status || "active";
         form.elements.phone_number.value = staff.phone_number || "";
         form.elements.email.value = staff.email || "";
         if (form.elements.password) form.elements.password.value = "";
         if (form.elements.pin) form.elements.pin.value = "";
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
       }
+      return;
+    }
+    if (staffFormReset) {
+      const form = document.querySelector("[data-staff-save]");
+      if (form) {
+        form.reset();
+        if (form.elements.id) form.elements.id.value = "";
+        if (form.elements.status) form.elements.status.value = "active";
+      }
+      return;
+    }
+    if (staffDelete) {
+      const staff = (cafeApp.staff || []).find((item) => String(item.id) === String(staffDelete.dataset.staffDelete));
+      if (!window.confirm(`Ngừng hoạt động nhân viên ${staff?.staff_name || ""}? Nhân viên này sẽ không đăng nhập POS được nữa.`)) return;
+      try {
+        const result = await api("staff-delete", {
+          id: staffDelete.dataset.staffDelete,
+          reason: "Disabled from POS staff module",
+        });
+        cafeApp.staff = result.staff || [];
+        renderPosApp();
+        showToast("Đã ngừng hoạt động nhân viên.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (staffRestore) {
+      try {
+        const result = await api("staff-restore", { id: staffRestore.dataset.staffRestore });
+        cafeApp.staff = result.staff || [];
+        renderPosApp();
+        showToast("Đã khôi phục nhân viên.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
     }
   });
 
@@ -3631,7 +3836,7 @@ function wireEvents() {
       event.preventDefault();
       try {
         const payload = Object.fromEntries(new FormData(serviceOrderForm));
-        payload.items = state.pos.cart;
+        payload.items = state.pos.cart.map(normalizePosCartItem);
         payload.branch_id = state.pos.user?.branch_id || 1;
         payload.waiter_id = state.pos.user?.id || 1;
         payload.customer_id = state.pos.customer?.id || "";
@@ -3759,6 +3964,7 @@ function wireEvents() {
     const sitePayment = event.target.closest("[data-site-payment]");
     const siteBranch = event.target.closest("[data-site-branch]");
     const siteCartSize = event.target.closest("[data-site-cart-size]");
+    const posCartSize = event.target.closest("[data-pos-cart-size]");
     const adminStatusFilter = event.target.closest("[data-admin-product-status]");
     const adminCategoryFilter = event.target.closest("[data-admin-product-category]");
     if (siteVoucher) {
@@ -3789,6 +3995,10 @@ function wireEvents() {
       updateSiteCartOption(siteCartSize.dataset.cartId, "size", siteCartSize.value);
       return;
     }
+    if (posCartSize) {
+      updatePosCartOption(posCartSize.dataset.cartId, "size", posCartSize.value);
+      return;
+    }
     if (adminStatusFilter) {
       state.pos.adminProductStatus = adminStatusFilter.value || "all";
       renderPosApp();
@@ -3804,6 +4014,8 @@ function wireEvents() {
     const productSearch = event.target.closest("[data-product-search]");
     const siteProductSearch = event.target.closest("[data-site-product-search]");
     const siteCartNote = event.target.closest("[data-site-cart-note]");
+    const posCartTopping = event.target.closest("[data-pos-cart-topping]");
+    const posCartNote = event.target.closest("[data-pos-cart-note]");
     const adminProductSearch = event.target.closest("[data-admin-product-search]");
     if (productSearch) {
       state.pos.productFilter = productSearch.value;
@@ -3815,6 +4027,14 @@ function wireEvents() {
     }
     if (siteCartNote) {
       updateSiteCartOption(siteCartNote.dataset.cartId, "topping", siteCartNote.value);
+      return;
+    }
+    if (posCartTopping) {
+      updatePosCartOption(posCartTopping.dataset.cartId, "topping", posCartTopping.value);
+      return;
+    }
+    if (posCartNote) {
+      updatePosCartOption(posCartNote.dataset.cartId, "note", posCartNote.value);
       return;
     }
     if (adminProductSearch) {
