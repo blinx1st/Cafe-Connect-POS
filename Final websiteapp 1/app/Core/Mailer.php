@@ -13,19 +13,21 @@ final class Mailer
 
     public function __construct()
     {
-        $path = APP_ROOT . '/config/mail.php';
+        $localPath = APP_ROOT . '/config/mail.local.php';
+        $path = is_file($localPath) ? $localPath : APP_ROOT . '/config/mail.php';
         $this->config = is_file($path) ? (require $path) : [];
     }
 
     public function sendPasswordReset(string $toEmail, string $toName, string $resetUrl): void
     {
         $subject = 'Đặt lại mật khẩu Cafe Connect';
-        $safeName = $toName !== '' ? $toName : 'thanh vien';
-        $body = "Xin chao {$safeName},\n\n"
-            . "Bạn vừa yêu cầu đặt lại mật khẩu Cafe Connect.\n"
-            . "Vui lòng mở liên kết sau trong 30 phút để tạo mật khẩu mới:\n\n"
+        $safeName = $toName !== '' ? $toName : 'thành viên';
+        $body = "Xin chào {$safeName},\n\n"
+            . "Bạn vừa yêu cầu đặt lại mật khẩu tài khoản Cafe Connect.\n"
+            . "Vui lòng mở liên kết bên dưới trong vòng 30 phút để tạo mật khẩu mới:\n\n"
             . $resetUrl . "\n\n"
-            . "Nếu bạn không yêu cầu thao tác này, hãy bỏ qua email này.\n\n"
+            . "Liên kết này chỉ dùng một lần. Nếu bạn không yêu cầu đặt lại mật khẩu, hãy bỏ qua email này và giữ an toàn cho tài khoản của bạn.\n\n"
+            . "Trân trọng,\n"
             . "Cafe Connect";
 
         $this->send($toEmail, $toName, $subject, $body);
@@ -93,7 +95,7 @@ final class Mailer
     {
         foreach (['host', 'username', 'password', 'from_email'] as $key) {
             if (trim((string) ($this->config[$key] ?? '')) === '') {
-                throw new RuntimeException('SMTP chưa được cấu hình trong config/mail.php.');
+                throw new RuntimeException('SMTP chưa được cấu hình. Hãy tạo config/mail.local.php từ config/mail.example.php và điền Gmail App Password.');
             }
         }
     }

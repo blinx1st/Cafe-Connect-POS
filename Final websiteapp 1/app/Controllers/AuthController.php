@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Controller;
+use App\Core\AppLogger;
 use App\Core\Mailer;
 use App\Core\RateLimiter;
 use App\Core\Session;
@@ -15,6 +16,7 @@ use App\Models\PosSession;
 use App\Models\Staff;
 use App\Models\StaffAuthSession;
 use InvalidArgumentException;
+use RuntimeException;
 
 final class AuthController extends Controller
 {
@@ -317,12 +319,23 @@ final class AuthController extends Controller
             (string) ($_SERVER['REMOTE_ADDR'] ?? '')
         );
 
-        $resetUrl = base_url('reset-password?token=' . urlencode($token));
-        (new Mailer())->sendPasswordReset(
-            (string) $account['email'],
-            (string) $account['customer_name'],
-            $resetUrl
-        );
+        $resetUrl = $this->absoluteUrl(base_url('reset-password?token=' . urlencode($token)));
+        try {
+            (new Mailer())->sendPasswordReset(
+                (string) $account['email'],
+                (string) $account['customer_name'],
+                $resetUrl
+            );
+        } catch (RuntimeException $exception) {
+            AppLogger::error($exception, [
+                'action' => 'member_forgot_password_mail',
+                'customer_id' => (int) $account['id'],
+                'email' => (string) $account['email'],
+            ]);
+            throw new InvalidArgumentException(
+                'Không thể gửi email đặt lại mật khẩu. Vui lòng kiểm tra cấu hình Gmail SMTP trong config/mail.local.php.'
+            );
+        }
 
         RateLimiter::clear('member-forgot-password', $limitIdentity);
         (new AuditLog())->record([
@@ -478,5 +491,22 @@ final class AuthController extends Controller
 
         $prefix = substr($name, 0, 2);
         return $prefix . str_repeat('*', max(2, strlen($name) - 2)) . '@' . $domain;
+    }
+
+    private function absoluteUrl(string $path): string
+    {
+        if (preg_match('#^https?://#i', $path) === 1) {
+            return $path;
+        }
+
+        $host = trim((string) ($_SERVER['HTTP_HOST'] ?? ''));
+        if ($host === '') {
+            return $path;
+        }
+
+        $https = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off')
+            || (string) ($_SERVER['SERVER_PORT'] ?? '') === '443';
+
+        return ($https ? 'https' : 'http') . '://' . $host . '/' . ltrim($path, '/');
     }
 }

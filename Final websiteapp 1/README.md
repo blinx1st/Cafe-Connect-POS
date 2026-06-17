@@ -27,6 +27,16 @@ Khi chuyển sang vận hành nội bộ, đặt biến môi trường trước 
 $env:APP_ENV = "production_internal"
 ```
 
+## Cấu hình Gmail quên mật khẩu
+
+Luồng `/forgot-password` gửi link đặt lại mật khẩu tới email trong tài khoản member. Không gửi mật khẩu hiện tại vì mật khẩu được lưu dạng hash.
+
+1. Bật 2-Step Verification cho Gmail dùng để gửi mail.
+2. Tạo Gmail App Password trong Google Account.
+3. Sao chép `config/mail.example.php` thành `config/mail.local.php`.
+4. Điền `username`, `password`, `from_email`; giữ `host = smtp.gmail.com`, `port = 587`, `encryption = tls`.
+5. Không dùng mật khẩu Gmail thường và không commit `config/mail.local.php`.
+
 Ứng dụng PHP thuần chạy bằng XAMPP/Apache/MySQL, không dùng framework. Code nghiệp vụ được tách theo MVC trong `app/`, giao diện website và POS đã tách thành nhiều trang theo module.
 
 ## Cấu trúc chính
@@ -94,7 +104,7 @@ Website member đăng nhập bằng số điện thoại hoặc email kèm mật
 - Ví dụ nhanh: `0900000001 / 123456`.
 - Member đăng ký mới cần họ tên, SĐT, email và mật khẩu tối thiểu 6 ký tự; đăng ký trùng SĐT/email sẽ yêu cầu đăng nhập.
 - `/account` cho phép sửa họ tên/email/ngày sinh/giới tính/địa chỉ và đổi mật khẩu bằng mật khẩu hiện tại.
-- Quên mật khẩu dùng SMTP trong `config/mail.php`. Cần điền `host`, `port`, `encryption`, `username`, `password`, `from_email`, `from_name`; nếu chưa cấu hình, API sẽ báo `SMTP chưa được cấu hình trong config/mail.php.`.
+- Quên mật khẩu gửi link đặt lại qua Gmail SMTP. Sao chép `config/mail.example.php` thành `config/mail.local.php`, điền Gmail App Password; file `mail.local.php` đã được ignore để không lộ credential.
 
 POS đăng nhập bằng tài khoản nhân viên riêng, sau đó nhập PIN riêng để mở ca làm:
 
