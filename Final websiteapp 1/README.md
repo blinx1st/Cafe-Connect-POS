@@ -131,7 +131,7 @@ Backend kiểm tra cả `staff_id`, `pos_session_id` và `session_token` cho cá
 
 - Mọi API ghi dữ liệu cần header `X-CSRF-Token`. Layout PHP inject token vào `window.CAFE_CSRF_TOKEN`, và `assets/js/app.js` tự động gửi token này khi gọi API.
 - Endpoint đọc dữ liệu như `member-session`, `member-lookup`, `dashboard`, `inventory`, `reports`, `receipt` được phép bỏ qua CSRF.
-- Login member, login staff POS và PIN mở ca có lockout bằng DB trong bảng `auth_lockouts`; sai quá ngưỡng sẽ bị khóa tạm 15 phút.
+- Login member còn lockout cơ bản bằng DB trong bảng `auth_lockouts`. Riêng đăng nhập POS, PIN mở ca và gửi quên mật khẩu không khóa tạm khi nhập nhiều lần.
 - Bảng `audit_logs` ghi các hành động quan trọng: login/logout, register, update profile, đổi/reset password, checkout, refund, receipt print, void/cancel order, product/staff/cash/inventory.
 - Lỗi backend bất ngờ được ghi vào `storage/logs/app.log`; API chỉ trả thông báo an toàn thay vì stack trace nội bộ.
 
@@ -211,7 +211,7 @@ Script này sẽ lint PHP, check JS, đảm bảo MySQL đang chạy, reset data
 - Mật khẩu member, mật khẩu staff và PIN POS được lưu bằng `password_hash()`.
 - PHP session dung cookie `HttpOnly`, `SameSite=Lax` va `Secure` khi chay HTTPS.
 - Session id duoc regenerate sau login/register/adopt/logout/reset password.
-- Cac diem auth nhay cam co rate limit co ban va DB lockout: member login/register/forgot/reset, POS staff login va PIN mo ca.
+- Các điểm auth nhạy cảm còn rate limit/DB lockout cho member login/register. POS staff login, PIN mở ca và toàn bộ luồng quên mật khẩu không khóa tạm khi nhập nhiều lần.
 - Cac API ghi du lieu co CSRF header `X-CSRF-Token`.
 - Audit log dùng chung được lưu trong `audit_logs`; lỗi hệ thống ghi vào `storage/logs/app.log`.
 - Cac API POS ghi du lieu van bat buoc `staff_id`, role hop le, `pos_session_id` va `session_token`.

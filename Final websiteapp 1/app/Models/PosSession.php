@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Core\Model;
-use App\Core\RateLimiter;
 use InvalidArgumentException;
 
 final class PosSession extends Model
@@ -23,11 +22,6 @@ final class PosSession extends Model
             throw new InvalidArgumentException('Vui lòng nhập PIN.');
         }
 
-        $limitIdentity = RateLimiter::identity('pos-session-login|' . $staffId);
-        $lockout = new AuthLockout();
-        $lockout->assertAllowed('pos-session-login', (string) $staffId);
-        RateLimiter::hit('pos-session-login', $limitIdentity, 8, 15 * 60);
-
         $staffModel = new Staff();
         $staff = $staffModel->find($staffId);
         if (!$staff) {
@@ -36,7 +30,6 @@ final class PosSession extends Model
         $authSession = (new StaffAuthSession())->requireActive($data, $staffId);
         $verifiedStaff = $staffModel->verifyPin($staffId, $pin);
         if (!$verifiedStaff) {
-            $lockout->recordFailure('pos-session-login', (string) $staffId);
             throw new InvalidArgumentException('PIN không đúng.');
         }
         $staff = $verifiedStaff;
@@ -86,8 +79,6 @@ final class PosSession extends Model
             'amount' => $openingCash,
             'note' => 'POS login',
         ]);
-        $lockout->clear('pos-session-login', (string) $staffId);
-        RateLimiter::clear('pos-session-login', $limitIdentity);
         (new AuditLog())->record([
             'actor_type' => 'staff',
             'actor_id' => $staffId,

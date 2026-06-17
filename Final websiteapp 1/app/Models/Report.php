@@ -10,11 +10,17 @@ final class Report extends Model
 {
     public function data(array $filters = []): array
     {
-        $start = $this->dateOrDefault((string) ($filters['start_date'] ?? ''), date('Y-m-01'));
+        $start = $this->dateOrDefault((string) ($filters['start_date'] ?? ''), date('Y-m-01', strtotime('-11 months')));
         $end = $this->dateOrDefault((string) ($filters['end_date'] ?? ''), date('Y-m-d'));
 
         return [
+            'period' => ['start_date' => $start, 'end_date' => $end],
             'revenue_by_channel' => $this->revenueByChannel($start, $end),
+            'branch_summary' => $this->branchSummary($start, $end),
+            'branch_monthly_revenue' => $this->branchMonthlyRevenue($start, $end),
+            'payment_by_branch' => $this->paymentByBranch($start, $end),
+            'top_products_by_branch' => $this->topProductsByBranch($start, $end),
+            'hourly_revenue' => $this->hourlyRevenue($start, $end),
             'staff_performance' => $this->staffPerformance($start, $end),
             'gross_margin' => $this->grossMargin($start, $end),
             'cash_transactions' => $this->cashTransactions(),
@@ -34,6 +40,51 @@ final class Report extends Model
                 $row['paid_invoice_count'],
                 $row['net_revenue'],
                 '',
+            ]);
+        }
+        foreach ($data['branch_monthly_revenue'] as $row) {
+            fputcsv($handle, [
+                'Monthly revenue by branch',
+                $row['revenue_month'],
+                $row['branch_name'],
+                $row['paid_invoice_count'],
+                $row['net_revenue'],
+            ]);
+        }
+        foreach ($data['branch_summary'] as $row) {
+            fputcsv($handle, [
+                'Branch summary',
+                $row['branch_name'],
+                $row['paid_invoice_count'],
+                $row['net_revenue'],
+                $row['average_invoice_value'],
+            ]);
+        }
+        foreach ($data['payment_by_branch'] as $row) {
+            fputcsv($handle, [
+                'Payment by branch',
+                $row['branch_name'],
+                $row['payment_method'],
+                $row['paid_invoice_count'],
+                $row['net_revenue'],
+            ]);
+        }
+        foreach ($data['top_products_by_branch'] as $row) {
+            fputcsv($handle, [
+                'Top products by branch',
+                $row['branch_name'],
+                $row['product_name'],
+                $row['quantity_sold'],
+                $row['product_revenue'],
+            ]);
+        }
+        foreach ($data['hourly_revenue'] as $row) {
+            fputcsv($handle, [
+                'Hourly revenue',
+                str_pad((string) $row['business_hour'], 2, '0', STR_PAD_LEFT) . ':00',
+                $row['paid_invoice_count'],
+                $row['net_revenue'],
+                $row['average_invoice_value'],
             ]);
         }
         foreach ($data['gross_margin'] as $row) {
@@ -73,6 +124,105 @@ final class Report extends Model
              WHERE status = 'paid' AND invoice_date BETWEEN :start AND :end
              GROUP BY sales_channel
              ORDER BY net_revenue DESC"
+        );
+        $stmt->execute(['start' => $start, 'end' => $end]);
+        return $stmt->fetchAll();
+    }
+
+    private function branchSummary(string $start, string $end): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT b.id AS branch_id, b.branch_name,
+                    COUNT(i.id) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS net_revenue,
+                    COALESCE(SUM(i.subtotal_amount), 0) AS gross_sales,
+                    COALESCE(SUM(i.membership_discount_amount), 0) AS membership_discount,
+                    COALESCE(SUM(i.voucher_discount_amount), 0) AS voucher_discount,
+                    COALESCE(AVG(i.total_amount), 0) AS average_invoice_value,
+                    COALESCE(SUM(CASE WHEN i.sales_channel = 'pos' THEN i.total_amount ELSE 0 END), 0) AS pos_revenue,
+                    COALESCE(SUM(CASE WHEN i.sales_channel IN ('website', 'delivery') THEN i.total_amount ELSE 0 END), 0) AS website_revenue
+             FROM branches b
+             LEFT JOIN invoices i ON i.branch_id = b.id
+                AND i.status = 'paid'
+                AND i.invoice_date BETWEEN :start AND :end
+             WHERE b.status = 'active'
+             GROUP BY b.id, b.branch_name
+             ORDER BY net_revenue DESC, b.branch_name"
+        );
+        $stmt->execute(['start' => $start, 'end' => $end]);
+        return $stmt->fetchAll();
+    }
+
+    private function branchMonthlyRevenue(string $start, string $end): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS revenue_month,
+                    b.id AS branch_id,
+                    b.branch_name,
+                    COUNT(i.id) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS net_revenue,
+                    COALESCE(SUM(i.voucher_discount_amount), 0) AS voucher_discount,
+                    COALESCE(AVG(i.total_amount), 0) AS average_invoice_value
+             FROM invoices i
+             JOIN branches b ON b.id = i.branch_id
+             WHERE i.status = 'paid'
+               AND i.invoice_date BETWEEN :start AND :end
+             GROUP BY revenue_month, b.id, b.branch_name
+             ORDER BY revenue_month DESC, net_revenue DESC, b.branch_name"
+        );
+        $stmt->execute(['start' => $start, 'end' => $end]);
+        return $stmt->fetchAll();
+    }
+
+    private function paymentByBranch(string $start, string $end): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT b.branch_name, i.payment_method,
+                    COUNT(i.id) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS net_revenue
+             FROM invoices i
+             JOIN branches b ON b.id = i.branch_id
+             WHERE i.status = 'paid'
+               AND i.invoice_date BETWEEN :start AND :end
+             GROUP BY b.id, b.branch_name, i.payment_method
+             ORDER BY b.branch_name, net_revenue DESC"
+        );
+        $stmt->execute(['start' => $start, 'end' => $end]);
+        return $stmt->fetchAll();
+    }
+
+    private function topProductsByBranch(string $start, string $end): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT b.branch_name, p.product_name,
+                    COALESCE(SUM(idt.quantity), 0) AS quantity_sold,
+                    COALESCE(SUM(idt.line_total), 0) AS product_revenue
+             FROM invoice_details idt
+             JOIN invoices i ON i.id = idt.invoice_id
+             JOIN branches b ON b.id = i.branch_id
+             JOIN products p ON p.id = idt.product_id
+             WHERE i.status = 'paid'
+               AND i.invoice_date BETWEEN :start AND :end
+             GROUP BY b.id, b.branch_name, p.id, p.product_name
+             ORDER BY product_revenue DESC, quantity_sold DESC
+             LIMIT 20"
+        );
+        $stmt->execute(['start' => $start, 'end' => $end]);
+        return $stmt->fetchAll();
+    }
+
+    private function hourlyRevenue(string $start, string $end): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT HOUR(i.invoice_time) AS business_hour,
+                    COUNT(i.id) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS net_revenue,
+                    COALESCE(AVG(i.total_amount), 0) AS average_invoice_value
+             FROM invoices i
+             WHERE i.status = 'paid'
+               AND i.invoice_date BETWEEN :start AND :end
+             GROUP BY business_hour
+             ORDER BY business_hour"
         );
         $stmt->execute(['start' => $start, 'end' => $end]);
         return $stmt->fetchAll();

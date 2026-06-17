@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Core\RateLimiter;
 use App\Core\Model;
 use InvalidArgumentException;
 
@@ -16,15 +15,9 @@ final class StaffAuthSession extends Model
     {
         $identity = require_field($data, 'identity', 'Staff code, email or phone');
         $password = require_field($data, 'password', 'Password');
-        $limitIdentity = RateLimiter::identity('pos-auth-login|' . $identity);
-        $lockout = new AuthLockout();
-        $lockout->assertAllowed('pos-auth-login', $identity);
-        RateLimiter::hit('pos-auth-login', $limitIdentity, 8, 15 * 60);
-
         $staffModel = new Staff();
         $staff = $staffModel->verifyPassword($identity, $password);
         if (!$staff) {
-            $lockout->recordFailure('pos-auth-login', $identity);
             throw new InvalidArgumentException('Tài khoản POS hoặc mật khẩu không đúng.');
         }
 
@@ -55,8 +48,6 @@ final class StaffAuthSession extends Model
             throw new InvalidArgumentException('Không thể tạo phiên đăng nhập POS.');
         }
 
-        $lockout->clear('pos-auth-login', $identity);
-        RateLimiter::clear('pos-auth-login', $limitIdentity);
         (new AuditLog())->record([
             'actor_type' => 'staff',
             'actor_id' => (int) $staff['id'],

@@ -53,6 +53,8 @@ const state = {
     adminProductStatus: "all",
     adminProductCategory: "",
     editingCampaignId: "",
+    reportStartDate: "",
+    reportEndDate: "",
     roleFilter: "",
     loginStaffId: "",
     loginPin: "",
@@ -2317,8 +2319,20 @@ function sessionReportsTable() {
   `, "Chưa có phiên làm việc.");
 }
 
+function reportFilterPayload() {
+  const period = cafeApp.reports?.period || {};
+  const now = new Date();
+  const pad = (number) => String(number).padStart(2, "0");
+  const defaultStart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`;
+  return {
+    start_date: state.pos.reportStartDate || period.start_date || defaultStart,
+    end_date: state.pos.reportEndDate || period.end_date || sqlDate(),
+  };
+}
+
 function renderReportsModule() {
   const reports = cafeApp.reports || {};
+  const filters = reportFilterPayload();
   const recentInvoices = cafeApp.dashboard?.recent_invoices || [];
   const invoiceActions = tableHtml(recentInvoices, ["HĐ", "Khách", "Kênh", "Tổng", ""], (row) => `
     <tr>
@@ -2331,8 +2345,26 @@ function renderReportsModule() {
   `, "Chưa có hóa đơn.");
   return `
     <div class="dashboard-columns">
-      <section class="panel span-2"><div class="panel-head"><h2>Report export</h2><button type="button" class="primary-btn" data-report-export>Export CSV</button></div></section>
+      <section class="panel span-2">
+        <div class="panel-head">
+          <div>
+            <h2>Báo cáo doanh thu</h2>
+            <p>Lọc theo khoảng ngày để xem chi tiết doanh thu theo tháng, chi nhánh, kênh bán và hiệu suất vận hành.</p>
+          </div>
+          <button type="button" class="primary-btn" data-report-export>Export CSV</button>
+        </div>
+        <form class="report-filter-form" data-report-filter>
+          <label>Từ ngày <input type="date" name="start_date" value="${escapeHtml(filters.start_date)}"></label>
+          <label>Đến ngày <input type="date" name="end_date" value="${escapeHtml(filters.end_date)}"></label>
+          <button type="submit" class="secondary-btn">Xem báo cáo</button>
+        </form>
+      </section>
+      <section class="panel span-2"><h2>Doanh thu các tháng theo chi nhánh</h2>${tableHtml(reports.branch_monthly_revenue || [], ["Tháng", "Chi nhánh", "Đơn", "Doanh thu", "TB/HĐ", "Giảm voucher"], (row) => `<tr><td>${escapeHtml(row.revenue_month)}</td><td>${escapeHtml(row.branch_name)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td><td>${formatMoney(row.average_invoice_value)}</td><td>${formatMoney(row.voucher_discount)}</td></tr>`, "Chưa có doanh thu trong kỳ.")}</section>
+      <section class="panel span-2"><h2>Tổng hợp chi nhánh</h2>${tableHtml(reports.branch_summary || [], ["Chi nhánh", "Đơn", "Doanh thu", "TB/HĐ", "POS", "Website", "Giảm"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td><td>${formatMoney(row.average_invoice_value)}</td><td>${formatMoney(row.pos_revenue)}</td><td>${formatMoney(row.website_revenue)}</td><td>${formatMoney(Number(row.membership_discount || 0) + Number(row.voucher_discount || 0))}</td></tr>`)}</section>
       <section class="panel"><h2>Doanh thu theo kênh</h2>${tableHtml(reports.revenue_by_channel || [], ["Kênh", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.sales_channel)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
+      <section class="panel"><h2>Thanh toán theo chi nhánh</h2>${tableHtml(reports.payment_by_branch || [], ["Chi nhánh", "Phương thức", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.payment_method)}</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td></tr>`)}</section>
+      <section class="panel span-2"><h2>Sản phẩm bán chạy theo chi nhánh</h2>${tableHtml(reports.top_products_by_branch || [], ["Chi nhánh", "Sản phẩm", "SL", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity_sold || 0)}</td><td>${formatMoney(row.product_revenue)}</td></tr>`)}</section>
+      <section class="panel"><h2>Giờ cao điểm</h2>${tableHtml(reports.hourly_revenue || [], ["Giờ", "Đơn", "Doanh thu", "TB/HĐ"], (row) => `<tr><td>${String(row.business_hour).padStart(2, "0")}:00</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td><td>${formatMoney(row.average_invoice_value)}</td></tr>`)}</section>
       <section class="panel"><h2>Hiệu suất nhân viên</h2>${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>`)}</section>
       <section class="panel span-2"><h2>Hóa đơn gần nhất</h2>${invoiceActions}</section>
       <section class="panel span-2"><h2>Phiên làm việc POS</h2>${sessionReportsTable()}</section>
@@ -3386,7 +3418,7 @@ function wireEvents() {
     }
     if (reportExport) {
       try {
-        const result = await api("reports-export");
+        const result = await api("reports-export", reportFilterPayload());
         downloadTextFile(result.filename || "cafe-connect-report.csv", result.csv || "");
         showToast("Đã xuất CSV.");
       } catch (error) {
@@ -3667,6 +3699,8 @@ function wireEvents() {
     const voucherClaimCodeForm = event.target.closest("[data-voucher-claim-code]");
     const createForm = event.target.closest("[data-customer-create]");
     const newsletterForm = event.target.closest("[data-newsletter-form]");
+    const offerLoginForm = event.target.closest("[data-offer-login-form]");
+    const reportFilterForm = event.target.closest("[data-report-filter]");
     const serviceOrderForm = event.target.closest("[data-service-order-create]");
     const campaignForm = event.target.closest("[data-campaign-create]");
     const stockForm = event.target.closest("[data-stock-movement]");
@@ -3827,6 +3861,27 @@ function wireEvents() {
         await api("newsletter-subscribe", Object.fromEntries(new FormData(newsletterForm)));
         newsletterForm.reset();
         showToast("Đã đăng ký newsletter.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (offerLoginForm) {
+      event.preventDefault();
+      const target = state.site.customer ? "account" : "login";
+      showToast(state.site.customer ? "Mở hồ sơ để nhận và quản lý voucher." : "Vui lòng đăng nhập để nhận ưu đãi.");
+      await navigateWebsite(url(target));
+      return;
+    }
+    if (reportFilterForm) {
+      event.preventDefault();
+      try {
+        const payload = Object.fromEntries(new FormData(reportFilterForm));
+        state.pos.reportStartDate = payload.start_date || "";
+        state.pos.reportEndDate = payload.end_date || "";
+        cafeApp.reports = await api("reports", payload);
+        renderPosApp();
+        showToast("Đã cập nhật báo cáo.");
       } catch (error) {
         showToast(error.message);
       }

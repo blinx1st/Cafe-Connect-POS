@@ -54,10 +54,9 @@
     <img class="newsletter-beans newsletter-left" src="<?= e(asset_url('images/newsletter-beans.png')) ?>" alt="">
     <div class="newsletter-content">
       <h2>Nhận ưu đãi 15%</h2>
-      <p>Đăng ký newsletter để nhận voucher và thông tin campaign mới.</p>
-      <form class="subscribe-form" data-newsletter-form>
-        <label><img src="<?= e(asset_url('images/mail.svg')) ?>" alt=""><input name="email" type="email" placeholder="Email address" required></label>
-        <button type="submit">Subscribe</button>
+      <p>Đăng nhập hoặc tạo tài khoản thành viên để nhận voucher, lưu điểm và dùng ưu đãi khi đặt món.</p>
+      <form class="subscribe-form" action="<?= e(base_url('login')) ?>" method="get" data-offer-login-form>
+        <button type="submit">Nhận ưu đãi</button>
       </form>
     </div>
     <img class="newsletter-beans newsletter-right" src="<?= e(asset_url('images/newsletter-beans.png')) ?>" alt="">

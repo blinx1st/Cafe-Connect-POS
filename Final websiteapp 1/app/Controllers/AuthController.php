@@ -300,8 +300,6 @@ final class AuthController extends Controller
     public function memberForgotPassword(array $payload): array
     {
         $identity = require_field($payload, 'identity', 'Phone or email');
-        $limitIdentity = RateLimiter::identity('member-forgot-password|' . $identity);
-        RateLimiter::hit('member-forgot-password', $limitIdentity, 5, 60 * 60);
 
         $customer = new Customer();
         $account = $customer->authByIdentity($identity);
@@ -337,7 +335,6 @@ final class AuthController extends Controller
             );
         }
 
-        RateLimiter::clear('member-forgot-password', $limitIdentity);
         (new AuditLog())->record([
             'actor_type' => 'customer',
             'actor_id' => (int) $account['id'],
@@ -352,8 +349,6 @@ final class AuthController extends Controller
     public function memberResetPassword(array $payload): array
     {
         $token = require_field($payload, 'token', 'Reset token');
-        $limitIdentity = RateLimiter::identity('member-reset-password|' . substr(hash('sha256', $token), 0, 16));
-        RateLimiter::hit('member-reset-password', $limitIdentity, 8, 30 * 60);
 
         $password = require_field($payload, 'password', 'New password');
         $confirm = require_field($payload, 'password_confirm', 'Password confirmation');
@@ -373,7 +368,6 @@ final class AuthController extends Controller
         $customer->updatePassword((int) $reset['customer_id'], password_hash($password, PASSWORD_DEFAULT));
         $customer->markPasswordResetUsed((int) $reset['id']);
         Session::forget('member_customer_id');
-        RateLimiter::clear('member-reset-password', $limitIdentity);
         Session::regenerate();
         (new AuditLog())->record([
             'actor_type' => 'customer',
