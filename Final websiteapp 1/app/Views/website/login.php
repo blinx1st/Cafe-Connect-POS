@@ -14,7 +14,7 @@
           <p class="eyebrow">Cafe Connect Account</p>
           <h3>Đăng nhập</h3>
         </div>
-        <span class="auth-badge">Member / Staff</span>
+        <span class="auth-badge">Member</span>
       </div>
 
       <form class="create-form compact" data-member-login>
