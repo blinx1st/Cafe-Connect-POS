@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Core\Model;
+use InvalidArgumentException;
 
 final class Inventory extends Model
 {
@@ -80,8 +81,7 @@ final class Inventory extends Model
         return $this->db->query(
             "SELECT id, material_name, unit, min_stock_level, unit_cost, supplier_name, status
              FROM inventory_materials
-             WHERE status = 'active'
-             ORDER BY material_name"
+             ORDER BY FIELD(status, 'active', 'inactive'), material_name"
         )->fetchAll();
     }
 
@@ -102,7 +102,7 @@ final class Inventory extends Model
 
     public function recipes(): array
     {
-        return $this->db->query(
+        $recipes = $this->db->query(
             "SELECT r.id, r.product_id, p.product_name, r.recipe_name, r.yield_quantity, r.status,
                     GROUP_CONCAT(CONCAT(im.material_name, ' ', ri.quantity_per_unit, ' ', im.unit) ORDER BY im.material_name SEPARATOR ', ') AS materials
              FROM recipes r
@@ -110,8 +110,275 @@ final class Inventory extends Model
              LEFT JOIN recipe_items ri ON ri.recipe_id = r.id
              LEFT JOIN inventory_materials im ON im.id = ri.material_id
              GROUP BY r.id, r.product_id, p.product_name, r.recipe_name, r.yield_quantity, r.status
-             ORDER BY p.product_name"
+             ORDER BY FIELD(r.status, 'active', 'inactive'), p.product_name"
         )->fetchAll();
+
+        if (!$recipes) {
+            return [];
+        }
+
+        $ids = array_map(static fn (array $row): int => (int) $row['id'], $recipes);
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $items = $this->db->prepare(
+            "SELECT ri.recipe_id, ri.material_id, ri.quantity_per_unit,
+                    im.material_name, im.unit
+             FROM recipe_items ri
+             JOIN inventory_materials im ON im.id = ri.material_id
+             WHERE ri.recipe_id IN ($placeholders)
+             ORDER BY ri.recipe_id, im.material_name"
+        );
+        $items->execute($ids);
+
+        $byRecipe = [];
+        foreach ($items->fetchAll() as $item) {
+            $byRecipe[(int) $item['recipe_id']][] = $item;
+        }
+        foreach ($recipes as &$recipe) {
+            $recipe['items'] = $byRecipe[(int) $recipe['id']] ?? [];
+        }
+
+        return $recipes;
+    }
+
+    public function saveMaterial(array $data): array
+    {
+        $id = (int) ($data['id'] ?? $data['material_id'] ?? 0);
+        $name = require_field($data, 'material_name', 'Tên nguyên vật liệu');
+        $unit = require_field($data, 'unit', 'Đơn vị tính');
+        $minStock = max(0, (float) ($data['min_stock_level'] ?? 0));
+        $unitCost = max(0, (float) ($data['unit_cost'] ?? 0));
+        $supplier = substr(trim((string) ($data['supplier_name'] ?? '')), 0, 150) ?: null;
+        $status = in_array(($data['status'] ?? 'active'), ['active', 'inactive'], true) ? $data['status'] : 'active';
+        $duplicate = $this->db->prepare(
+            "SELECT id FROM inventory_materials WHERE material_name = :name AND id <> :id LIMIT 1"
+        );
+        $duplicate->execute(['name' => $name, 'id' => $id]);
+        if ($duplicate->fetchColumn()) {
+            throw new InvalidArgumentException('Tên nguyên vật liệu đã tồn tại.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            if ($id > 0) {
+                $this->db->prepare(
+                    "UPDATE inventory_materials
+                     SET material_name = :name,
+                         unit = :unit,
+                         min_stock_level = :min_stock,
+                         unit_cost = :unit_cost,
+                         supplier_name = :supplier,
+                         status = :status,
+                         last_updated = NOW()
+                     WHERE id = :id"
+                )->execute([
+                    'id' => $id,
+                    'name' => $name,
+                    'unit' => $unit,
+                    'min_stock' => $minStock,
+                    'unit_cost' => $unitCost,
+                    'supplier' => $supplier,
+                    'status' => $status,
+                ]);
+            } else {
+                $this->db->prepare(
+                    "INSERT INTO inventory_materials (
+                        material_name, unit, stock_quantity, min_stock_level, unit_cost, supplier_name, status, last_updated
+                     ) VALUES (
+                        :name, :unit, 0, :min_stock, :unit_cost, :supplier, :status, NOW()
+                     )"
+                )->execute([
+                    'name' => $name,
+                    'unit' => $unit,
+                    'min_stock' => $minStock,
+                    'unit_cost' => $unitCost,
+                    'supplier' => $supplier,
+                    'status' => $status,
+                ]);
+                $id = (int) $this->db->lastInsertId();
+            }
+
+            $this->ensureMaterialBranchRows($id, $minStock, $unitCost);
+            $this->syncMaterialAggregate($id);
+            $this->auditInventory($data, 'material_save', 'inventory_material', $id, [
+                'material_name' => $name,
+                'unit' => $unit,
+                'status' => $status,
+            ]);
+
+            $this->db->commit();
+            return ['id' => $id] + $this->overview();
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
+    public function deleteMaterial(int $id, array $data = []): array
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Thiếu nguyên vật liệu cần ngừng sử dụng.');
+        }
+
+        $this->db->prepare(
+            "UPDATE inventory_materials SET status = 'inactive', last_updated = NOW() WHERE id = :id"
+        )->execute(['id' => $id]);
+        $this->auditInventory($data, 'material_delete', 'inventory_material', $id);
+        return $this->overview();
+    }
+
+    public function restoreMaterial(int $id, array $data = []): array
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Thiếu nguyên vật liệu cần khôi phục.');
+        }
+
+        $this->db->prepare(
+            "UPDATE inventory_materials SET status = 'active', last_updated = NOW() WHERE id = :id"
+        )->execute(['id' => $id]);
+        $this->auditInventory($data, 'material_restore', 'inventory_material', $id);
+        return $this->overview();
+    }
+
+    public function saveBranchStock(array $data): array
+    {
+        $branchId = max(1, (int) ($data['branch_id'] ?? 0));
+        $materialId = max(1, (int) ($data['material_id'] ?? 0));
+        $stock = max(0, (float) ($data['stock_quantity'] ?? 0));
+        $minStock = max(0, (float) ($data['min_stock_level'] ?? 0));
+        $unitCost = max(0, (float) ($data['unit_cost'] ?? 0));
+
+        $this->db->beginTransaction();
+        try {
+            $this->db->prepare(
+                "INSERT INTO branch_material_inventory (
+                    branch_id, material_id, stock_quantity, min_stock_level, unit_cost, last_updated
+                 ) VALUES (
+                    :branch_id, :material_id, :stock, :min_stock, :unit_cost, NOW()
+                 )
+                 ON DUPLICATE KEY UPDATE
+                    stock_quantity = VALUES(stock_quantity),
+                    min_stock_level = VALUES(min_stock_level),
+                    unit_cost = VALUES(unit_cost),
+                    last_updated = NOW()"
+            )->execute([
+                'branch_id' => $branchId,
+                'material_id' => $materialId,
+                'stock' => $stock,
+                'min_stock' => $minStock,
+                'unit_cost' => $unitCost,
+            ]);
+            $this->syncMaterialAggregate($materialId);
+            $this->auditInventory($data, 'branch_material_stock_save', 'branch_material_inventory', $materialId, [
+                'branch_id' => $branchId,
+                'stock_quantity' => $stock,
+                'min_stock_level' => $minStock,
+                'unit_cost' => $unitCost,
+            ]);
+            $this->db->commit();
+            return $this->overview();
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
+    public function saveRecipe(array $data): array
+    {
+        $id = (int) ($data['id'] ?? $data['recipe_id'] ?? 0);
+        $productId = max(1, (int) ($data['product_id'] ?? 0));
+        $recipeName = trim((string) ($data['recipe_name'] ?? ''));
+        $yield = max(0.0001, (float) ($data['yield_quantity'] ?? 1));
+        $status = in_array(($data['status'] ?? 'active'), ['active', 'inactive'], true) ? $data['status'] : 'active';
+        $items = $this->recipeItemsFromPayload($data);
+        if ($status === 'active' && !$items) {
+            throw new InvalidArgumentException('Recipe đang hoạt động cần ít nhất một nguyên vật liệu.');
+        }
+
+        $this->db->beginTransaction();
+        try {
+            if ($id <= 0) {
+                $stmt = $this->db->prepare("SELECT id FROM recipes WHERE product_id = :product_id LIMIT 1");
+                $stmt->execute(['product_id' => $productId]);
+                $id = (int) ($stmt->fetchColumn() ?: 0);
+            }
+            if ($recipeName === '') {
+                $stmt = $this->db->prepare("SELECT product_name FROM products WHERE id = :id LIMIT 1");
+                $stmt->execute(['id' => $productId]);
+                $recipeName = ((string) ($stmt->fetchColumn() ?: 'Sản phẩm')) . ' recipe';
+            }
+
+            if ($id > 0) {
+                $this->db->prepare(
+                    "UPDATE recipes
+                     SET product_id = :product_id,
+                         recipe_name = :recipe_name,
+                         yield_quantity = :yield_quantity,
+                         status = :status
+                     WHERE id = :id"
+                )->execute([
+                    'id' => $id,
+                    'product_id' => $productId,
+                    'recipe_name' => $recipeName,
+                    'yield_quantity' => $yield,
+                    'status' => $status,
+                ]);
+            } else {
+                $this->db->prepare(
+                    "INSERT INTO recipes (product_id, recipe_name, yield_quantity, status)
+                     VALUES (:product_id, :recipe_name, :yield_quantity, :status)"
+                )->execute([
+                    'product_id' => $productId,
+                    'recipe_name' => $recipeName,
+                    'yield_quantity' => $yield,
+                    'status' => $status,
+                ]);
+                $id = (int) $this->db->lastInsertId();
+            }
+
+            $this->db->prepare("DELETE FROM recipe_items WHERE recipe_id = :id")->execute(['id' => $id]);
+            $itemStmt = $this->db->prepare(
+                "INSERT INTO recipe_items (recipe_id, material_id, quantity_per_unit)
+                 VALUES (:recipe_id, :material_id, :quantity_per_unit)"
+            );
+            foreach ($items as $item) {
+                $itemStmt->execute([
+                    'recipe_id' => $id,
+                    'material_id' => $item['material_id'],
+                    'quantity_per_unit' => $item['quantity_per_unit'],
+                ]);
+            }
+
+            $this->auditInventory($data, 'recipe_save', 'recipe', $id, [
+                'product_id' => $productId,
+                'items' => $items,
+                'status' => $status,
+            ]);
+            $this->db->commit();
+            return ['id' => $id] + $this->overview();
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
+    public function deleteRecipe(int $id, array $data = []): array
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Thiếu recipe cần ngừng sử dụng.');
+        }
+        $this->db->prepare("UPDATE recipes SET status = 'inactive' WHERE id = :id")->execute(['id' => $id]);
+        $this->auditInventory($data, 'recipe_delete', 'recipe', $id);
+        return $this->overview();
+    }
+
+    public function restoreRecipe(int $id, array $data = []): array
+    {
+        if ($id <= 0) {
+            throw new InvalidArgumentException('Thiếu recipe cần khôi phục.');
+        }
+        $this->db->prepare("UPDATE recipes SET status = 'active' WHERE id = :id")->execute(['id' => $id]);
+        $this->auditInventory($data, 'recipe_restore', 'recipe', $id);
+        return $this->overview();
     }
 
     public function createMovement(array $data): array
@@ -167,8 +434,8 @@ final class Inventory extends Model
                  FROM inventory_materials im
                  WHERE im.id = :material_id
                  ON DUPLICATE KEY UPDATE
-                    stock_quantity = GREATEST(stock_quantity + VALUES(stock_quantity) - GREATEST(-:delta_again, 0), 0),
-                    unit_cost = CASE WHEN VALUES(unit_cost) > 0 THEN VALUES(unit_cost) ELSE unit_cost END,
+                    stock_quantity = GREATEST(branch_material_inventory.stock_quantity + VALUES(stock_quantity) - GREATEST(-:delta_again, 0), 0),
+                    unit_cost = CASE WHEN VALUES(unit_cost) > 0 THEN VALUES(unit_cost) ELSE branch_material_inventory.unit_cost END,
                     last_updated = NOW()"
             )->execute([
                 'branch_id' => $branchId,
@@ -371,6 +638,68 @@ final class Inventory extends Model
             ]);
             $this->syncMaterialAggregate((int) $row['material_id']);
         }
+    }
+
+    private function ensureMaterialBranchRows(int $materialId, float $minStock, float $unitCost): void
+    {
+        $this->db->prepare(
+            "INSERT INTO branch_material_inventory (
+                branch_id, material_id, stock_quantity, min_stock_level, unit_cost, last_updated
+             )
+             SELECT b.id, :material_id, 0, :min_stock, :unit_cost, NOW()
+             FROM branches b
+             ON DUPLICATE KEY UPDATE
+                min_stock_level = CASE WHEN min_stock_level = 0 THEN VALUES(min_stock_level) ELSE min_stock_level END,
+                unit_cost = CASE WHEN unit_cost = 0 THEN VALUES(unit_cost) ELSE unit_cost END,
+                last_updated = NOW()"
+        )->execute([
+            'material_id' => $materialId,
+            'min_stock' => $minStock,
+            'unit_cost' => $unitCost,
+        ]);
+    }
+
+    private function recipeItemsFromPayload(array $data): array
+    {
+        $raw = $data['items'] ?? $data['recipe_items'] ?? $data['items_json'] ?? [];
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            $raw = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($raw)) {
+            return [];
+        }
+
+        $items = [];
+        foreach ($raw as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $materialId = (int) ($item['material_id'] ?? 0);
+            $quantity = (float) ($item['quantity_per_unit'] ?? $item['quantity'] ?? 0);
+            if ($materialId <= 0 || $quantity <= 0) {
+                continue;
+            }
+            $items[$materialId] = [
+                'material_id' => $materialId,
+                'quantity_per_unit' => round(($items[$materialId]['quantity_per_unit'] ?? 0) + $quantity, 4),
+            ];
+        }
+
+        return array_values($items);
+    }
+
+    private function auditInventory(array $data, string $action, string $entityType, int $entityId, array $metadata = []): void
+    {
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) ($data['staff_id'] ?? 0) ?: null,
+            'actor_role' => (string) ($data['staff_role'] ?? ''),
+            'action' => $action,
+            'entity_type' => $entityType,
+            'entity_id' => $entityId,
+            'metadata' => $metadata,
+        ]);
     }
 
     private function materialRequirementsForItems(array $items): array

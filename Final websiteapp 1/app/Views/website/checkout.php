@@ -117,14 +117,16 @@ $member = $appData['member'] ?? null;
           <div class="checkout-fields">
             <div data-member-result="site" class="member-result muted-box">Đăng nhập thành viên để dùng voucher, tích điểm và theo dõi đơn hàng.</div>
             <label class="field">Voucher
-              <select data-site-voucher><option value="">Không dùng voucher</option></select>
+              <select data-site-voucher>
+                <option value="">Không dùng voucher</option>
+              </select>
             </label>
             <label class="field">Phương thức thanh toán
               <select data-site-payment>
                 <?php if ($momoEnabled): ?>
-                  <option value="e_wallet">MoMo e-wallet - thanh toán online</option>
+                  <option value="e_wallet">MoMo E-Wallet (Thanh toán online)</option>
                 <?php endif; ?>
-                <option value="cash" <?= $momoEnabled ? '' : 'selected' ?>>COD - thanh toán khi nhận hàng</option>
+                <option value="cash" <?= $momoEnabled ? '' : 'selected' ?>>COD - Thanh toán khi nhận hàng</option>
               </select>
             </label>
             <?php if (!$momoEnabled): ?>

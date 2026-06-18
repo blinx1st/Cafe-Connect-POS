@@ -447,6 +447,43 @@ if (-not $restoredRow -or $restoredRow.status -ne "active") {
 
 Expect-CafeApiFailure "inventory" (Add-Session @{} $marketing) "kh"
 
+$materialResult = Invoke-CafeApi "material-save" (Add-Session @{
+  material_name = "Smoke Material $suffix"
+  unit = "kg"
+  min_stock_level = 2
+  unit_cost = 15000
+  supplier_name = "Smoke Supplier"
+  status = "active"
+} $manager)
+$materialId = $materialResult.id
+if (-not ($materialResult.material_catalog | Where-Object { $_.id -eq $materialId })) {
+  throw "Created material was not returned in inventory catalog."
+}
+
+Invoke-CafeApi "inventory-stock-save" (Add-Session @{
+  branch_id = 1
+  material_id = $materialId
+  stock_quantity = 12
+  min_stock_level = 3
+  unit_cost = 16000
+} $manager) | Out-Null
+
+Invoke-CafeApi "stock-movement" (Add-Session @{
+  branch_id = 1
+  material_id = $materialId
+  movement_type = "import"
+  quantity = 4
+  unit_cost = 16000
+  total_amount = 64000
+  supplier_name = "Smoke Supplier"
+  note = "Smoke inventory movement"
+} $manager) | Out-Null
+
+Expect-CafeApiFailure "material-save" (Add-Session @{
+  material_name = "Blocked Material $suffix"
+  unit = "kg"
+} $cashier) "kh"
+
 Expect-CafeApiFailure "checkout" (Add-Session @{
   branch_id = 1
   customer_id = 2
@@ -611,6 +648,26 @@ Invoke-CafeApi "product-restore" (Add-Session @{
 Invoke-CafeApi "product-list" (Add-Session @{
   branch_id = 1
 } $manager) | Out-Null
+
+$recipeItemsJson = ConvertTo-Json @(
+  @{ material_id = $materialId; quantity_per_unit = 0.2500 }
+) -Compress
+$recipeResult = Invoke-CafeApi "recipe-save" (Add-Session @{
+  product_id = $productId
+  recipe_name = "Smoke Recipe $suffix"
+  yield_quantity = 1
+  status = "active"
+  items_json = $recipeItemsJson
+} $manager)
+$recipeId = $recipeResult.id
+if (-not ($recipeResult.recipes | Where-Object { $_.id -eq $recipeId })) {
+  throw "Created recipe was not returned in inventory recipes."
+}
+
+Invoke-CafeApi "recipe-delete" (Add-Session @{ id = $recipeId } $manager) | Out-Null
+Invoke-CafeApi "recipe-restore" (Add-Session @{ id = $recipeId } $manager) | Out-Null
+Invoke-CafeApi "material-delete" (Add-Session @{ id = $materialId } $manager) | Out-Null
+Invoke-CafeApi "material-restore" (Add-Session @{ id = $materialId } $manager) | Out-Null
 
 Invoke-CafeApi "refund-invoice" (Add-Session @{
   invoice_id = $posCheckout.invoice_id

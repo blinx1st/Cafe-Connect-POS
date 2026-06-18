@@ -2173,7 +2173,7 @@ function renderModule(moduleId) {
     dashboard: renderDashboardModule,
     customers: renderCustomersModule,
     campaigns: renderCampaignsModule,
-    inventory: renderInventoryModule,
+    inventory: renderInventoryCrudModule,
     reports: renderReportsModule,
     products: renderProductsModule,
     staff: renderStaffCrudModule,
@@ -2624,6 +2624,206 @@ function renderInventoryModule() {
     <div class="dashboard-columns">
       <section class="panel"><h2>Recipe / BOM</h2>${tableHtml(inventory.recipes || [], ["Sản phẩm", "Recipe", "Nguyên vật liệu", "Trạng thái"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${escapeHtml(row.recipe_name)}</td><td>${escapeHtml(row.materials || "Chưa cấu hình")}</td><td><span class="status ${row.status === "active" ? "good" : "bad"}">${escapeHtml(row.status)}</span></td></tr>`, "Chưa có recipe.")}</section>
       <section class="panel"><h2>Lịch sử kho</h2>${tableHtml(inventory.movements || [], ["Mã", "Chi nhánh", "Loại", "NVL", "SL", "Giá trị", "Nhân viên"], (row) => `<tr><td>${escapeHtml(row.movement_code)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.movement_type)}</td><td>${escapeHtml(row.material_name)}</td><td>${Number(row.quantity).toFixed(2)}</td><td>${formatMoney(row.total_amount)}</td><td>${escapeHtml(row.staff_name)}</td></tr>`, "Chưa có lịch sử kho.")}</section>
+    </div>
+  `;
+}
+
+function renderInventoryCrudModule() {
+  const inventory = cafeApp.inventory || {};
+  const catalog = inventory.material_catalog || [];
+  const activeCatalog = catalog.filter((item) => (item.status || "active") === "active");
+  const stockRows = inventory.materials || [];
+  const recipes = inventory.recipes || [];
+  const selectAttr = (value, expected) => String(value ?? "") === String(expected ?? "") ? "selected" : "";
+  const materialOptions = (selectedId = "") => activeCatalog.map((item) =>
+    `<option value="${escapeHtml(item.id)}" ${selectAttr(item.id, selectedId)}>${escapeHtml(item.material_name)} (${escapeHtml(item.unit)})</option>`
+  ).join("");
+  const productOptions = (selectedId = "") => products.map((product) =>
+    `<option value="${escapeHtml(product.id)}" ${selectAttr(product.id, selectedId)}>${escapeHtml(product.product_name)}</option>`
+  ).join("");
+  const recipeItemRows = Array.from({ length: 5 }, (_, index) => `
+    <div class="recipe-item-row">
+      <select name="recipe_material_id">${materialOptions()}</select>
+      <input type="number" name="recipe_quantity_per_unit" min="0" step="0.0001" placeholder="Lượng / sản phẩm">
+      <span>${index === 0 ? "Bắt buộc" : "Tùy chọn"}</span>
+    </div>
+  `).join("");
+
+  return `
+    <div class="inventory-admin-grid">
+      <form class="panel create-form" data-material-save>
+        <div class="panel-head">
+          <div>
+            <h2>Danh mục nguyên vật liệu</h2>
+            <p>Tạo, sửa hoặc ngừng sử dụng nguyên liệu.</p>
+          </div>
+        </div>
+        <input type="hidden" name="id">
+        <label>Tên nguyên vật liệu <input name="material_name" required placeholder="Arabica beans"></label>
+        <label>Đơn vị tính <input name="unit" required placeholder="kg, lít, cái..."></label>
+        <label>Tồn tối thiểu mặc định <input type="number" name="min_stock_level" min="0" step="0.01" value="0"></label>
+        <label>Giá vốn mặc định <input type="number" name="unit_cost" min="0" step="100" value="0"></label>
+        <label>Nhà cung cấp <input name="supplier_name" maxlength="150"></label>
+        <label>Trạng thái
+          <select name="status">
+            <option value="active">Đang dùng</option>
+            <option value="inactive">Ngừng dùng</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button class="primary-btn" type="submit">Lưu nguyên vật liệu</button>
+          <button class="secondary-btn" type="button" data-material-form-reset>Nhập mới</button>
+        </div>
+      </form>
+
+      <form class="panel create-form" data-inventory-stock-save>
+        <div class="panel-head">
+          <div>
+            <h2>Tồn kho chi nhánh</h2>
+            <p>Cập nhật tồn kiểm kê, định mức và giá vốn theo chi nhánh.</p>
+          </div>
+        </div>
+        <label>Chi nhánh <select name="branch_id">${branchOptions(state.pos.user?.branch_id || 1)}</select></label>
+        <label>Nguyên vật liệu <select name="material_id">${materialOptions()}</select></label>
+        <label>Tồn hiện tại <input type="number" name="stock_quantity" min="0" step="0.01" value="0"></label>
+        <label>Tồn tối thiểu <input type="number" name="min_stock_level" min="0" step="0.01" value="0"></label>
+        <label>Giá vốn <input type="number" name="unit_cost" min="0" step="100" value="0"></label>
+        <div class="form-actions">
+          <button class="primary-btn" type="submit">Lưu tồn kho</button>
+          <button class="secondary-btn" type="button" data-stock-form-reset>Nhập mới</button>
+        </div>
+      </form>
+
+      <form class="panel create-form" data-stock-movement>
+        <div class="panel-head">
+          <div>
+            <h2>Nhập / xuất kho</h2>
+            <p>Ghi nhận giao dịch kho. Lịch sử không xóa để giữ audit.</p>
+          </div>
+        </div>
+        <label>Chi nhánh <select name="branch_id">${branchOptions(state.pos.user?.branch_id || 1)}</select></label>
+        <label>Nguyên vật liệu <select name="material_id">${materialOptions()}</select></label>
+        <label>Loại
+          <select name="movement_type">
+            <option value="import">Nhập kho</option>
+            <option value="sales_export">Xuất sử dụng</option>
+            <option value="waste_export">Hủy hao hụt</option>
+            <option value="adjustment">Điều chỉnh tăng</option>
+          </select>
+        </label>
+        <label>Số lượng <input type="number" name="quantity" value="1" min="0.01" step="0.01"></label>
+        <label>Đơn giá <input type="number" name="unit_cost" value="0" min="0" step="100"></label>
+        <label>Tổng giá trị <input type="number" name="total_amount" value="0" min="0" step="100"></label>
+        <label>Nhà cung cấp <input name="supplier_name" maxlength="150"></label>
+        <label>Mã lô <input name="batch_code" maxlength="80"></label>
+        <label>Hạn dùng <input type="date" name="expiry_date"></label>
+        <label>Ghi chú <textarea name="note" placeholder="Lý do nhập/xuất/hao hụt..."></textarea></label>
+        <button class="primary-btn" type="submit">Ghi nhận giao dịch</button>
+      </form>
+
+      <form class="panel create-form recipe-form" data-recipe-save>
+        <div class="panel-head">
+          <div>
+            <h2>Recipe / BOM</h2>
+            <p>Cấu hình nguyên liệu tiêu hao cho từng sản phẩm.</p>
+          </div>
+        </div>
+        <input type="hidden" name="id">
+        <label>Sản phẩm <select name="product_id">${productOptions()}</select></label>
+        <label>Tên recipe <input name="recipe_name" placeholder="Signature Brown Latte recipe"></label>
+        <label>Yield <input type="number" name="yield_quantity" min="0.0001" step="0.0001" value="1"></label>
+        <label>Trạng thái
+          <select name="status">
+            <option value="active">Đang dùng</option>
+            <option value="inactive">Ngừng dùng</option>
+          </select>
+        </label>
+        <div class="recipe-items-editor">
+          <strong>Nguyên vật liệu</strong>
+          ${recipeItemRows}
+        </div>
+        <div class="form-actions">
+          <button class="primary-btn" type="submit">Lưu recipe</button>
+          <button class="secondary-btn" type="button" data-recipe-form-reset>Nhập mới</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="dashboard-columns inventory-data-grid">
+      <section class="panel">
+        <div class="panel-head"><h2>Nguyên vật liệu</h2><p>Danh mục dùng cho nhập/xuất và recipe.</p></div>
+        ${tableHtml(catalog, ["Tên", "ĐVT", "Min", "Giá vốn", "NCC", "Trạng thái", "Thao tác"], (row) => `
+          <tr>
+            <td>${escapeHtml(row.material_name)}</td>
+            <td>${escapeHtml(row.unit)}</td>
+            <td>${Number(row.min_stock_level || 0).toFixed(2)}</td>
+            <td>${formatMoney(row.unit_cost)}</td>
+            <td>${escapeHtml(row.supplier_name || "")}</td>
+            <td><span class="status ${row.status === "active" ? "good" : "bad"}">${row.status === "active" ? "Đang dùng" : "Ngừng dùng"}</span></td>
+            <td class="table-actions">
+              <button type="button" data-edit-material="${escapeHtml(row.id)}">Sửa</button>
+              ${row.status === "active"
+                ? `<button type="button" data-material-delete="${escapeHtml(row.id)}">Ngừng</button>`
+                : `<button type="button" data-material-restore="${escapeHtml(row.id)}">Khôi phục</button>`}
+            </td>
+          </tr>
+        `)}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Tồn kho theo chi nhánh</h2><p>Chỉ hiển thị nguyên vật liệu, không còn tồn đồ uống.</p></div>
+        ${tableHtml(stockRows, ["Chi nhánh", "Nguyên vật liệu", "ĐVT", "Tồn", "Tối thiểu", "Giá vốn", "Trạng thái", "Thao tác"], (row) => {
+          const status = row.stock_status === "out" ? "Hết" : (row.stock_status === "low" ? "Thấp" : "Đủ");
+          const statusClass = row.stock_status === "ok" ? "good" : "bad";
+          return `
+            <tr>
+              <td>${escapeHtml(row.branch_name)}</td>
+              <td>${escapeHtml(row.material_name)}</td>
+              <td>${escapeHtml(row.unit)}</td>
+              <td>${Number(row.stock_quantity || 0).toFixed(2)}</td>
+              <td>${Number(row.min_stock_level || 0).toFixed(2)}</td>
+              <td>${formatMoney(row.unit_cost)}</td>
+              <td><span class="status ${statusClass}">${status}</span></td>
+              <td class="table-actions"><button type="button" data-edit-stock="${escapeHtml(row.branch_id)}:${escapeHtml(row.material_id)}">Sửa tồn</button></td>
+            </tr>
+          `;
+        })}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Recipe / BOM</h2><p>Recipe active sẽ tự trừ nguyên vật liệu khi hóa đơn paid.</p></div>
+        ${tableHtml(recipes, ["Sản phẩm", "Recipe", "Nguyên vật liệu", "Yield", "Trạng thái", "Thao tác"], (row) => `
+          <tr>
+            <td>${escapeHtml(row.product_name)}</td>
+            <td>${escapeHtml(row.recipe_name)}</td>
+            <td>${escapeHtml(row.materials || "Chưa cấu hình")}</td>
+            <td>${Number(row.yield_quantity || 1).toFixed(2)}</td>
+            <td><span class="status ${row.status === "active" ? "good" : "bad"}">${row.status === "active" ? "Đang dùng" : "Ngừng dùng"}</span></td>
+            <td class="table-actions">
+              <button type="button" data-edit-recipe="${escapeHtml(row.id)}">Sửa</button>
+              ${row.status === "active"
+                ? `<button type="button" data-recipe-delete="${escapeHtml(row.id)}">Ngừng</button>`
+                : `<button type="button" data-recipe-restore="${escapeHtml(row.id)}">Khôi phục</button>`}
+            </td>
+          </tr>
+        `, "Chưa có recipe.")}
+      </section>
+
+      <section class="panel">
+        <div class="panel-head"><h2>Lịch sử kho</h2><p>Các giao dịch nhập, xuất, hao hụt và tự trừ theo hóa đơn.</p></div>
+        ${tableHtml(inventory.movements || [], ["Mã", "Chi nhánh", "Loại", "NVL", "SL", "Giá trị", "Nhân viên", "Ghi chú"], (row) => `
+          <tr>
+            <td>${escapeHtml(row.movement_code)}</td>
+            <td>${escapeHtml(row.branch_name)}</td>
+            <td>${escapeHtml(row.movement_type)}</td>
+            <td>${escapeHtml(row.material_name)}</td>
+            <td>${Number(row.quantity || 0).toFixed(2)}</td>
+            <td>${formatMoney(row.total_amount)}</td>
+            <td>${escapeHtml(row.staff_name)}</td>
+            <td>${escapeHtml(row.note || "")}</td>
+          </tr>
+        `, "Chưa có lịch sử kho.")}
+      </section>
     </div>
   `;
 }
@@ -3479,6 +3679,16 @@ function wireEvents() {
     const campaignFormReset = event.target.closest("[data-campaign-form-reset]");
     const editCategory = event.target.closest("[data-edit-category]");
     const productFormReset = event.target.closest("[data-product-form-reset]");
+    const editMaterial = event.target.closest("[data-edit-material]");
+    const materialDelete = event.target.closest("[data-material-delete]");
+    const materialRestore = event.target.closest("[data-material-restore]");
+    const materialFormReset = event.target.closest("[data-material-form-reset]");
+    const editStock = event.target.closest("[data-edit-stock]");
+    const stockFormReset = event.target.closest("[data-stock-form-reset]");
+    const editRecipe = event.target.closest("[data-edit-recipe]");
+    const recipeDelete = event.target.closest("[data-recipe-delete]");
+    const recipeRestore = event.target.closest("[data-recipe-restore]");
+    const recipeFormReset = event.target.closest("[data-recipe-form-reset]");
     const editStaff = event.target.closest("[data-edit-staff]");
     const staffDelete = event.target.closest("[data-staff-delete]");
     const staffRestore = event.target.closest("[data-staff-restore]");
@@ -4000,6 +4210,124 @@ function wireEvents() {
       }
       return;
     }
+    if (materialFormReset) {
+      const form = document.querySelector("[data-material-save]");
+      if (form) {
+        form.reset();
+        if (form.elements.id) form.elements.id.value = "";
+        if (form.elements.status) form.elements.status.value = "active";
+      }
+      return;
+    }
+    if (editMaterial) {
+      const material = (cafeApp.inventory?.material_catalog || []).find((item) => String(item.id) === String(editMaterial.dataset.editMaterial));
+      const form = document.querySelector("[data-material-save]");
+      if (material && form) {
+        form.elements.id.value = material.id || "";
+        form.elements.material_name.value = material.material_name || "";
+        form.elements.unit.value = material.unit || "";
+        form.elements.min_stock_level.value = material.min_stock_level || 0;
+        form.elements.unit_cost.value = material.unit_cost || 0;
+        form.elements.supplier_name.value = material.supplier_name || "";
+        form.elements.status.value = material.status || "active";
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    if (materialDelete) {
+      if (!window.confirm("Ngừng sử dụng nguyên vật liệu này? Lịch sử kho vẫn được giữ lại.")) return;
+      try {
+        cafeApp.inventory = await api("material-delete", { id: materialDelete.dataset.materialDelete });
+        renderPosApp();
+        showToast("Đã ngừng sử dụng nguyên vật liệu.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (materialRestore) {
+      try {
+        cafeApp.inventory = await api("material-restore", { id: materialRestore.dataset.materialRestore });
+        renderPosApp();
+        showToast("Đã khôi phục nguyên vật liệu.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (stockFormReset) {
+      const form = document.querySelector("[data-inventory-stock-save]");
+      if (form) form.reset();
+      return;
+    }
+    if (editStock) {
+      const [branchId, materialId] = String(editStock.dataset.editStock || "").split(":");
+      const row = (cafeApp.inventory?.materials || []).find((item) => String(item.branch_id) === branchId && String(item.material_id) === materialId);
+      const form = document.querySelector("[data-inventory-stock-save]");
+      if (row && form) {
+        form.elements.branch_id.value = row.branch_id;
+        form.elements.material_id.value = row.material_id;
+        form.elements.stock_quantity.value = row.stock_quantity || 0;
+        form.elements.min_stock_level.value = row.min_stock_level || 0;
+        form.elements.unit_cost.value = row.unit_cost || 0;
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    if (recipeFormReset) {
+      const form = document.querySelector("[data-recipe-save]");
+      if (form) {
+        form.reset();
+        if (form.elements.id) form.elements.id.value = "";
+        form.querySelectorAll(".recipe-item-row").forEach((row) => {
+          const qty = row.querySelector('[name="recipe_quantity_per_unit"]');
+          if (qty) qty.value = "";
+        });
+      }
+      return;
+    }
+    if (editRecipe) {
+      const recipe = (cafeApp.inventory?.recipes || []).find((item) => String(item.id) === String(editRecipe.dataset.editRecipe));
+      const form = document.querySelector("[data-recipe-save]");
+      if (recipe && form) {
+        form.elements.id.value = recipe.id || "";
+        form.elements.product_id.value = recipe.product_id || "";
+        form.elements.recipe_name.value = recipe.recipe_name || "";
+        form.elements.yield_quantity.value = recipe.yield_quantity || 1;
+        form.elements.status.value = recipe.status || "active";
+        const rows = Array.from(form.querySelectorAll(".recipe-item-row"));
+        rows.forEach((row, index) => {
+          const item = (recipe.items || [])[index] || {};
+          const material = row.querySelector('[name="recipe_material_id"]');
+          const qty = row.querySelector('[name="recipe_quantity_per_unit"]');
+          if (material && item.material_id) material.value = item.material_id;
+          if (qty) qty.value = item.quantity_per_unit || "";
+        });
+        form.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    if (recipeDelete) {
+      if (!window.confirm("Ngừng sử dụng recipe này? Sản phẩm sẽ không tự trừ nguyên liệu theo recipe này nữa.")) return;
+      try {
+        cafeApp.inventory = await api("recipe-delete", { id: recipeDelete.dataset.recipeDelete });
+        renderPosApp();
+        showToast("Đã ngừng sử dụng recipe.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (recipeRestore) {
+      try {
+        cafeApp.inventory = await api("recipe-restore", { id: recipeRestore.dataset.recipeRestore });
+        renderPosApp();
+        showToast("Đã khôi phục recipe.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
     if (editStaff) {
       const staff = (cafeApp.staff || []).find((item) => String(item.id) === String(editStaff.dataset.editStaff));
       const form = document.querySelector("[data-staff-save]");
@@ -4073,7 +4401,10 @@ function wireEvents() {
     const reportFilterForm = event.target.closest("[data-report-filter]");
     const serviceOrderForm = event.target.closest("[data-service-order-create]");
     const campaignForm = event.target.closest("[data-campaign-create]");
+    const materialForm = event.target.closest("[data-material-save]");
+    const inventoryStockForm = event.target.closest("[data-inventory-stock-save]");
     const stockForm = event.target.closest("[data-stock-movement]");
+    const recipeForm = event.target.closest("[data-recipe-save]");
     const cashForm = event.target.closest("[data-cash-transaction]");
     const productForm = event.target.closest("[data-product-save]");
     const categoryForm = event.target.closest("[data-category-save]");
@@ -4321,6 +4652,33 @@ function wireEvents() {
       }
       return;
     }
+    if (materialForm) {
+      event.preventDefault();
+      try {
+        const payload = Object.fromEntries(new FormData(materialForm));
+        if (!payload.id) delete payload.id;
+        cafeApp.inventory = await api("material-save", payload);
+        materialForm.reset();
+        if (materialForm.elements.id) materialForm.elements.id.value = "";
+        renderPosApp();
+        showToast("Đã lưu nguyên vật liệu.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (inventoryStockForm) {
+      event.preventDefault();
+      try {
+        const payload = Object.fromEntries(new FormData(inventoryStockForm));
+        cafeApp.inventory = await api("inventory-stock-save", payload);
+        renderPosApp();
+        showToast("Đã cập nhật tồn kho chi nhánh.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
     if (stockForm) {
       event.preventDefault();
       try {
@@ -4330,6 +4688,30 @@ function wireEvents() {
         cafeApp.inventory = await api("stock-movement", payload);
         renderPosApp();
         showToast("Đã ghi nhận nhập/xuất kho.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (recipeForm) {
+      event.preventDefault();
+      try {
+        const formData = new FormData(recipeForm);
+        const payload = Object.fromEntries(formData);
+        if (!payload.id) delete payload.id;
+        const materialIds = formData.getAll("recipe_material_id");
+        const quantities = formData.getAll("recipe_quantity_per_unit");
+        payload.items_json = JSON.stringify(materialIds.map((materialId, index) => ({
+          material_id: materialId,
+          quantity_per_unit: quantities[index],
+        })).filter((item) => Number(item.material_id) > 0 && Number(item.quantity_per_unit) > 0));
+        delete payload.recipe_material_id;
+        delete payload.recipe_quantity_per_unit;
+        cafeApp.inventory = await api("recipe-save", payload);
+        recipeForm.reset();
+        if (recipeForm.elements.id) recipeForm.elements.id.value = "";
+        renderPosApp();
+        showToast("Đã lưu recipe/BOM.");
       } catch (error) {
         showToast(error.message);
       }
