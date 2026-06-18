@@ -19,6 +19,11 @@ $relatedProducts = $product['related_products'] ?? [];
 $stockTotal = $product ? (float) ($product['stock_quantity'] ?? 0) : 0;
 $stockLabel = $stockTotal > 0 ? number_format($stockTotal, 0, ',', '.') . ' phần còn lại' : 'Tạm hết';
 $stockClass = $stockTotal > 0 ? 'good' : 'bad';
+$sizeMeta = [
+    'S' => ['label' => 'Size S', 'note' => 'Nhỏ gọn'],
+    'M' => ['label' => 'Size M', 'note' => 'Phổ biến'],
+    'L' => ['label' => 'Size L', 'note' => 'Đậm vị hơn'],
+];
 $sizePriceLabel = static function (array $row): string {
     $prices = [];
     foreach (['S', 'M', 'L'] as $size) {
@@ -63,8 +68,8 @@ require VIEW_PATH . '/website/partials/header.php';
             </figure>
             <?php if (count($images) > 1): ?>
               <div class="product-thumbs">
-                <?php foreach ($images as $image): ?>
-                  <button type="button" class="product-thumb" data-product-thumb="<?= e($assetFor((string) $image['image_path'])) ?>">
+                <?php foreach ($images as $index => $image): ?>
+                  <button type="button" class="product-thumb <?= $index === 0 ? 'is-active' : '' ?>" data-product-thumb="<?= e($assetFor((string) $image['image_path'])) ?>">
                     <img src="<?= e($assetFor((string) $image['image_path'])) ?>" alt="<?= e($image['alt_text'] ?: $product['product_name']) ?>">
                   </button>
                 <?php endforeach; ?>
@@ -72,43 +77,59 @@ require VIEW_PATH . '/website/partials/header.php';
             <?php endif; ?>
           </div>
 
-          <article class="product-info-card">
-            <p class="eyebrow"><?= e($product['category_name'] ?? $product['category']) ?></p>
+          <article class="product-info-card" data-product-detail-options-root>
+            <div class="product-info-head">
+              <p class="eyebrow"><?= e($product['category_name'] ?? $product['category']) ?></p>
+              <span class="status <?= e($stockClass) ?>"><?= e($stockLabel) ?></span>
+            </div>
             <h1><?= e($product['product_name']) ?></h1>
             <p class="product-summary"><?= e($product['take_note'] ?: 'Sản phẩm đang bán tại Cafe Connect, phù hợp dùng tại quán hoặc mang đi.') ?></p>
 
-            <div class="product-price-row">
+            <div class="product-price-panel">
+              <span>Khoảng giá theo size</span>
               <strong><?= e($sizePriceLabel($product)) ?></strong>
-              <span class="status <?= e($stockClass) ?>"><?= e($stockLabel) ?></span>
+              <small>Giá chính xác sẽ lấy theo size bạn chọn khi thêm vào giỏ hàng.</small>
             </div>
 
-            <div class="product-quick-specs">
-              <div><span>Size S</span><strong><?= e(money(\App\Models\Product::priceForSize($product, 'S'))) ?></strong></div>
-              <div><span>Size M</span><strong><?= e(money(\App\Models\Product::priceForSize($product, 'M'))) ?></strong></div>
-              <div><span>Size L</span><strong><?= e(money(\App\Models\Product::priceForSize($product, 'L'))) ?></strong></div>
-              <div><span>Tích điểm</span><strong><?= e((string) max(1, (int) floor(\App\Models\Product::priceForSize($product, 'M') / 10000))) ?> điểm</strong></div>
-              <div><span>Kênh bán</span><strong>Website / POS</strong></div>
-            </div>
+            <fieldset class="product-size-picker">
+              <legend>Chọn size</legend>
+              <div class="size-choice-grid">
+                <?php foreach ($sizeMeta as $size => $meta): ?>
+                  <?php $price = \App\Models\Product::priceForSize($product, $size); ?>
+                  <label class="size-choice">
+                    <input type="radio" name="product_size" value="<?= e($size) ?>" data-product-size-option <?= $size === 'M' ? 'checked' : '' ?>>
+                    <span><?= e($meta['label']) ?></span>
+                    <strong><?= e(money($price)) ?></strong>
+                    <small><?= e($meta['note']) ?></small>
+                  </label>
+                <?php endforeach; ?>
+              </div>
+            </fieldset>
 
             <div class="product-option-preview">
-              <p>Gợi ý tuỳ chọn</p>
+              <p>Gợi ý tuỳ chọn khi đặt</p>
               <div>
-                <span>Size S</span>
-                <span>Size M</span>
-                <span>Size L</span>
                 <span>Ít đá</span>
                 <span>Ít ngọt</span>
+                <span>Không đường</span>
+                <span>Mang đi</span>
               </div>
             </div>
 
-            <div class="section-actions product-actions">
-              <button type="button" class="primary-btn" data-site-add="<?= e((string) $product['id']) ?>" <?= !empty($product['is_out_of_stock']) ? 'disabled' : '' ?>>
+            <div class="product-detail-actions">
+              <button type="button" class="primary-btn cart-add-btn" data-site-add="<?= e((string) $product['id']) ?>" <?= !empty($product['is_out_of_stock']) ? 'disabled' : '' ?>>
                 Thêm vào giỏ hàng
               </button>
               <button type="button" class="primary-btn order-now-btn" data-site-order-now="<?= e((string) $product['id']) ?>" <?= !empty($product['is_out_of_stock']) ? 'disabled' : '' ?>>
                 Order now
               </button>
               <a class="secondary-link" href="<?= e(base_url('menu')) ?>">Xem menu</a>
+            </div>
+
+            <div class="product-trust-row">
+              <span>Tích điểm tự động</span>
+              <span>Dùng voucher hợp lệ</span>
+              <span>Nhận tại quầy hoặc giao hàng</span>
             </div>
           </article>
         </div>
@@ -161,20 +182,28 @@ require VIEW_PATH . '/website/partials/header.php';
         <div class="product-grid related-product-grid">
           <?php foreach ($relatedProducts as $related): ?>
             <article class="product-card related-card">
-              <img src="<?= e($assetFor((string) $related['image'])) ?>" alt="<?= e($related['product_name']) ?>">
-              <div>
-                <span class="tag"><?= e($related['category_name'] ?? $related['category']) ?></span>
+              <div class="product-media">
+                <img src="<?= e($assetFor((string) $related['image'])) ?>" alt="<?= e($related['product_name']) ?>">
+                <span class="related-badge"><?= e($related['category_name'] ?? $related['category']) ?></span>
+              </div>
+              <div class="product-body">
                 <h3><?= e($related['product_name']) ?></h3>
                 <p><?= e($related['take_note'] ?: 'Sản phẩm đang bán tại Cafe Connect.') ?></p>
-              </div>
-              <footer>
-                <strong><?= e($sizePriceLabel($related)) ?></strong>
-                <div class="card-actions">
-                  <a class="secondary-link" href="<?= e(base_url('product?id=' . (int) $related['id'])) ?>">Chi tiết</a>
-                  <button type="button" data-site-add="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Thêm vào giỏ hàng</button>
-                  <button type="button" class="order-now-btn" data-site-order-now="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Order now</button>
+                <span class="status <?= !empty($related['is_out_of_stock']) ? 'bad' : 'good' ?>">
+                  <?= !empty($related['is_out_of_stock']) ? 'Tạm hết' : 'Còn hàng' ?>
+                </span>
+                <div class="product-purchase">
+                  <div class="product-price-line">
+                    <span>Giá theo size</span>
+                    <strong><?= e($sizePriceLabel($related)) ?></strong>
+                  </div>
+                  <div class="product-cta-row">
+                    <a class="detail-link" href="<?= e(base_url('product?id=' . (int) $related['id'])) ?>">Chi tiết</a>
+                    <button type="button" class="cart-add-btn" data-site-add="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Thêm vào giỏ</button>
+                    <button type="button" class="order-now-btn" data-site-order-now="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Order now</button>
+                  </div>
                 </div>
-              </footer>
+              </div>
             </article>
           <?php endforeach; ?>
         </div>

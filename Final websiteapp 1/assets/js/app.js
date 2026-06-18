@@ -992,8 +992,16 @@ function addToCart(scope, productId, options = {}) {
   return true;
 }
 
-async function orderNowSiteProduct(productId) {
-  if (addToCart("site", productId)) {
+function productDetailCartOptions(trigger) {
+  const root = trigger?.closest("[data-product-detail-options-root]");
+  const selectedSize = root?.querySelector("[data-product-size-option]:checked")?.value;
+  return {
+    size: normalizeSize(selectedSize || trigger?.dataset.size || "M"),
+  };
+}
+
+async function orderNowSiteProduct(productId, options = {}) {
+  if (addToCart("site", productId, options)) {
     await navigateWebsite(url("checkout"));
   }
 }
@@ -3953,11 +3961,11 @@ function wireEvents() {
       return;
     }
     if (siteAdd) {
-      addToCart("site", siteAdd.dataset.siteAdd);
+      addToCart("site", siteAdd.dataset.siteAdd, productDetailCartOptions(siteAdd));
       return;
     }
     if (siteOrderNow) {
-      await orderNowSiteProduct(siteOrderNow.dataset.siteOrderNow);
+      await orderNowSiteProduct(siteOrderNow.dataset.siteOrderNow, productDetailCartOptions(siteOrderNow));
       return;
     }
     if (posAdd) {

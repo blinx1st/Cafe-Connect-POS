@@ -12,6 +12,11 @@ if (is_file(APP_ROOT . '/config/payment.local.php')) {
     $paymentConfig = array_replace_recursive($paymentConfig, require APP_ROOT . '/config/payment.local.php');
 }
 
+ini_set('default_charset', 'UTF-8');
+if (function_exists('mb_internal_encoding')) {
+    mb_internal_encoding('UTF-8');
+}
+
 date_default_timezone_set((string) ($appConfig['timezone'] ?? 'Asia/Bangkok'));
 
 define('APP_NAME', (string) ($appConfig['name'] ?? 'Cafe Connect'));
