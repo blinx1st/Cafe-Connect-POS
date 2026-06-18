@@ -19,6 +19,15 @@ $relatedProducts = $product['related_products'] ?? [];
 $stockTotal = $product ? (float) ($product['stock_quantity'] ?? 0) : 0;
 $stockLabel = $stockTotal > 0 ? number_format($stockTotal, 0, ',', '.') . ' phần còn lại' : 'Tạm hết';
 $stockClass = $stockTotal > 0 ? 'good' : 'bad';
+$sizePriceLabel = static function (array $row): string {
+    $prices = [];
+    foreach (['S', 'M', 'L'] as $size) {
+        $prices[] = \App\Models\Product::priceForSize($row, $size);
+    }
+    $min = min($prices);
+    $max = max($prices);
+    return abs($max - $min) < 0.01 ? money($min) : money($min) . ' - ' . money($max);
+};
 require VIEW_PATH . '/website/partials/header.php';
 ?>
 
@@ -69,13 +78,15 @@ require VIEW_PATH . '/website/partials/header.php';
             <p class="product-summary"><?= e($product['take_note'] ?: 'Sản phẩm đang bán tại Cafe Connect, phù hợp dùng tại quán hoặc mang đi.') ?></p>
 
             <div class="product-price-row">
-              <strong><?= e(money((float) $product['price'])) ?></strong>
+              <strong><?= e($sizePriceLabel($product)) ?></strong>
               <span class="status <?= e($stockClass) ?>"><?= e($stockLabel) ?></span>
             </div>
 
             <div class="product-quick-specs">
-              <div><span>Size mặc định</span><strong>M</strong></div>
-              <div><span>Tích điểm</span><strong><?= e((string) max(1, (int) floor(((float) $product['price']) / 10000))) ?> điểm</strong></div>
+              <div><span>Size S</span><strong><?= e(money(\App\Models\Product::priceForSize($product, 'S'))) ?></strong></div>
+              <div><span>Size M</span><strong><?= e(money(\App\Models\Product::priceForSize($product, 'M'))) ?></strong></div>
+              <div><span>Size L</span><strong><?= e(money(\App\Models\Product::priceForSize($product, 'L'))) ?></strong></div>
+              <div><span>Tích điểm</span><strong><?= e((string) max(1, (int) floor(\App\Models\Product::priceForSize($product, 'M') / 10000))) ?> điểm</strong></div>
               <div><span>Kênh bán</span><strong>Website / POS</strong></div>
             </div>
 
@@ -157,7 +168,7 @@ require VIEW_PATH . '/website/partials/header.php';
                 <p><?= e($related['take_note'] ?: 'Sản phẩm đang bán tại Cafe Connect.') ?></p>
               </div>
               <footer>
-                <strong><?= e(money((float) $related['price'])) ?></strong>
+                <strong><?= e($sizePriceLabel($related)) ?></strong>
                 <div class="card-actions">
                   <a class="secondary-link" href="<?= e(base_url('product?id=' . (int) $related['id'])) ?>">Chi tiết</a>
                   <button type="button" data-site-add="<?= e((string) $related['id']) ?>" <?= !empty($related['is_out_of_stock']) ? 'disabled' : '' ?>>Thêm vào giỏ hàng</button>

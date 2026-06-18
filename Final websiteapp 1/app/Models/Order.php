@@ -179,7 +179,8 @@ final class Order extends Model
                 if (!isset($products[$productId])) {
                     throw new InvalidArgumentException('Invalid product in service order.');
                 }
-                $unitPrice = (float) $products[$productId]['price'];
+                $size = Product::normalizeSize((string) ($item['size'] ?? 'M'));
+                $unitPrice = Product::priceForSize($products[$productId], $size);
                 $lineTotal = $unitPrice * $quantity;
                 $totalQuantity += $quantity;
                 $subtotal += $lineTotal;
@@ -188,7 +189,7 @@ final class Order extends Model
                     'product_id' => $productId,
                     'quantity' => $quantity,
                     'unit_price' => $unitPrice,
-                    'size' => in_array(strtoupper((string) ($item['size'] ?? 'M')), ['S', 'M', 'L'], true) ? strtoupper((string) ($item['size'] ?? 'M')) : 'M',
+                    'size' => $size,
                     'topping' => substr(trim((string) ($item['topping'] ?? '')), 0, 100) ?: null,
                     'note' => substr(trim((string) ($item['note'] ?? '')), 0, 255) ?: null,
                     'line_total' => $lineTotal,

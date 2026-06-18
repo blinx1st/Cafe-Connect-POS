@@ -133,7 +133,7 @@ function posCartItemForInvoice(item) {
     .join(" | ")
     .slice(0, 100);
   return {
-    ...item,
+    ...cartItemPayload(item),
     size: normalizeSize(item.size),
     topping,
   };
@@ -209,6 +209,64 @@ function savePosAuth(auth) {
 
 const formatMoney = (value) =>
   new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND", maximumFractionDigits: 0 }).format(Number(value || 0));
+
+function productSizePrices(product) {
+  const basePrice = Number(product?.price || 0);
+  const isFood = String(product?.category || "").toLowerCase() === "food";
+  const prices = isFood
+    ? { S: basePrice, M: basePrice, L: basePrice }
+    : { S: Math.max(0, basePrice - 5000), M: basePrice, L: basePrice + 7000 };
+  const raw = product?.size_prices || {};
+  if (Array.isArray(raw)) {
+    raw.forEach((entry) => {
+      if (entry && entry.size !== undefined) {
+        prices[normalizeSize(entry.size)] = Number(entry.price || 0);
+      }
+    });
+  } else if (raw && typeof raw === "object") {
+    ["S", "M", "L"].forEach((size) => {
+      if (raw[size] !== undefined && raw[size] !== null && raw[size] !== "") {
+        prices[size] = Number(raw[size] || 0);
+      }
+    });
+  }
+  return prices;
+}
+
+function productPriceForSize(product, size = "M", fallbackPrice = 0) {
+  const normalized = normalizeSize(size);
+  if (!product) return Number(fallbackPrice || 0);
+  return Number(productSizePrices(product)[normalized] ?? product.price ?? fallbackPrice ?? 0);
+}
+
+function productPriceRangeLabel(product) {
+  const prices = productSizePrices(product);
+  const values = ["S", "M", "L"].map((size) => Number(prices[size] || 0));
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (min === max) return formatMoney(min);
+  return `${formatMoney(min)} - ${formatMoney(max)}`;
+}
+
+function sizeOptionLabel(product, size) {
+  return `${size} - ${formatMoney(productPriceForSize(product, size))}`;
+}
+
+function cartItemUnitPrice(item) {
+  const product = productMap.get(Number(item.product_id));
+  return productPriceForSize(product, item.size, item.unit_price);
+}
+
+function cartItemPayload(item) {
+  const unitPrice = cartItemUnitPrice(item);
+  const quantity = Number(item.quantity || 0);
+  return {
+    ...item,
+    size: normalizeSize(item.size),
+    unit_price: unitPrice,
+    line_total: unitPrice * quantity,
+  };
+}
 
 function sqlNow() {
   const value = new Date();
@@ -1030,6 +1088,10 @@ function updateSiteCartOption(lineId, field, value) {
   if (field === "size") item.size = normalizeSize(value);
   if (field === "topping") item.topping = normalizeCartNote(value).slice(0, 160);
   saveSiteCart();
+  if (field === "size") {
+    renderCart("site");
+    return;
+  }
   renderTotals("site");
 }
 
@@ -1039,6 +1101,10 @@ function updatePosCartOption(lineId, field, value) {
   if (field === "size") item.size = normalizeSize(value);
   if (field === "topping") item.topping = normalizeCartNote(value).slice(0, 100);
   if (field === "note") item.note = normalizeCartNote(value).slice(0, 180);
+  if (field === "size") {
+    renderCart("pos");
+    return;
+  }
   renderTotals("pos");
 }
 
@@ -1063,8 +1129,7 @@ function voucherUsableOnScope(voucher, scope) {
 
 function totalsFor(scope) {
   const subtotal = cartFor(scope).reduce((sum, item) => {
-    const product = productMap.get(Number(item.product_id));
-    return sum + Number(product?.price || item.unit_price || 0) * Number(item.quantity || 0);
+    return sum + cartItemUnitPrice(item) * Number(item.quantity || 0);
   }, 0);
   const rate = Number(state[scope].customer?.discount_rate || 0);
   const membershipDiscount = Math.round((subtotal * rate) / 100);
@@ -1200,7 +1265,7 @@ function renderSiteCart() {
 
   target.innerHTML = cart.map((item) => {
     const product = productMap.get(Number(item.product_id));
-    const price = Number(product?.price || item.unit_price || 0);
+    const price = cartItemUnitPrice(item);
     const lineTotal = price * Number(item.quantity || 0);
     const available = availableProductQuantity(product, branchId);
     const lineId = escapeHtml(item.line_id);
@@ -1218,7 +1283,7 @@ function renderSiteCart() {
           <div class="site-cart-controls">
             <label>Size
               <select data-site-cart-size data-cart-id="${lineId}">
-                ${["S", "M", "L"].map((size) => `<option value="${size}" ${normalizeSize(item.size) === size ? "selected" : ""}>${size}</option>`).join("")}
+                ${["S", "M", "L"].map((size) => `<option value="${size}" ${normalizeSize(item.size) === size ? "selected" : ""}>${escapeHtml(sizeOptionLabel(product, size))}</option>`).join("")}
               </select>
             </label>
             <label class="site-cart-note">Ghi chú món
@@ -1260,12 +1325,13 @@ function renderCart(scope) {
 
   target.innerHTML = cart.map((item) => {
     const product = productMap.get(Number(item.product_id));
-    const lineTotal = Number(product?.price || item.unit_price || 0) * Number(item.quantity || 0);
+    const unitPrice = cartItemUnitPrice(item);
+    const lineTotal = unitPrice * Number(item.quantity || 0);
     return `
       <div class="cart-row">
         <div>
           <h4>${escapeHtml(product?.product_name || "Sản phẩm")}</h4>
-          <small>${formatMoney(product?.price || item.unit_price || 0)} · Size ${escapeHtml(item.size || "M")}</small>
+          <small>${formatMoney(unitPrice)} · Size ${escapeHtml(item.size || "M")}</small>
         </div>
         <div class="qty-control">
           <button type="button" data-cart-scope="${scope}" data-product-id="${item.product_id}" data-delta="-1">-</button>
@@ -1296,17 +1362,18 @@ function renderPosCart(scope = "pos") {
 
   target.innerHTML = cart.map((item) => {
     const product = productMap.get(Number(item.product_id));
-    const lineTotal = Number(product?.price || item.unit_price || 0) * Number(item.quantity || 0);
+    const unitPrice = cartItemUnitPrice(item);
+    const lineTotal = unitPrice * Number(item.quantity || 0);
     const lineId = escapeHtml(item.line_id || item.cart_key || String(item.product_id));
     return `
       <div class="cart-row pos-cart-row">
         <div class="pos-cart-main">
           <h4>${escapeHtml(product?.product_name || "Sản phẩm")}</h4>
-          <small>${formatMoney(product?.price || item.unit_price || 0)} · Size ${escapeHtml(item.size || "M")}</small>
+          <small>${formatMoney(unitPrice)} · Size ${escapeHtml(item.size || "M")}</small>
           <div class="pos-cart-options">
             <label>Size
               <select data-pos-cart-size data-cart-id="${lineId}">
-                ${["S", "M", "L"].map((size) => `<option value="${size}" ${normalizeSize(item.size) === size ? "selected" : ""}>${size}</option>`).join("")}
+                ${["S", "M", "L"].map((size) => `<option value="${size}" ${normalizeSize(item.size) === size ? "selected" : ""}>${escapeHtml(sizeOptionLabel(product, size))}</option>`).join("")}
               </select>
             </label>
             <label>Tùy chọn pha chế
@@ -1712,7 +1779,7 @@ function legacyRenderSiteProducts() {
           <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
         </div>
         <footer>
-          <strong>${formatMoney(product.price)}</strong>
+          <strong>${productPriceRangeLabel(product)}</strong>
           <div class="card-actions">
             <button type="button" data-site-add="${product.id}">Thêm</button>
             <button type="button" class="icon-action ${isFavorite ? "is-active" : ""}" data-favorite-product="${product.id}" title="Yêu thích">♡</button>
@@ -1788,7 +1855,9 @@ async function checkoutScope(scope, extraPayload = {}) {
 
   const user = state.pos.user || {};
   const paymentSelect = document.querySelector(scope === "site" ? "[data-site-payment]" : "[data-pos-payment]");
-  const payloadItems = scope === "pos" && !extraPayload.order_id ? cart.map(posCartItemForInvoice) : cart;
+  const payloadItems = extraPayload.order_id
+    ? []
+    : (scope === "pos" ? cart.map(posCartItemForInvoice) : cart.map(cartItemPayload));
   const payload = {
     sales_channel: scope === "site" ? "website" : "pos",
     staff_id: scope === "site" ? cafeApp.staff?.find((item) => item.staff_role === "cashier")?.id || 2 : user.id || 2,
@@ -2920,7 +2989,7 @@ function renderProductsModule() {
         <label>Trạng thái <select name="status"><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
         <button class="primary-btn" type="submit">Lưu sản phẩm</button>
       </form>
-      <section class="panel"><h2>Danh sách sản phẩm</h2>${tableHtml(products, ["Tên", "Danh mục", "Giá", "Trạng thái", ""], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${escapeHtml(row.category_name || row.category)}</td><td>${formatMoney(row.price)}</td><td><span class="status good">${escapeHtml(row.status)}</span></td><td><button type="button" data-edit-product="${row.id}">Sửa</button></td></tr>`)}</section>
+      <section class="panel"><h2>Danh sách sản phẩm</h2>${tableHtml(products, ["Tên", "Danh mục", "Giá", "Trạng thái", ""], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${escapeHtml(row.category_name || row.category)}</td><td>${productPriceRangeLabel(row)}</td><td><span class="status good">${escapeHtml(row.status)}</span></td><td><button type="button" data-edit-product="${row.id}">Sửa</button></td></tr>`)}</section>
     </div>
   `;
 }
@@ -2957,7 +3026,12 @@ function renderProductsModule() {
         <input type="hidden" name="id">
         <label>Tên sản phẩm <input name="product_name" required placeholder="Latte hạt dẻ"></label>
         <label>Danh mục <select name="category">${categoryOptions("coffee", adminCategories)}</select></label>
-        <label>Giá bán <input type="number" name="price" min="0" step="1000" value="45000"></label>
+        <label>Giá bán / Size M <input type="number" name="price" min="0" step="1000" value="45000"></label>
+        <div class="form-three size-price-grid">
+          <label>Size S <input type="number" name="size_price_s" min="0" step="1000" value="40000"></label>
+          <label>Size M <input type="number" name="size_price_m" min="0" step="1000" value="45000"></label>
+          <label>Size L <input type="number" name="size_price_l" min="0" step="1000" value="52000"></label>
+        </div>
         <label>Trạng thái <select name="status">${statusOptions}</select></label>
         <label>Chi nhánh <select name="branch_id">${branchOptions(selectedBranch)}</select></label>
         <div class="form-two">
@@ -2992,7 +3066,7 @@ function renderProductsModule() {
             <td><img class="product-admin-thumb" src="${escapeHtml(asset(row.image))}" alt="${escapeHtml(row.product_name)}"></td>
             <td><strong>${escapeHtml(row.product_name)}</strong><small>${escapeHtml(row.take_note || "")}</small></td>
             <td>${escapeHtml(row.category_name || row.category)}</td>
-            <td>${formatMoney(row.price)}</td>
+            <td>${productPriceRangeLabel(row)}</td>
             <td>${Number(row.stock_quantity || 0)} <small>Min ${Number(row.min_stock_level || 0)}</small></td>
             <td><span class="status ${row.status === "active" ? "good" : "bad"}">${row.status === "active" ? "Đang bán" : "Ngừng bán"}</span></td>
             <td class="row-actions">
@@ -3161,7 +3235,7 @@ function legacyRenderPosProducts() {
         <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
       </div>
       <footer>
-        <strong>${formatMoney(product.price)}</strong>
+        <strong>${productPriceRangeLabel(product)}</strong>
         <button type="button" data-pos-add="${product.id}">Thêm</button>
       </footer>
     </article>
@@ -3290,7 +3364,7 @@ function renderSiteProducts() {
           <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
           <span class="status ${isOut ? "bad" : "good"}">${isOut ? "Tạm hết" : "Còn hàng"}</span>
           <div class="product-actions">
-            <strong>${formatMoney(product.price)}</strong>
+            <strong>${productPriceRangeLabel(product)}</strong>
             <a class="secondary-link" href="${url(`product?id=${product.id}`)}">Chi tiết</a>
             <button type="button" class="cart-add-btn" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Thêm vào giỏ hàng</button>
             <button type="button" class="order-now-btn" data-site-order-now="${product.id}" ${isOut ? "disabled" : ""}>Order now</button>
@@ -3606,7 +3680,7 @@ function renderPosProducts() {
           <strong class="product-title">${escapeHtml(product.product_name)}</strong>
           <small>${escapeHtml(product.category_name || product.category)} · Tồn ${Number(product.stock_quantity || 0)}</small>
           <div class="product-foot">
-            <span class="price">${formatMoney(product.price)}</span>
+            <span class="price">${productPriceRangeLabel(product)}</span>
             <button type="button" class="add-btn" data-pos-add="${product.id}" ${isOut ? "disabled" : ""}>${isOut ? "Hết" : "+"}</button>
           </div>
         </div>
@@ -4199,6 +4273,10 @@ function wireEvents() {
         form.elements.product_name.value = product.product_name;
         form.elements.category.value = product.category;
         form.elements.price.value = product.price;
+        const sizePrices = productSizePrices(product);
+        if (form.elements.size_price_s) form.elements.size_price_s.value = sizePrices.S;
+        if (form.elements.size_price_m) form.elements.size_price_m.value = sizePrices.M;
+        if (form.elements.size_price_l) form.elements.size_price_l.value = sizePrices.L;
         form.elements.take_note.value = product.take_note || "";
         form.elements.status.value = product.status || "active";
         if (form.elements.branch_id) form.elements.branch_id.value = product.branch_id || state.pos.user?.branch_id || 1;
@@ -4615,7 +4693,7 @@ function wireEvents() {
       event.preventDefault();
       try {
         const payload = Object.fromEntries(new FormData(serviceOrderForm));
-        payload.items = state.pos.cart.map(normalizePosCartItem);
+        payload.items = state.pos.cart.map(posCartItemForInvoice);
         payload.branch_id = state.pos.user?.branch_id || 1;
         payload.waiter_id = state.pos.user?.id || 1;
         payload.customer_id = state.pos.customer?.id || "";

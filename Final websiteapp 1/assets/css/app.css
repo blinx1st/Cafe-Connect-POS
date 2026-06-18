@@ -5311,6 +5311,19 @@ body {
   gap: 12px;
 }
 
+.pos-body .form-three {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pos-body .size-price-grid {
+  border: 1px solid rgba(116, 64, 35, 0.16);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: #fff8ef;
+}
+
 .pos-body .product-admin-filters {
   display: grid;
   grid-template-columns: minmax(160px, 1fr) minmax(150px, 190px) minmax(
@@ -5492,6 +5505,7 @@ body {
 
   .pos-body .product-admin-filters,
   .pos-body .form-two,
+  .pos-body .form-three,
   .pos-body .category-admin-grid {
     grid-template-columns: 1fr;
   }

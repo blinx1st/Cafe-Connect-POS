@@ -68,6 +68,7 @@ final class Invoice extends Model
         $products = $productModel->byIds($productIds);
         $prepared = [];
         $subtotal = 0.0;
+        $trustedItemPrices = $orderId > 0;
 
         foreach ($items as $item) {
             $productId = (int) ($item['product_id'] ?? 0);
@@ -75,14 +76,19 @@ final class Invoice extends Model
             if (!isset($products[$productId]) && !isset($item['unit_price'])) {
                 throw new InvalidArgumentException('Invalid product in checkout.');
             }
-            $unitPrice = isset($item['unit_price']) ? (float) $item['unit_price'] : (float) $products[$productId]['price'];
-            $lineTotal = isset($item['line_total']) ? (float) $item['line_total'] : $unitPrice * $quantity;
+            $size = Product::normalizeSize((string) ($item['size'] ?? 'M'));
+            $unitPrice = $trustedItemPrices && isset($item['unit_price'])
+                ? (float) $item['unit_price']
+                : Product::priceForSize($products[$productId], $size);
+            $lineTotal = $trustedItemPrices && isset($item['line_total'])
+                ? (float) $item['line_total']
+                : $unitPrice * $quantity;
             $subtotal += $lineTotal;
             $prepared[] = [
                 'product_id' => $productId,
                 'quantity' => $quantity,
                 'unit_price' => $unitPrice,
-                'size' => in_array(strtoupper((string) ($item['size'] ?? 'M')), ['S', 'M', 'L'], true) ? strtoupper((string) ($item['size'] ?? 'M')) : 'M',
+                'size' => $size,
                 'topping' => substr(trim((string) ($item['topping'] ?? '')), 0, 100) ?: null,
                 'line_total' => $lineTotal,
             ];

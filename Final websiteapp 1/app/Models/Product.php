@@ -69,6 +69,8 @@ final class Product extends Model
             $row['is_out_of_stock'] = $row['status'] !== 'active' || $row['stock_quantity'] <= 0;
             $row['is_low_stock'] = $row['stock_quantity'] <= $row['min_stock_level'];
         }
+        unset($row);
+        $this->attachSizePrices($rows);
 
         return $rows;
     }
@@ -130,8 +132,10 @@ final class Product extends Model
             $row['stock_quantity'] = (float) $row['stock_quantity'];
             $row['is_out_of_stock'] = $row['stock_quantity'] <= 0;
         }
+        unset($row);
 
         $this->attachBranchInventory($rows);
+        $this->attachSizePrices($rows);
 
         return $rows;
     }
@@ -167,6 +171,9 @@ final class Product extends Model
         $product['price'] = (float) $product['price'];
         $product['stock_quantity'] = (float) $product['stock_quantity'];
         $product['is_out_of_stock'] = $product['status'] !== 'active' || $product['stock_quantity'] <= 0;
+        $productRows = [$product];
+        $this->attachSizePrices($productRows);
+        $product = $productRows[0];
 
         $images = $this->db->prepare(
             "SELECT image_path, alt_text, is_primary, display_order
@@ -228,6 +235,7 @@ final class Product extends Model
             $row['is_out_of_stock'] = $row['stock_quantity'] <= 0;
             return $row;
         }, $related->fetchAll());
+        $this->attachSizePrices($product['related_products']);
 
         return $product;
     }
@@ -287,8 +295,15 @@ final class Product extends Model
         );
         $stmt->execute($ids);
 
+        $rows = $stmt->fetchAll();
+        foreach ($rows as &$row) {
+            $row['price'] = (float) $row['price'];
+        }
+        unset($row);
+        $this->attachSizePrices($rows);
+
         $products = [];
-        foreach ($stmt->fetchAll() as $row) {
+        foreach ($rows as $row) {
             $products[(int) $row['id']] = $row;
         }
 
@@ -307,6 +322,9 @@ final class Product extends Model
             'take_note' => trim((string) ($data['take_note'] ?? '')),
             'status' => in_array(($data['status'] ?? 'active'), ['active', 'inactive'], true) ? $data['status'] : 'active',
         ];
+        if (array_key_exists('size_price_m', $data) && trim((string) $data['size_price_m']) !== '') {
+            $payload['price'] = max(0, (float) $data['size_price_m']);
+        }
 
         $this->db->beginTransaction();
         try {
@@ -325,6 +343,7 @@ final class Product extends Model
                 )->execute($payload);
                 $id = (int) $this->db->lastInsertId();
             }
+            $this->upsertDefaultSizePrices($id, $payload, $data);
 
             if ($hasInventory) {
                 $this->upsertBranchInventory(
@@ -469,5 +488,116 @@ final class Product extends Model
             'stock_quantity' => $stockQuantity,
             'min_stock_level' => $minStockLevel,
         ]);
+    }
+
+    private function upsertDefaultSizePrices(int $productId, array $product, array $source = []): void
+    {
+        if ($productId <= 0) {
+            return;
+        }
+
+        $prices = self::defaultSizePrices($product);
+        foreach (['S' => 'size_price_s', 'M' => 'size_price_m', 'L' => 'size_price_l'] as $size => $field) {
+            if (array_key_exists($field, $source) && trim((string) $source[$field]) !== '') {
+                $prices[$size] = max(0.0, (float) $source[$field]);
+            }
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                "INSERT INTO product_size_prices (product_id, size, price)
+                 VALUES (:product_id, :size, :price)
+                 ON DUPLICATE KEY UPDATE price = VALUES(price)"
+            );
+            foreach ($prices as $size => $price) {
+                $stmt->execute([
+                    'product_id' => $productId,
+                    'size' => $size,
+                    'price' => $price,
+                ]);
+            }
+        } catch (\Throwable) {
+            // Older local databases may not have product_size_prices yet; fallback pricing still works.
+        }
+    }
+
+    public static function normalizeSize(string $size): string
+    {
+        $size = strtoupper(trim($size));
+        return in_array($size, ['S', 'M', 'L'], true) ? $size : 'M';
+    }
+
+    public static function defaultSizePrices(array $product): array
+    {
+        $basePrice = max(0.0, (float) ($product['price'] ?? 0));
+        $category = strtolower((string) ($product['category'] ?? ''));
+        if ($category === 'food') {
+            return [
+                'S' => $basePrice,
+                'M' => $basePrice,
+                'L' => $basePrice,
+            ];
+        }
+
+        return [
+            'S' => max(0.0, $basePrice - 5000),
+            'M' => $basePrice,
+            'L' => $basePrice + 7000,
+        ];
+    }
+
+    public static function priceForSize(array $product, string $size): float
+    {
+        $normalized = self::normalizeSize($size);
+        $sizePrices = $product['size_prices'] ?? [];
+        if (is_array($sizePrices) && isset($sizePrices[$normalized])) {
+            return max(0.0, (float) $sizePrices[$normalized]);
+        }
+
+        $fallback = self::defaultSizePrices($product);
+        return (float) $fallback[$normalized];
+    }
+
+    private function attachSizePrices(array &$rows): void
+    {
+        if (!$rows) {
+            return;
+        }
+
+        foreach ($rows as &$row) {
+            $row['size_prices'] = self::defaultSizePrices($row);
+        }
+        unset($row);
+
+        $productIds = array_values(array_unique(array_map(static fn (array $row): int => (int) $row['id'], $rows)));
+        if (!$productIds) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($productIds), '?'));
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT product_id, size, price
+                 FROM product_size_prices
+                 WHERE product_id IN ($placeholders)
+                 ORDER BY FIELD(size, 'S', 'M', 'L')"
+            );
+            $stmt->execute($productIds);
+        } catch (\Throwable) {
+            return;
+        }
+
+        $pricesByProduct = [];
+        foreach ($stmt->fetchAll() as $priceRow) {
+            $pricesByProduct[(int) $priceRow['product_id']][self::normalizeSize((string) $priceRow['size'])] = (float) $priceRow['price'];
+        }
+
+        foreach ($rows as &$row) {
+            $productId = (int) $row['id'];
+            if (isset($pricesByProduct[$productId])) {
+                $row['size_prices'] = array_replace(self::defaultSizePrices($row), $pricesByProduct[$productId]);
+            }
+        }
+        unset($row);
     }
 }

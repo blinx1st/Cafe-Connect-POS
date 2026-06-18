@@ -116,6 +116,55 @@ ALTER TABLE promotions
 ALTER TABLE promotions
     ADD UNIQUE KEY IF NOT EXISTS uq_promotions_claim_code (claim_code);
 
+CREATE TABLE IF NOT EXISTS product_size_prices (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    product_id INT NOT NULL,
+    size ENUM('S', 'M', 'L') NOT NULL,
+    price DECIMAL(12,2) NOT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_product_size_prices_product_size (product_id, size),
+    CONSTRAINT fk_product_size_prices_product
+        FOREIGN KEY (product_id) REFERENCES products(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO product_size_prices (product_id, size, price)
+SELECT p.id, x.size_code, x.price
+FROM (
+    SELECT 'Signature Brown Latte' AS product_name, 'S' AS size_code, 49000 AS price
+    UNION ALL SELECT 'Signature Brown Latte', 'M', 55000
+    UNION ALL SELECT 'Signature Brown Latte', 'L', 62000
+    UNION ALL SELECT 'Vietnamese Phin Coffee', 'S', 30000
+    UNION ALL SELECT 'Vietnamese Phin Coffee', 'M', 35000
+    UNION ALL SELECT 'Vietnamese Phin Coffee', 'L', 42000
+    UNION ALL SELECT 'Cold Brew Citrus', 'S', 54000
+    UNION ALL SELECT 'Cold Brew Citrus', 'M', 60000
+    UNION ALL SELECT 'Cold Brew Citrus', 'L', 68000
+    UNION ALL SELECT 'Lotus Oolong Tea', 'S', 40000
+    UNION ALL SELECT 'Lotus Oolong Tea', 'M', 45000
+    UNION ALL SELECT 'Lotus Oolong Tea', 'L', 52000
+    UNION ALL SELECT 'Peach Lemongrass Tea', 'S', 43000
+    UNION ALL SELECT 'Peach Lemongrass Tea', 'M', 48000
+    UNION ALL SELECT 'Peach Lemongrass Tea', 'L', 55000
+    UNION ALL SELECT 'Mango Yogurt Smoothie', 'S', 59000
+    UNION ALL SELECT 'Mango Yogurt Smoothie', 'M', 65000
+    UNION ALL SELECT 'Mango Yogurt Smoothie', 'L', 73000
+    UNION ALL SELECT 'Croissant Butter', 'S', 42000
+    UNION ALL SELECT 'Croissant Butter', 'M', 42000
+    UNION ALL SELECT 'Croissant Butter', 'L', 42000
+    UNION ALL SELECT 'Tiramisu Cup', 'S', 58000
+    UNION ALL SELECT 'Tiramisu Cup', 'M', 58000
+    UNION ALL SELECT 'Tiramisu Cup', 'L', 58000
+    UNION ALL SELECT 'May Bloom Macchiato', 'S', 62000
+    UNION ALL SELECT 'May Bloom Macchiato', 'M', 68000
+    UNION ALL SELECT 'May Bloom Macchiato', 'L', 76000
+) x
+JOIN products p ON p.product_name = x.product_name
+ON DUPLICATE KEY UPDATE
+    price = VALUES(price);
+
 -- 2) Security / audit / operational tables.
 CREATE TABLE IF NOT EXISTS schema_migrations (
     id INT AUTO_INCREMENT PRIMARY KEY,
