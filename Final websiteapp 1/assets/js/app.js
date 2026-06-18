@@ -3363,11 +3363,16 @@ function renderSiteProducts() {
           <h3>${escapeHtml(product.product_name)}</h3>
           <p>${escapeHtml(product.take_note || "Sản phẩm đang bán")}</p>
           <span class="status ${isOut ? "bad" : "good"}">${isOut ? "Tạm hết" : "Còn hàng"}</span>
-          <div class="product-actions">
-            <strong>${productPriceRangeLabel(product)}</strong>
-            <a class="secondary-link" href="${url(`product?id=${product.id}`)}">Chi tiết</a>
-            <button type="button" class="cart-add-btn" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Thêm vào giỏ hàng</button>
-            <button type="button" class="order-now-btn" data-site-order-now="${product.id}" ${isOut ? "disabled" : ""}>Order now</button>
+          <div class="product-purchase">
+            <div class="product-price-line">
+              <span>Giá theo size</span>
+              <strong>${productPriceRangeLabel(product)}</strong>
+            </div>
+            <div class="product-cta-row">
+              <a class="detail-link" href="${url(`product?id=${product.id}`)}">Chi tiết</a>
+              <button type="button" class="cart-add-btn" data-site-add="${product.id}" ${isOut ? "disabled" : ""}>Thêm vào giỏ</button>
+              <button type="button" class="order-now-btn" data-site-order-now="${product.id}" ${isOut ? "disabled" : ""}>Order now</button>
+            </div>
           </div>
         </div>
       </article>

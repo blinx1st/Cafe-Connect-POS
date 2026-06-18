@@ -3666,6 +3666,94 @@ body {
   opacity: 0.55;
 }
 
+.product-purchase {
+  display: grid;
+  gap: 12px;
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(74, 38, 24, 0.12);
+}
+
+.product-price-line {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.product-price-line span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.product-price-line strong {
+  color: var(--dark);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.product-cta-row {
+  display: grid;
+  grid-template-columns: minmax(74px, 0.72fr) minmax(120px, 1fr) minmax(108px, 0.9fr);
+  gap: 8px;
+}
+
+.product-cta-row .detail-link,
+.product-cta-row button {
+  min-width: 0;
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 0 12px;
+  font-family: Outfit, "Segoe UI", Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.product-cta-row .detail-link {
+  border: 1px solid rgba(74, 38, 24, 0.16);
+  color: var(--coffee);
+  background: #fffaf3;
+}
+
+.product-cta-row .cart-add-btn {
+  border: 1px solid rgba(74, 38, 24, 0.18);
+  color: var(--coffee);
+  background: #ffffff;
+}
+
+.product-cta-row .order-now-btn {
+  border: 1px solid var(--dark);
+  color: #fffaf3;
+  background: var(--dark);
+}
+
+.product-cta-row .detail-link:hover,
+.product-cta-row button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(74, 38, 24, 0.12);
+}
+
+.product-cta-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
 .beans-band {
   position: relative;
   min-height: 335px;
@@ -5649,6 +5737,25 @@ body {
   .feedback-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .product-price-line {
+    align-items: flex-start;
+    display: grid;
+  }
+
+  .product-price-line strong {
+    text-align: left;
+    white-space: normal;
+  }
+
+  .product-cta-row {
+    grid-template-columns: 1fr;
+  }
+
+  .product-cta-row .detail-link,
+  .product-cta-row button {
+    min-height: 46px;
   }
 
   .pos-body .login-page {
