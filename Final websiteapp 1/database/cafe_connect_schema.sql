@@ -23,6 +23,7 @@ DROP TABLE IF EXISTS customer_favorites;
 DROP TABLE IF EXISTS campaign_recipients;
 DROP TABLE IF EXISTS marketing_emails;
 DROP TABLE IF EXISTS customer_interactions;
+DROP TABLE IF EXISTS payment_transactions;
 DROP TABLE IF EXISTS payments;
 DROP TABLE IF EXISTS invoice_details;
 DROP TABLE IF EXISTS pos_activity_logs;
@@ -31,6 +32,7 @@ DROP TABLE IF EXISTS service_order_items;
 DROP TABLE IF EXISTS service_orders;
 DROP TABLE IF EXISTS dining_tables;
 DROP TABLE IF EXISTS branch_inventory;
+DROP TABLE IF EXISTS branch_material_inventory;
 DROP TABLE IF EXISTS inventory_materials;
 DROP TABLE IF EXISTS product_images;
 DROP TABLE IF EXISTS products;
@@ -512,11 +514,44 @@ CREATE TABLE payments (
     payment_method ENUM('cash', 'card', 'e_wallet') NOT NULL,
     payment_provider VARCHAR(80) NULL,
     amount DECIMAL(12,2) NOT NULL,
-    paid_at DATETIME NOT NULL,
+    paid_at DATETIME NULL,
     transaction_reference VARCHAR(120) NULL,
     status ENUM('pending', 'paid', 'failed', 'refunded') NOT NULL DEFAULT 'paid',
     KEY idx_payments_invoice_method (invoice_id, payment_method),
     CONSTRAINT fk_payments_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE payment_transactions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    payment_id INT NULL,
+    invoice_id INT NOT NULL,
+    provider VARCHAR(40) NOT NULL DEFAULT 'momo',
+    provider_order_id VARCHAR(200) NOT NULL,
+    provider_request_id VARCHAR(80) NOT NULL,
+    provider_transaction_id VARCHAR(80) NULL,
+    amount DECIMAL(12,2) NOT NULL,
+    pay_url TEXT NULL,
+    deeplink TEXT NULL,
+    qr_code_url TEXT NULL,
+    result_code INT NULL,
+    message VARCHAR(255) NULL,
+    status ENUM('created', 'pending', 'paid', 'failed', 'cancelled') NOT NULL DEFAULT 'created',
+    raw_request_json TEXT NULL,
+    raw_response_json TEXT NULL,
+    raw_ipn_json TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_payment_transactions_order (provider_order_id),
+    KEY idx_payment_transactions_invoice (invoice_id, created_at),
+    KEY idx_payment_transactions_payment (payment_id),
+    CONSTRAINT fk_payment_transactions_payment
+        FOREIGN KEY (payment_id) REFERENCES payments(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_payment_transactions_invoice
         FOREIGN KEY (invoice_id) REFERENCES invoices(id)
         ON UPDATE CASCADE
         ON DELETE CASCADE
@@ -528,7 +563,13 @@ CREATE TABLE website_orders (
     customer_id INT NULL,
     fulfillment_type ENUM('pickup', 'delivery') NOT NULL DEFAULT 'pickup',
     order_status ENUM('pending', 'paid', 'preparing', 'ready', 'delivering', 'completed', 'cancelled') NOT NULL DEFAULT 'paid',
+    receiver_email VARCHAR(150) NULL,
+    receiver_name VARCHAR(150) NULL,
+    receiver_phone VARCHAR(20) NULL,
     delivery_address VARCHAR(255) NULL,
+    city VARCHAR(120) NULL,
+    district VARCHAR(120) NULL,
+    ward VARCHAR(120) NULL,
     customer_note VARCHAR(255) NULL,
     requested_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -746,6 +787,26 @@ CREATE TABLE inventory_materials (
     UNIQUE KEY uq_inventory_materials_name (material_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE branch_material_inventory (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_id INT NOT NULL,
+    material_id INT NOT NULL,
+    stock_quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+    min_stock_level DECIMAL(12,2) NOT NULL DEFAULT 0,
+    unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+    last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_branch_material_inventory (branch_id, material_id),
+    KEY idx_branch_material_inventory_material (material_id),
+    CONSTRAINT fk_branch_material_inventory_branch
+        FOREIGN KEY (branch_id) REFERENCES branches(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+    CONSTRAINT fk_branch_material_inventory_material
+        FOREIGN KEY (material_id) REFERENCES inventory_materials(id)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE stock_movements (
     id INT AUTO_INCREMENT PRIMARY KEY,
     movement_code VARCHAR(50) NOT NULL,
@@ -753,7 +814,7 @@ CREATE TABLE stock_movements (
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
     pos_session_id INT NULL,
-    movement_type ENUM('import', 'sales_export', 'waste_export') NOT NULL,
+    movement_type ENUM('import', 'sales_export', 'waste_export', 'adjustment') NOT NULL,
     quantity DECIMAL(12,2) NOT NULL,
     unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
     total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
@@ -911,7 +972,17 @@ INSERT INTO staff (branch_id, staff_code, staff_name, staff_role, phone_number, 
 (1, 'MKT001', 'Mai Marketing', 'marketing', '0911000005', 'marketing@cafeconnect.test'),
 (2, 'ADMIN001', 'Admin Cafe Connect', 'admin', '0911000006', 'admin@cafeconnect.test'),
 (2, 'MGR001', 'Minh Manager', 'manager', '0911000007', 'manager.hk@cafeconnect.test'),
-(3, 'CASH002', 'Chau Cashier', 'cashier', '0911000008', 'cashier.th@cafeconnect.test');
+(3, 'CASH002', 'Chau Cashier', 'cashier', '0911000008', 'cashier.th@cafeconnect.test'),
+(2, 'WAIT002', 'Hoa Waiter HK', 'waiter', '0911000009', 'waiter.hk@cafeconnect.test'),
+(2, 'BAR002', 'Phuc Barista HK', 'barista', '0911000010', 'barista.hk@cafeconnect.test'),
+(3, 'WAIT003', 'Linh Waiter TH', 'waiter', '0911000011', 'waiter.th@cafeconnect.test'),
+(3, 'BAR003', 'Son Barista TH', 'barista', '0911000012', 'barista.th@cafeconnect.test'),
+(3, 'MGR003', 'Hanh Manager TH', 'manager', '0911000013', 'manager.th@cafeconnect.test'),
+(4, 'WAIT004', 'An Waiter TVB', 'waiter', '0911000014', 'waiter.tvb@cafeconnect.test'),
+(4, 'CASH004', 'Binh Cashier TVB', 'cashier', '0911000015', 'cashier.tvb@cafeconnect.test'),
+(4, 'BAR004', 'Khoa Barista TVB', 'barista', '0911000016', 'barista.tvb@cafeconnect.test'),
+(4, 'MGR004', 'Trang Manager TVB', 'manager', '0911000017', 'manager.tvb@cafeconnect.test'),
+(2, 'CASH003', 'Vy Cashier HK', 'cashier', '0911000018', 'cashier.hk@cafeconnect.test');
 
 INSERT INTO staff_shifts (staff_id, shift_name, starts_at, ends_at, work_date) VALUES
 (1, 'Morning floor', '07:00:00', '15:00:00', '2026-05-13'),
@@ -921,7 +992,17 @@ INSERT INTO staff_shifts (staff_id, shift_name, starts_at, ends_at, work_date) V
 (5, 'Campaign desk', '09:00:00', '17:00:00', '2026-05-13'),
 (6, 'Admin support', '09:00:00', '18:00:00', '2026-05-13'),
 (7, 'Manager shift', '13:00:00', '21:00:00', '2026-05-13'),
-(8, 'Evening cashier', '13:00:00', '21:00:00', '2026-05-13');
+(8, 'Evening cashier', '13:00:00', '21:00:00', '2026-05-13'),
+(9, 'Hoan Kiem floor', '08:00:00', '16:00:00', '2026-05-13'),
+(10, 'Hoan Kiem bar', '08:00:00', '16:00:00', '2026-05-13'),
+(11, 'Tay Ho floor', '09:00:00', '17:00:00', '2026-05-13'),
+(12, 'Tay Ho bar', '09:00:00', '17:00:00', '2026-05-13'),
+(13, 'Tay Ho manager', '13:00:00', '21:00:00', '2026-05-13'),
+(14, 'Trinh Van Bo floor', '07:00:00', '15:00:00', '2026-05-13'),
+(15, 'Trinh Van Bo cashier', '07:00:00', '15:00:00', '2026-05-13'),
+(16, 'Trinh Van Bo bar', '07:00:00', '15:00:00', '2026-05-13'),
+(17, 'Trinh Van Bo manager', '13:00:00', '21:00:00', '2026-05-13'),
+(18, 'Hoan Kiem cashier', '13:00:00', '21:00:00', '2026-05-13');
 
 INSERT INTO pos_sessions (
     branch_id, staff_id, shift_id, session_token, staff_role, opened_at, closed_at, last_seen_at,
@@ -1017,12 +1098,25 @@ INSERT INTO dining_tables (branch_id, table_name, area_name, seat_count, status)
 (1, 'T05', 'Garden', 2, 'available'),
 (2, 'H01', 'Lobby', 2, 'available'),
 (2, 'H02', 'Lobby', 4, 'occupied'),
-(3, 'W01', 'Lake', 2, 'available');
+(2, 'H03', 'Balcony', 2, 'available'),
+(2, 'H04', 'Main', 6, 'available'),
+(2, 'H05', 'Main', 4, 'available'),
+(3, 'W01', 'Lake', 2, 'available'),
+(3, 'W02', 'Lake', 4, 'occupied'),
+(3, 'W03', 'Main', 4, 'available'),
+(3, 'W04', 'Terrace', 6, 'available'),
+(4, 'B01', 'Ground floor', 2, 'available'),
+(4, 'B02', 'Ground floor', 4, 'occupied'),
+(4, 'B03', 'Study corner', 4, 'available'),
+(4, 'B04', 'Balcony', 6, 'available'),
+(4, 'B05', 'Takeaway', 2, 'available');
 
 INSERT INTO service_orders (order_code, branch_id, table_id, customer_id, waiter_id, status, note, created_at) VALUES
 ('OD-101', 1, 2, 2, 1, 'preparing', 'Less ice for tea.', '2026-05-13 09:12:00'),
 ('OD-102', 1, 4, NULL, 1, 'ready', 'Guest at main table.', '2026-05-13 09:25:00'),
-('OD-103', 2, 7, 1, 7, 'served', 'Waiting for cashier.', '2026-05-13 09:40:00');
+('OD-103', 2, 7, 1, 7, 'served', 'Waiting for cashier.', '2026-05-13 09:40:00'),
+('OD-104', 3, 12, 3, 11, 'preparing', 'Lake view guests, less sugar.', '2026-05-13 10:05:00'),
+('OD-105', 4, 16, 4, 14, 'ready', 'Pickup after meeting.', '2026-05-13 10:20:00');
 
 INSERT INTO service_order_items (
     service_order_id, product_id, quantity, unit_price, size, topping, note, line_total, kitchen_status
@@ -1032,7 +1126,11 @@ INSERT INTO service_order_items (
 (2, 7, 2, 42000, NULL, NULL, 'Warm', 84000, 'ready'),
 (2, 2, 2, 35000, 'M', NULL, NULL, 70000, 'ready'),
 (3, 9, 1, 68000, 'L', NULL, NULL, 68000, 'served'),
-(3, 8, 1, 58000, NULL, NULL, NULL, 58000, 'served');
+(3, 8, 1, 58000, NULL, NULL, NULL, 58000, 'served'),
+(4, 3, 1, 59000, 'M', 'Orange peel', 'Less sugar', 59000, 'preparing'),
+(4, 6, 1, 62000, 'M', NULL, NULL, 62000, 'waiting'),
+(5, 1, 1, 55000, 'M', NULL, NULL, 55000, 'ready'),
+(5, 7, 2, 42000, NULL, NULL, 'Warm', 84000, 'ready');
 
 UPDATE service_order_items
 SET preparing_started_at = '2026-05-13 09:26:00',
@@ -1056,16 +1154,18 @@ INSERT INTO invoices (
 ) VALUES
 (1, 2, NULL, NULL, 1, 3, 'website', '2026-05-10', '09:30:00', '2026-05-10 09:30:00', '2026-05-10 09:32:00', 165000, 16500, 15000, 133500, 13, 'e_wallet', 'paid', '2026-05-10 09:32:00'),
 (1, 2, 1, NULL, 2, NULL, 'pos', '2026-05-11', '14:10:00', '2026-05-11 14:10:00', '2026-05-11 14:12:00', 145000, 7250, 0, 137750, 13, 'cash', 'paid', '2026-05-11 14:12:00'),
-(2, 8, NULL, NULL, 4, NULL, 'pos', '2026-05-12', '18:05:00', '2026-05-12 18:05:00', '2026-05-12 18:08:00', 262000, 26200, 0, 235800, 23, 'card', 'paid', '2026-05-12 18:08:00'),
+(2, 18, NULL, NULL, 4, NULL, 'pos', '2026-05-12', '18:05:00', '2026-05-12 18:05:00', '2026-05-12 18:08:00', 262000, 26200, 0, 235800, 23, 'card', 'paid', '2026-05-12 18:08:00'),
 (3, 8, NULL, NULL, 5, NULL, 'delivery', '2026-05-13', '08:40:00', '2026-05-13 08:40:00', '2026-05-13 08:43:00', 110000, 5500, 0, 104500, 10, 'e_wallet', 'paid', '2026-05-13 08:43:00'),
-(1, 2, 4, NULL, NULL, NULL, 'pos', '2026-05-13', '10:05:00', '2026-05-13 10:05:00', '2026-05-13 10:07:00', 70000, 0, 0, 70000, 0, 'cash', 'paid', '2026-05-13 10:07:00');
+(1, 2, 4, NULL, NULL, NULL, 'pos', '2026-05-13', '10:05:00', '2026-05-13 10:05:00', '2026-05-13 10:07:00', 70000, 0, 0, 70000, 0, 'cash', 'paid', '2026-05-13 10:07:00'),
+(4, 15, NULL, NULL, 4, NULL, 'website', '2026-05-13', '11:15:00', '2026-05-13 11:15:00', NULL, 139000, 0, 0, 139000, 0, 'cash', 'pending', '2026-05-13 11:15:00');
 
 INSERT INTO payments (invoice_id, payment_method, payment_provider, amount, paid_at, transaction_reference, status) VALUES
 (1, 'e_wallet', 'Demo Momo', 133500, '2026-05-10 09:32:00', 'WEB-000001', 'paid'),
 (2, 'cash', NULL, 137750, '2026-05-11 14:12:00', NULL, 'paid'),
 (3, 'card', 'Demo card', 235800, '2026-05-12 18:08:00', 'CARD-000003', 'paid'),
 (4, 'e_wallet', 'Demo ZaloPay', 104500, '2026-05-13 08:43:00', 'DEL-000004', 'paid'),
-(5, 'cash', NULL, 70000, '2026-05-13 10:07:00', NULL, 'paid');
+(5, 'cash', NULL, 70000, '2026-05-13 10:07:00', NULL, 'paid'),
+(6, 'cash', 'COD', 139000, NULL, 'WEB-000006', 'pending');
 
 INSERT INTO invoice_details (invoice_id, product_id, quantity, unit_price, size, topping, line_total) VALUES
 (1, 1, 2, 55000, 'M', NULL, 110000),
@@ -1076,7 +1176,9 @@ INSERT INTO invoice_details (invoice_id, product_id, quantity, unit_price, size,
 (3, 8, 1, 58000, NULL, NULL, 58000),
 (4, 3, 1, 60000, 'M', NULL, 60000),
 (4, 5, 1, 48000, 'M', NULL, 48000),
-(5, 2, 2, 35000, 'M', NULL, 70000);
+(5, 2, 2, 35000, 'M', NULL, 70000),
+(6, 1, 1, 55000, 'M', NULL, 55000),
+(6, 7, 2, 42000, NULL, 'Warm', 84000);
 
 INSERT INTO pos_activity_logs (
     pos_session_id, staff_id, staff_role, action_type, entity_type, entity_id,
@@ -1119,9 +1221,38 @@ INSERT INTO branch_inventory (branch_id, product_id, stock_quantity, min_stock_l
 (1, 5, 11, 12, '2026-05-13 07:00:00'),
 (1, 7, 9, 12, '2026-05-13 07:00:00'),
 (2, 1, 24, 20, '2026-05-13 07:00:00'),
+(2, 2, 28, 20, '2026-05-13 07:00:00'),
+(2, 4, 22, 15, '2026-05-13 07:00:00'),
+(2, 5, 18, 12, '2026-05-13 07:00:00'),
+(2, 7, 16, 12, '2026-05-13 07:00:00'),
 (2, 8, 14, 10, '2026-05-13 07:00:00'),
+(2, 9, 12, 8, '2026-05-13 07:00:00'),
+(3, 1, 20, 20, '2026-05-13 07:00:00'),
+(3, 2, 18, 20, '2026-05-13 07:00:00'),
 (3, 3, 12, 15, '2026-05-13 07:00:00'),
-(3, 9, 10, 8, '2026-05-13 07:00:00');
+(3, 4, 16, 15, '2026-05-13 07:00:00'),
+(3, 5, 14, 12, '2026-05-13 07:00:00'),
+(3, 6, 15, 12, '2026-05-13 07:00:00'),
+(3, 8, 12, 10, '2026-05-13 07:00:00'),
+(3, 9, 10, 8, '2026-05-13 07:00:00'),
+(4, 1, 40, 20, '2026-05-13 07:00:00'),
+(4, 2, 35, 20, '2026-05-13 07:00:00'),
+(4, 3, 30, 15, '2026-05-13 07:00:00'),
+(4, 4, 30, 15, '2026-05-13 07:00:00'),
+(4, 5, 30, 12, '2026-05-13 07:00:00'),
+(4, 6, 25, 12, '2026-05-13 07:00:00'),
+(4, 7, 25, 12, '2026-05-13 07:00:00'),
+(4, 8, 24, 10, '2026-05-13 07:00:00'),
+(4, 9, 24, 8, '2026-05-13 07:00:00');
+
+INSERT IGNORE INTO branch_inventory (branch_id, product_id, stock_quantity, min_stock_level, last_updated)
+SELECT b.id,
+       p.id,
+       24,
+       CASE WHEN p.category IN ('coffee', 'tea') THEN 12 ELSE 8 END,
+       '2026-05-13 07:00:00'
+FROM branches b
+CROSS JOIN products p;
 
 INSERT INTO inventory_materials (material_name, unit, stock_quantity, min_stock_level, supplier_name, last_updated) VALUES
 ('Arabica beans', 'kg', 42, 20, 'Highland Supply', '2026-05-13 07:00:00'),
@@ -1130,17 +1261,59 @@ INSERT INTO inventory_materials (material_name, unit, stock_quantity, min_stock_
 ('Tea leaves', 'kg', 12, 10, 'Lotus Tea Farm', '2026-05-13 07:00:00'),
 ('Croissant dough', 'pack', 9, 12, 'Bakery Partner', '2026-05-13 07:00:00');
 
+INSERT INTO branch_material_inventory (
+    branch_id, material_id, stock_quantity, min_stock_level, unit_cost, last_updated
+)
+SELECT b.id,
+       im.id,
+       im.stock_quantity,
+       im.min_stock_level,
+       im.unit_cost,
+       '2026-05-13 07:00:00'
+FROM branches b
+CROSS JOIN inventory_materials im;
+
+UPDATE branch_material_inventory bmi
+JOIN inventory_materials im ON im.id = bmi.material_id
+SET bmi.stock_quantity = CASE
+        WHEN bmi.branch_id = 1 AND im.material_name = 'Robusta beans' THEN 16
+        WHEN bmi.branch_id = 1 AND im.material_name = 'Croissant dough' THEN 9
+        WHEN bmi.branch_id = 2 AND im.material_name = 'Arabica beans' THEN 28
+        WHEN bmi.branch_id = 2 AND im.material_name = 'Fresh milk' THEN 62
+        WHEN bmi.branch_id = 2 AND im.material_name = 'Tea leaves' THEN 18
+        WHEN bmi.branch_id = 3 AND im.material_name = 'Arabica beans' THEN 18
+        WHEN bmi.branch_id = 3 AND im.material_name = 'Robusta beans' THEN 14
+        WHEN bmi.branch_id = 3 AND im.material_name = 'Fresh milk' THEN 48
+        WHEN bmi.branch_id = 4 AND im.material_name = 'Arabica beans' THEN 36
+        WHEN bmi.branch_id = 4 AND im.material_name = 'Robusta beans' THEN 22
+        WHEN bmi.branch_id = 4 AND im.material_name = 'Croissant dough' THEN 16
+        ELSE bmi.stock_quantity
+    END,
+    bmi.last_updated = '2026-05-13 07:30:00';
+
 INSERT INTO stock_movements (
     movement_code, material_id, branch_id, staff_id, pos_session_id, movement_type, quantity, total_amount, note, created_at
 ) VALUES
 ('IM-001', 1, 1, 7, NULL, 'import', 20, 3800000, 'Weekly bean import.', '2026-05-12 08:00:00'),
 ('SA-002', 3, 1, 3, 3, 'sales_export', 12, 0, 'Milk used in morning shift.', '2026-05-13 12:00:00'),
-('WA-003', 5, 1, 7, NULL, 'waste_export', 2, 0, 'Damaged pastry packs.', '2026-05-13 13:30:00');
+('WA-003', 5, 1, 7, NULL, 'waste_export', 2, 0, 'Damaged pastry packs.', '2026-05-13 13:30:00'),
+('IM-004', 1, 2, 7, NULL, 'import', 12, 2280000, 'Hoan Kiem bean replenishment.', '2026-05-12 08:20:00'),
+('SA-005', 3, 2, 10, NULL, 'sales_export', 8, 0, 'Milk used by Hoan Kiem bar.', '2026-05-13 11:45:00'),
+('IM-006', 4, 3, 13, NULL, 'import', 6, 960000, 'Tay Ho tea stock import.', '2026-05-12 09:10:00'),
+('WA-007', 3, 3, 12, NULL, 'waste_export', 3, 0, 'Expired milk bottles.', '2026-05-13 14:00:00'),
+('IM-008', 2, 4, 17, NULL, 'import', 18, 2160000, 'Trinh Van Bo robusta import.', '2026-05-12 08:45:00'),
+('SA-009', 1, 4, 16, NULL, 'sales_export', 10, 0, 'Arabica used by Trinh Van Bo bar.', '2026-05-13 12:25:00');
 
 INSERT INTO cash_transactions (branch_id, staff_id, pos_session_id, transaction_type, reason, amount, created_at) VALUES
 (1, 2, NULL, 'in', 'Opening cash float', 1000000, '2026-05-13 07:00:00'),
 (1, 2, 4, 'out', 'Buy small supplies', 120000, '2026-05-13 11:20:00'),
-(1, 2, 4, 'in', 'Cash order correction', 70000, '2026-05-13 10:07:00');
+(1, 2, 4, 'in', 'Cash order correction', 70000, '2026-05-13 10:07:00'),
+(2, 7, NULL, 'in', 'Hoan Kiem opening float', 1500000, '2026-05-13 08:00:00'),
+(2, 7, NULL, 'out', 'Hoan Kiem local delivery fee', 90000, '2026-05-13 12:10:00'),
+(3, 8, NULL, 'in', 'Tay Ho opening float', 1200000, '2026-05-13 09:00:00'),
+(3, 8, NULL, 'out', 'Tay Ho ice purchase', 65000, '2026-05-13 13:20:00'),
+(4, 15, NULL, 'in', 'Trinh Van Bo opening float', 1000000, '2026-05-13 07:00:00'),
+(4, 15, NULL, 'out', 'Trinh Van Bo packaging purchase', 110000, '2026-05-13 10:30:00');
 
 INSERT INTO loyalty_point_transactions (customer_id, invoice_id, transaction_type, points, description, created_at) VALUES
 (1, 1, 'earn', 13, 'Earned points from invoice #1', '2026-05-10 09:32:00'),

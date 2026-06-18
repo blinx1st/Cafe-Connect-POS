@@ -1086,6 +1086,38 @@ function selectedSiteFulfillment() {
   return (checked || fallback)?.value || "pickup";
 }
 
+function prefillDeliveryRecipient(force = false) {
+  const member = state.site.customer || cafeApp.member || null;
+  if (!member) return;
+
+  [
+    ["[data-site-receiver-email]", member.email],
+    ["[data-site-receiver-name]", member.customer_name],
+    ["[data-site-receiver-phone]", member.phone_number],
+  ].forEach(([selector, value]) => {
+    const input = document.querySelector(selector);
+    if (!input || value === undefined || value === null) return;
+    if (force || !input.value.trim()) input.value = String(value);
+  });
+}
+
+function readSiteDeliveryPayload() {
+  return {
+    receiver_email: document.querySelector("[data-site-receiver-email]")?.value?.trim() || "",
+    receiver_name: document.querySelector("[data-site-receiver-name]")?.value?.trim() || "",
+    receiver_phone: document.querySelector("[data-site-receiver-phone]")?.value?.trim() || "",
+    delivery_address: document.querySelector("[data-site-delivery-address]")?.value?.trim() || "",
+    city: document.querySelector("[data-site-city]")?.value?.trim() || "",
+    district: document.querySelector("[data-site-district]")?.value?.trim() || "",
+    ward: document.querySelector("[data-site-ward]")?.value?.trim() || "",
+    customer_note: document.querySelector("[data-site-customer-note]")?.value?.trim() || "",
+  };
+}
+
+function isValidEmail(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
+}
+
 function cartItemCount(scope) {
   return cartFor(scope).reduce((sum, item) => sum + Number(item.quantity || 0), 0);
 }
@@ -1125,6 +1157,7 @@ function renderCheckoutState() {
   document.querySelectorAll("[data-pickup-only]").forEach((node) => {
     node.hidden = isDelivery;
   });
+  prefillDeliveryRecipient();
 
   const count = cartItemCount("site");
   document.querySelectorAll("[data-site-cart-count]").forEach((node) => {
@@ -1140,7 +1173,7 @@ function renderCheckoutState() {
   if (paymentHint) {
     paymentHint.textContent = payment === "cash"
       ? "COD sẽ tạo đơn chờ thanh toán. Voucher được giữ cho đơn này đến khi đơn bị hủy hoặc được xác nhận thanh toán."
-      : "DemoPay nội bộ ghi nhận thanh toán ngay và đơn sẽ chuyển sang trạng thái đã thanh toán.";
+      : "MoMo sẽ chuyển bạn sang cổng thanh toán sandbox. Đơn chỉ được xác nhận sau khi MoMo trả kết quả thành công.";
   }
   renderSiteBranchInfo();
 }
@@ -1425,6 +1458,7 @@ function setSiteMember(member) {
   renderMiniMember("site");
   renderVoucherOptions("site");
   renderSiteProducts();
+  prefillDeliveryRecipient(true);
   renderProfile("portal", state.site.customer);
   renderProfile("account", state.site.customer);
 }
@@ -1774,6 +1808,18 @@ async function checkoutScope(scope, extraPayload = {}) {
     }
     payload.fulfillment_type = selectedSiteFulfillment();
     payload.sales_channel = payload.fulfillment_type === "delivery" ? "delivery" : "website";
+    const deliveryPayload = readSiteDeliveryPayload();
+    Object.assign(payload, deliveryPayload);
+    if (payload.fulfillment_type === "delivery") {
+      if (!isValidEmail(deliveryPayload.receiver_email)) {
+        showToast("Vui lòng nhập email nhận hàng hợp lệ.");
+        return;
+      }
+      if (!deliveryPayload.city) {
+        showToast("Vui lòng nhập tỉnh/thành phố giao hàng.");
+        return;
+      }
+    }
     payload.delivery_address = document.querySelector("[data-site-delivery-address]")?.value?.trim() || "";
     const receiverPhone = document.querySelector("[data-site-receiver-phone]")?.value?.trim() || "";
     if (payload.fulfillment_type === "delivery" && !receiverPhone) {
@@ -1788,6 +1834,7 @@ async function checkoutScope(scope, extraPayload = {}) {
       receiverPhone ? `SĐT nhận hàng: ${receiverPhone}` : "",
       document.querySelector("[data-site-customer-note]")?.value?.trim() || "",
     ].filter(Boolean).join(" | ");
+    payload.customer_note = deliveryPayload.customer_note;
     const requestedAt = document.querySelector("[data-site-requested-at]")?.value || "";
     if (requestedAt) {
       payload.requested_at = requestedAt.replace("T", " ") + ":00";
@@ -1819,7 +1866,12 @@ async function checkoutScope(scope, extraPayload = {}) {
     } catch {}
   }
   if (scope === "site" && result.invoice_id) {
-    const statusText = result.status === "pending" ? "Đơn COD đang chờ thanh toán." : "Đơn đã thanh toán DemoPay.";
+    if (result.momo_payment?.pay_url) {
+      showToast(`Đơn #${result.invoice_id} đã được tạo. Đang chuyển sang MoMo...`);
+      window.location.href = result.momo_payment.pay_url;
+      return;
+    }
+    const statusText = result.status === "pending" ? "Đơn đang chờ thanh toán." : "Đơn đã thanh toán.";
     showToast(`${statusText} Đang chuyển sang chi tiết đơn #${result.invoice_id}.`);
     await navigateWebsite(url(`order?invoice_id=${result.invoice_id}`));
     return;
@@ -1836,6 +1888,21 @@ function renderWebsiteOrderDetail(receipt) {
   const payments = receipt?.payments || [];
   const payment = payments[0] || {};
   const canCancel = invoice.order_status === "pending";
+  const receiverName = invoice.receiver_name || invoice.customer_name || "";
+  const receiverPhone = invoice.receiver_phone || invoice.phone_number || "";
+  const receiverAddress = invoice.delivery_address || [invoice.ward, invoice.district, invoice.city]
+    .filter(Boolean)
+    .join(", ");
+  const receiverBlock = invoice.fulfillment_type === "delivery" ? `
+      <div class="delivery-detail-box">
+        <strong>Thông tin người nhận</strong>
+        <span>${escapeHtml(receiverName || "Chưa có tên người nhận")}</span>
+        ${invoice.receiver_email ? `<span>Email: ${escapeHtml(invoice.receiver_email)}</span>` : ""}
+        ${receiverPhone ? `<span>SĐT: ${escapeHtml(receiverPhone)}</span>` : ""}
+        ${receiverAddress ? `<span>Địa chỉ: ${escapeHtml(receiverAddress)}</span>` : ""}
+        ${invoice.customer_note ? `<span>Ghi chú: ${escapeHtml(invoice.customer_note)}</span>` : ""}
+      </div>
+    ` : (invoice.customer_note ? `<p><strong>Ghi chú:</strong> ${escapeHtml(invoice.customer_note)}</p>` : "");
   target.innerHTML = `
     <article class="auth-card">
       <div class="panel-head">
@@ -1856,8 +1923,7 @@ function renderWebsiteOrderDetail(receipt) {
         <span>Thanh toán: ${escapeHtml(formatDateTime(invoice.paid_at || ""))}</span>
         <span>Chi nhanh: ${escapeHtml(invoice.branch_name || "")}</span>
       </div>
-      ${invoice.delivery_address ? `<p><strong>Dia chi:</strong> ${escapeHtml(invoice.delivery_address)}</p>` : ""}
-      ${invoice.customer_note ? `<p><strong>Ghi chu:</strong> ${escapeHtml(invoice.customer_note)}</p>` : ""}
+      ${receiverBlock}
       ${tableHtml(items, ["Món", "SL", "Size", "Giá", "Tổng"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${escapeHtml(row.size || "")}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
       <div class="order-action-row">
         <button type="button" class="secondary-btn" data-order-receipt>In / xem receipt</button>
@@ -1880,6 +1946,54 @@ async function loadWebsiteOrderDetail() {
     renderWebsiteOrderDetail(receipt);
   } catch (error) {
     target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function loadMomoPaymentReturn() {
+  const target = document.querySelector("[data-payment-return-status]");
+  if (!target) return;
+
+  const invoiceId = Number(queryParam("invoice_id") || 0);
+  const providerOrderId = queryParam("orderId") || "";
+  if (!invoiceId && !providerOrderId) {
+    target.innerHTML = `
+      <p class="eyebrow">Thiếu thông tin</p>
+      <h2>Không tìm thấy mã thanh toán</h2>
+      <p>Vui lòng mở lại đơn từ hồ sơ hoặc lịch sử đơn hàng.</p>
+      <a class="primary-btn" href="${url("account")}">Về hồ sơ</a>
+    `;
+    return;
+  }
+
+  try {
+    const status = await api("payment-status", {
+      invoice_id: invoiceId,
+      provider_order_id: providerOrderId,
+    });
+    const paid = status.invoice_status === "paid" || status.payment_status === "paid";
+    const failed = ["failed", "cancelled"].includes(status.transaction_status) || ["failed", "cancelled"].includes(status.invoice_status);
+    target.innerHTML = `
+      <p class="eyebrow">MoMo</p>
+      <h2>${paid ? "Thanh toán thành công" : (failed ? "Thanh toán chưa thành công" : "Đang chờ xác nhận")}</h2>
+      <div class="receipt-summary-grid">
+        <div class="metric"><strong>#${escapeHtml(status.invoice_id || invoiceId)}</strong><small>Hóa đơn</small></div>
+        <div class="metric"><strong>${formatMoney(status.total_amount)}</strong><small>Số tiền</small></div>
+        <div class="metric"><strong>${escapeHtml(status.payment_status || "")}</strong><small>Payment</small></div>
+        <div class="metric"><strong>${escapeHtml(status.transaction_status || "")}</strong><small>MoMo</small></div>
+      </div>
+      <p>${escapeHtml(status.message || (paid ? "Đơn hàng đã được ghi nhận thanh toán." : "Nếu bạn vừa thanh toán, vui lòng chờ IPN từ MoMo trong vài giây."))}</p>
+      <div class="order-action-row">
+        <a class="primary-btn" href="${url(`order?invoice_id=${status.invoice_id || invoiceId}`)}">Xem chi tiết đơn</a>
+        <a class="secondary-btn" href="${url("menu")}">Tiếp tục mua hàng</a>
+      </div>
+    `;
+  } catch (error) {
+    target.innerHTML = `
+      <p class="eyebrow">Lỗi kiểm tra</p>
+      <h2>Không đọc được trạng thái MoMo</h2>
+      <p>${escapeHtml(error.message)}</p>
+      <a class="primary-btn" href="${url("account")}">Về hồ sơ</a>
+    `;
   }
 }
 
@@ -2134,6 +2248,7 @@ function renderCheckoutModule() {
 function renderOrdersModule() {
   const tables = cafeApp.tables || [];
   const orders = cafeApp.orders || [];
+  const websitePending = cafeApp.website_orders_pending || [];
   const role = state.pos.user?.staff_role || "";
   const canCreate = canCreateServiceOrder(role);
   const canCheckout = canCheckoutServiceOrder(role);
@@ -2177,8 +2292,51 @@ function renderOrdersModule() {
     </article>
   `).join("");
 
+  const websitePendingSection = canCheckout ? `
+    <section class="panel website-pending-orders">
+      <div class="panel-head">
+        <h2>Đơn website chờ thanh toán</h2>
+        <p>Chỉ hiển thị đơn COD pending của chi nhánh ca POS hiện tại.</p>
+      </div>
+      <div class="order-list">
+        ${websitePending.map((order) => `
+          <article class="order-card website-order-card">
+            <header>
+              <div>
+                <strong>WEB-${String(order.invoice_id || "").padStart(6, "0")}</strong>
+                <small>${escapeHtml(order.customer_name || "Khách lẻ")} · ${escapeHtml(order.phone_number || "Không có SĐT")}</small>
+              </div>
+              <span class="status">${escapeHtml(order.order_status || "pending")}</span>
+            </header>
+            <p class="order-meta">${escapeHtml(order.branch_name || "")} · ${escapeHtml(order.fulfillment_type || "pickup")} · ${escapeHtml(order.payment_method || "cash")} / ${escapeHtml(order.payment_status || "pending")}</p>
+            <p class="order-meta">Đặt lúc ${escapeHtml(formatDateTime(order.created_at || order.bill_started_at))}${order.requested_at ? ` · Hẹn ${escapeHtml(formatDateTime(order.requested_at))}` : ""}</p>
+            ${order.delivery_address ? `<p class="order-meta">Địa chỉ: ${escapeHtml(order.delivery_address)}</p>` : ""}
+            ${order.customer_note ? `<p class="order-meta">Ghi chú: ${escapeHtml(order.customer_note)}</p>` : ""}
+            ${order.receiver_name || order.receiver_phone ? `<p class="order-meta">Người nhận: ${escapeHtml(order.receiver_name || "Chưa có tên")} ${order.receiver_phone ? `· ${escapeHtml(order.receiver_phone)}` : ""}</p>` : ""}
+            ${order.receiver_email ? `<p class="order-meta">Email nhận hàng: ${escapeHtml(order.receiver_email)}</p>` : ""}
+            <div class="order-items">
+              ${(order.items || []).map((item) => `
+                <div>
+                  <span>${Number(item.quantity || 0)}× ${escapeHtml(item.product_name || "")}</span>
+                  <em class="order-item-note">${escapeHtml([item.size ? `Size ${item.size}` : "", item.topping].filter(Boolean).join(" · ") || "Không có ghi chú")}</em>
+                  <small>${formatMoney(item.line_total || 0)}</small>
+                </div>
+              `).join("")}
+            </div>
+            <footer>
+              <strong>${formatMoney(order.total_amount || 0)}</strong>
+              <button type="button" class="primary-btn" data-website-pending-pay="${escapeHtml(order.invoice_id || "")}">Xác nhận đã thanh toán</button>
+              <button type="button" class="ghost-btn" data-website-pending-cancel="${escapeHtml(order.invoice_id || "")}">Hủy đơn pending</button>
+            </footer>
+          </article>
+        `).join("") || '<div class="empty-state">Không có đơn website chờ thanh toán tại chi nhánh này.</div>'}
+      </div>
+    </section>
+  ` : "";
+
   if (!canCreate) {
     return `
+      ${websitePendingSection}
       <section class="panel">
         <div class="panel-head"><h2>Order đang mở</h2><p>${canCheckout ? "Thu ngân xem order để thanh toán." : "Role này chỉ được xem order theo quyền được cấp."}</p></div>
         ${canCheckout ? `<label class="field order-payment">Thanh toán
@@ -2212,6 +2370,7 @@ function renderOrdersModule() {
         <button class="primary-btn full" type="submit">Gửi order xuống bếp</button>
       </form>
     </div>
+    ${websitePendingSection}
     <div class="pos-grid order-picker">
       ${productPickerHtml("Thêm món vào order")}
       <section class="panel">
@@ -2432,6 +2591,39 @@ function renderInventoryModule() {
     <div class="dashboard-columns">
       <section class="panel"><h2>Nguyên vật liệu</h2>${tableHtml(inventory.materials || [], ["Tên", "ĐVT", "Tồn", "Tối thiểu", "Nhà cung cấp"], (row) => `<tr><td>${escapeHtml(row.material_name)}</td><td>${escapeHtml(row.unit)}</td><td>${Number(row.stock_quantity)}</td><td>${Number(row.min_stock_level)}</td><td>${escapeHtml(row.supplier_name)}</td></tr>`)}</section>
       <section class="panel"><h2>Lịch sử kho</h2>${tableHtml(inventory.movements || [], ["Mã", "Loại", "NVL", "SL", "Nhân viên"], (row) => `<tr><td>${escapeHtml(row.movement_code)}</td><td>${escapeHtml(row.movement_type)}</td><td>${escapeHtml(row.material_name)}</td><td>${Number(row.quantity)}</td><td>${escapeHtml(row.staff_name)}</td></tr>`)}</section>
+    </div>
+  `;
+}
+
+function renderInventoryModule() {
+  const inventory = cafeApp.inventory || {};
+  const materialCatalog = inventory.material_catalog || inventory.materials || [];
+  const materials = inventory.materials || [];
+  return `
+    <div class="admin-grid">
+      <form class="create-form" data-stock-movement>
+        <h2>Nhập/xuất nguyên vật liệu</h2>
+        <label>Chi nhánh <select name="branch_id">${(cafeApp.branches || []).map((branch) => `<option value="${branch.id}" ${Number(branch.id) === Number(state.pos.user?.branch_id || 1) ? "selected" : ""}>${escapeHtml(branch.branch_name)}</option>`).join("")}</select></label>
+        <label>Nguyên vật liệu <select name="material_id">${materialCatalog.map((item) => `<option value="${item.material_id || item.id}">${escapeHtml(item.material_name)} (${escapeHtml(item.unit)})</option>`).join("")}</select></label>
+        <label>Loại <select name="movement_type"><option value="import">Nhập kho</option><option value="sales_export">Xuất sử dụng</option><option value="waste_export">Hủy hao hụt</option><option value="adjustment">Điều chỉnh tăng</option></select></label>
+        <label>Số lượng <input type="number" name="quantity" value="1" min="0.01" step="0.01"></label>
+        <label>Đơn giá <input type="number" name="unit_cost" value="0" min="0"></label>
+        <label>Tổng giá trị <input type="number" name="total_amount" value="0" min="0"></label>
+        <label>Nhà cung cấp <input name="supplier_name" maxlength="150"></label>
+        <label>Mã lô <input name="batch_code" maxlength="80"></label>
+        <label>Hạn dùng <input type="date" name="expiry_date"></label>
+        <label>Ghi chú <textarea name="note" placeholder="Lý do nhập/xuất/hao hụt..."></textarea></label>
+        <button class="primary-btn" type="submit">Ghi nhận kho</button>
+      </form>
+      <section class="panel"><div class="panel-head"><h2>Tổng quan nguyên vật liệu</h2><p>Kho được quản lý theo chi nhánh và trừ tự động theo recipe khi hóa đơn được ghi nhận.</p></div>${tableHtml(materials, ["Chi nhánh", "Nguyên vật liệu", "ĐVT", "Tồn", "Tối thiểu", "Giá vốn", "Trạng thái"], (row) => {
+        const status = row.stock_status === "out" ? "Hết" : (row.stock_status === "low" ? "Thấp" : "Đủ");
+        const statusClass = row.stock_status === "ok" ? "good" : "bad";
+        return `<tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.material_name)}</td><td>${escapeHtml(row.unit)}</td><td>${Number(row.stock_quantity).toFixed(2)}</td><td>${Number(row.min_stock_level).toFixed(2)}</td><td>${formatMoney(row.unit_cost)}</td><td><span class="status ${statusClass}">${status}</span></td></tr>`;
+      }, "Chưa có dữ liệu tồn nguyên vật liệu.")}</section>
+    </div>
+    <div class="dashboard-columns">
+      <section class="panel"><h2>Recipe / BOM</h2>${tableHtml(inventory.recipes || [], ["Sản phẩm", "Recipe", "Nguyên vật liệu", "Trạng thái"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${escapeHtml(row.recipe_name)}</td><td>${escapeHtml(row.materials || "Chưa cấu hình")}</td><td><span class="status ${row.status === "active" ? "good" : "bad"}">${escapeHtml(row.status)}</span></td></tr>`, "Chưa có recipe.")}</section>
+      <section class="panel"><h2>Lịch sử kho</h2>${tableHtml(inventory.movements || [], ["Mã", "Chi nhánh", "Loại", "NVL", "SL", "Giá trị", "Nhân viên"], (row) => `<tr><td>${escapeHtml(row.movement_code)}</td><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.movement_type)}</td><td>${escapeHtml(row.material_name)}</td><td>${Number(row.quantity).toFixed(2)}</td><td>${formatMoney(row.total_amount)}</td><td>${escapeHtml(row.staff_name)}</td></tr>`, "Chưa có lịch sử kho.")}</section>
     </div>
   `;
 }
@@ -2782,6 +2974,7 @@ async function refreshPosData(showMessage = true) {
   cafeApp.staff = data.staff || [];
   cafeApp.tables = data.tables || [];
   cafeApp.orders = data.orders || [];
+  cafeApp.website_orders_pending = data.website_orders_pending || [];
   cafeApp.kitchen = data.kitchen || [];
   cafeApp.dashboard = data.dashboard || null;
   cafeApp.campaigns = data.campaigns || [];
@@ -2852,6 +3045,7 @@ function startPosHeartbeat() {
 
 function updatePosCollections(result = {}) {
   if (result.orders) cafeApp.orders = result.orders;
+  if (result.website_orders_pending) cafeApp.website_orders_pending = result.website_orders_pending;
   if (result.tables) cafeApp.tables = result.tables;
   if (result.kitchen) cafeApp.kitchen = result.kitchen;
   if (result.product_inventory || result.materials || result.movements) cafeApp.inventory = result;
@@ -3263,6 +3457,8 @@ function wireEvents() {
     const updateItem = event.target.closest("[data-update-item]");
     const voidItem = event.target.closest("[data-void-item]");
     const cancelOrder = event.target.closest("[data-cancel-order]");
+    const websitePendingPay = event.target.closest("[data-website-pending-pay]");
+    const websitePendingCancel = event.target.closest("[data-website-pending-cancel]");
     const orderCheckout = event.target.closest("[data-order-checkout]");
     const receiptInvoice = event.target.closest("[data-receipt-invoice]");
     const refundInvoice = event.target.closest("[data-refund-invoice]");
@@ -3524,6 +3720,37 @@ function wireEvents() {
         updatePosCollections(result);
         renderPosApp();
         showToast("Đã hủy order.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (websitePendingPay) {
+      try {
+        const result = await api("order-status-update", {
+          invoice_id: Number(websitePendingPay.dataset.websitePendingPay),
+          status: "paid",
+        });
+        updatePosCollections(result);
+        renderPosApp();
+        showToast("Đã xác nhận thanh toán đơn website.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (websitePendingCancel) {
+      const reason = window.prompt("Lý do hủy đơn website pending?");
+      if (!reason || !reason.trim()) return;
+      try {
+        const result = await api("order-status-update", {
+          invoice_id: Number(websitePendingCancel.dataset.websitePendingCancel),
+          status: "cancelled",
+          reason: reason.trim(),
+        });
+        updatePosCollections(result);
+        renderPosApp();
+        showToast("Đã hủy đơn website pending.");
       } catch (error) {
         showToast(error.message);
       }
@@ -4099,7 +4326,7 @@ function wireEvents() {
       try {
         const payload = Object.fromEntries(new FormData(stockForm));
         payload.staff_id = state.pos.user?.id || 1;
-        payload.branch_id = state.pos.user?.branch_id || 1;
+        payload.branch_id = Number(payload.branch_id || state.pos.user?.branch_id || 1);
         cafeApp.inventory = await api("stock-movement", payload);
         renderPosApp();
         showToast("Đã ghi nhận nhập/xuất kho.");
@@ -4287,6 +4514,7 @@ function initialRender() {
   renderReviews();
   renderCart("site");
   loadWebsiteOrderDetail();
+  loadMomoPaymentReturn();
   if (state.site.customer) {
     renderMiniMember("site");
     renderVoucherOptions("site");

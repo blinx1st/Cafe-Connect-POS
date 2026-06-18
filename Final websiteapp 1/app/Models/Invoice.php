@@ -49,12 +49,19 @@ final class Invoice extends Model
         $now = date('Y-m-d H:i:s');
         $isWebsiteOrder = in_array($salesChannel, ['website', 'delivery'], true);
         $posSessionId = $isWebsiteOrder ? null : (int) ($data['pos_session_id'] ?? 0);
-        $isPendingCod = $isWebsiteOrder && $paymentMethod === 'cash';
-        $invoiceStatus = $isPendingCod ? 'pending' : 'paid';
-        $paymentStatus = $isPendingCod ? 'pending' : 'paid';
+        $isPendingWebsitePayment = $isWebsiteOrder && in_array($paymentMethod, ['cash', 'e_wallet'], true);
+        $invoiceStatus = $isPendingWebsitePayment ? 'pending' : 'paid';
+        $paymentStatus = $isPendingWebsitePayment ? 'pending' : 'paid';
         $paidAt = $invoiceStatus === 'paid' ? $now : null;
         $invoiceDate = substr($now, 0, 10);
         $invoiceTime = substr($now, 11, 8);
+        $websiteDelivery = null;
+        if ($isWebsiteOrder) {
+            $fulfillmentTypeForValidation = in_array(($data['fulfillment_type'] ?? 'pickup'), ['pickup', 'delivery'], true)
+                ? (string) $data['fulfillment_type']
+                : 'pickup';
+            $websiteDelivery = $this->prepareWebsiteDeliveryData($data, $fulfillmentTypeForValidation);
+        }
 
         $productModel = new Product();
         $productIds = array_map(static fn ($item) => (int) ($item['product_id'] ?? 0), $items);
@@ -92,6 +99,7 @@ final class Invoice extends Model
         $this->db->beginTransaction();
         try {
             $this->assertStockAvailable($prepared, $branchId);
+            (new Inventory())->assertMaterialsAvailableForItems($prepared, $branchId);
             $customer = $customerId ? $this->customerForUpdate($customerId) : null;
             $membershipDiscount = $customer ? round($subtotal * ((float) $customer['discount_rate'] / 100), 0) : 0.0;
             $voucher = $voucherModel->validateForCheckout($voucherId, $customerId, $salesChannel, true);
@@ -153,9 +161,9 @@ final class Invoice extends Model
             )->execute([
                 'invoice_id' => $invoiceId,
                 'payment_method' => $paymentMethod,
-                'provider' => $paymentMethod === 'cash' ? PAYMENT_COD_PROVIDER : PAYMENT_DEMO_PROVIDER,
+                'provider' => $paymentMethod === 'cash' ? PAYMENT_COD_PROVIDER : ($isWebsiteOrder ? PAYMENT_MOMO_PROVIDER : PAYMENT_DEMO_PROVIDER),
                 'amount' => $total,
-                'paid_at' => $paidAt ?? $now,
+                'paid_at' => $paidAt,
                 'ref' => strtoupper($salesChannel) . '-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
                 'status' => $paymentStatus,
             ]);
@@ -163,23 +171,31 @@ final class Invoice extends Model
             $websiteOrderId = null;
             $websiteOrderStatus = null;
             if ($isWebsiteOrder) {
-                $fulfillmentType = in_array(($data['fulfillment_type'] ?? 'pickup'), ['pickup', 'delivery'], true)
-                    ? $data['fulfillment_type']
-                    : 'pickup';
+                $fulfillmentType = $websiteDelivery['fulfillment_type'] ?? 'pickup';
                 $orderStatus = $invoiceStatus === 'pending' ? 'pending' : 'paid';
                 $this->db->prepare(
                     "INSERT INTO website_orders (
-                        invoice_id, customer_id, fulfillment_type, order_status, delivery_address, customer_note, requested_at
+                        invoice_id, customer_id, fulfillment_type, order_status,
+                        receiver_email, receiver_name, receiver_phone, delivery_address, city, district, ward,
+                        customer_note, requested_at
                      ) VALUES (
-                        :invoice_id, :customer_id, :fulfillment_type, :order_status, :delivery_address, :customer_note, :requested_at
+                        :invoice_id, :customer_id, :fulfillment_type, :order_status,
+                        :receiver_email, :receiver_name, :receiver_phone, :delivery_address, :city, :district, :ward,
+                        :customer_note, :requested_at
                      )"
                 )->execute([
                     'invoice_id' => $invoiceId,
                     'customer_id' => $customerId,
                     'fulfillment_type' => $fulfillmentType,
                     'order_status' => $orderStatus,
-                    'delivery_address' => trim((string) ($data['delivery_address'] ?? '')) ?: null,
-                    'customer_note' => trim((string) ($data['customer_note'] ?? $data['note'] ?? '')) ?: null,
+                    'receiver_email' => $websiteDelivery['receiver_email'] ?? null,
+                    'receiver_name' => $websiteDelivery['receiver_name'] ?? null,
+                    'receiver_phone' => $websiteDelivery['receiver_phone'] ?? null,
+                    'delivery_address' => $websiteDelivery['delivery_address'] ?? null,
+                    'city' => $websiteDelivery['city'] ?? null,
+                    'district' => $websiteDelivery['district'] ?? null,
+                    'ward' => $websiteDelivery['ward'] ?? null,
+                    'customer_note' => $websiteDelivery['customer_note'] ?? null,
                     'requested_at' => $this->dateTimeOrNull((string) ($data['requested_at'] ?? '')),
                 ]);
                 $websiteOrderId = (int) $this->db->lastInsertId();
@@ -269,6 +285,43 @@ final class Invoice extends Model
             $this->db->rollBack();
             throw $exception;
         }
+    }
+
+    public function restoreInventoryForCancelledInvoice(int $invoiceId, string $note): void
+    {
+        $stmt = $this->db->prepare("SELECT * FROM invoices WHERE id = :id FOR UPDATE");
+        $stmt->execute(['id' => $invoiceId]);
+        $invoice = $stmt->fetch();
+        if (!$invoice) {
+            return;
+        }
+
+        $details = $this->db->prepare(
+            "SELECT product_id, quantity
+             FROM invoice_details
+             WHERE invoice_id = :invoice_id"
+        );
+        $details->execute(['invoice_id' => $invoiceId]);
+        $stockStmt = $this->db->prepare(
+            "UPDATE branch_inventory
+             SET stock_quantity = stock_quantity + :quantity, last_updated = NOW()
+             WHERE branch_id = :branch_id AND product_id = :product_id"
+        );
+        foreach ($details->fetchAll() as $detail) {
+            $stockStmt->execute([
+                'quantity' => (int) $detail['quantity'],
+                'branch_id' => (int) $invoice['branch_id'],
+                'product_id' => (int) $detail['product_id'],
+            ]);
+        }
+
+        (new Inventory())->restoreInvoiceMaterials(
+            $invoiceId,
+            (int) $invoice['branch_id'],
+            (int) $invoice['staff_id'],
+            !empty($invoice['pos_session_id']) ? (int) $invoice['pos_session_id'] : null,
+            $note
+        );
     }
 
     public function refund(array $data): array
@@ -385,7 +438,8 @@ final class Invoice extends Model
         $stmt = $this->db->prepare(
             "SELECT i.*, b.branch_name, b.address AS branch_address, s.staff_name,
                     c.customer_name, c.phone_number, c.email,
-                    wo.fulfillment_type, wo.order_status, wo.delivery_address, wo.customer_note, wo.requested_at
+                    wo.fulfillment_type, wo.order_status, wo.receiver_email, wo.receiver_name, wo.receiver_phone,
+                    wo.delivery_address, wo.city, wo.district, wo.ward, wo.customer_note, wo.requested_at
              FROM invoices i
              JOIN branches b ON b.id = i.branch_id
              JOIN staff s ON s.id = i.staff_id
@@ -555,5 +609,58 @@ final class Invoice extends Model
         }
 
         return date('Y-m-d H:i:s', $timestamp);
+    }
+
+    private function prepareWebsiteDeliveryData(array $data, string $fulfillmentType): array
+    {
+        $note = substr(trim((string) ($data['customer_note'] ?? $data['note'] ?? '')), 0, 255) ?: null;
+        if ($fulfillmentType !== 'delivery') {
+            return [
+                'fulfillment_type' => 'pickup',
+                'receiver_email' => null,
+                'receiver_name' => null,
+                'receiver_phone' => null,
+                'delivery_address' => null,
+                'city' => null,
+                'district' => null,
+                'ward' => null,
+                'customer_note' => $note,
+            ];
+        }
+
+        $email = substr(trim((string) ($data['receiver_email'] ?? $data['email'] ?? '')), 0, 150);
+        $name = substr(trim((string) ($data['receiver_name'] ?? $data['customer_name'] ?? '')), 0, 150);
+        $phone = substr(trim((string) ($data['receiver_phone'] ?? $data['phone_number'] ?? '')), 0, 20);
+        $address = substr(trim((string) ($data['delivery_address'] ?? '')), 0, 180);
+        $city = substr(trim((string) ($data['city'] ?? '')), 0, 120);
+        $district = substr(trim((string) ($data['district'] ?? '')), 0, 120);
+        $ward = substr(trim((string) ($data['ward'] ?? '')), 0, 120);
+
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('Vui lòng nhập email nhận hàng hợp lệ.');
+        }
+        if ($phone === '') {
+            throw new InvalidArgumentException('Vui lòng nhập số điện thoại nhận hàng.');
+        }
+        if ($address === '') {
+            throw new InvalidArgumentException('Vui lòng nhập địa chỉ giao hàng.');
+        }
+        if ($city === '') {
+            throw new InvalidArgumentException('Vui lòng nhập tỉnh/thành phố giao hàng.');
+        }
+
+        $fullAddress = implode(', ', array_filter([$address, $ward, $district, $city], static fn ($part) => $part !== ''));
+
+        return [
+            'fulfillment_type' => 'delivery',
+            'receiver_email' => $email,
+            'receiver_name' => $name ?: null,
+            'receiver_phone' => $phone,
+            'delivery_address' => substr($fullAddress, 0, 255),
+            'city' => $city,
+            'district' => $district ?: null,
+            'ward' => $ward ?: null,
+            'customer_note' => $note,
+        ];
     }
 }

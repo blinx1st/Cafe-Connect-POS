@@ -17,7 +17,8 @@ final class WebsiteOrder extends Model
 
         $stmt = $this->db->prepare(
             "SELECT wo.id AS website_order_id, wo.invoice_id, wo.fulfillment_type, wo.order_status,
-                    wo.delivery_address, wo.customer_note, wo.requested_at, wo.created_at,
+                    wo.receiver_email, wo.receiver_name, wo.receiver_phone, wo.delivery_address,
+                    wo.city, wo.district, wo.ward, wo.customer_note, wo.requested_at, wo.created_at,
                     i.invoice_date, i.invoice_time, i.paid_at, i.total_amount, i.payment_method, i.status AS invoice_status,
                     b.branch_name,
                     COALESCE(v.voucher_code, '') AS voucher_code,
@@ -59,6 +60,7 @@ final class WebsiteOrder extends Model
                 throw new InvalidArgumentException('Only pending website orders can be cancelled by customer.');
             }
 
+            (new Invoice())->restoreInventoryForCancelledInvoice($invoiceId, 'Restore stock for cancelled website order #' . $invoiceId);
             $this->db->prepare(
                 "UPDATE website_orders
                  SET order_status = 'cancelled',
@@ -94,7 +96,7 @@ final class WebsiteOrder extends Model
         }
     }
 
-    public function confirmDemoPayment(int $customerId, int $invoiceId): array
+    public function confirmMomoPayment(int $customerId, int $invoiceId, array $metadata = []): array
     {
         $this->db->beginTransaction();
         try {
@@ -102,8 +104,8 @@ final class WebsiteOrder extends Model
             if (!$invoice) {
                 throw new InvalidArgumentException('Website order not found.');
             }
-            if (!in_array(($invoice['payment_method'] ?? ''), ['card', 'e_wallet'], true)) {
-                throw new InvalidArgumentException('DemoPay can only confirm card or e-wallet orders.');
+            if (($invoice['payment_method'] ?? '') !== 'e_wallet') {
+                throw new InvalidArgumentException('MoMo can only confirm e-wallet orders.');
             }
 
             if (($invoice['invoice_status'] ?? '') !== 'paid') {
@@ -124,8 +126,8 @@ final class WebsiteOrder extends Model
                      WHERE invoice_id = :invoice_id"
                 )->execute([
                     'invoice_id' => $invoiceId,
-                    'provider' => PAYMENT_DEMO_PROVIDER,
-                    'ref' => 'DEMO-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT),
+                    'provider' => PAYMENT_MOMO_PROVIDER,
+                    'ref' => (string) ($metadata['transaction_reference'] ?? ('MOMO-' . str_pad((string) $invoiceId, 6, '0', STR_PAD_LEFT))),
                 ]);
                 $this->db->prepare("UPDATE website_orders SET order_status = 'paid' WHERE invoice_id = :invoice_id")
                     ->execute(['invoice_id' => $invoiceId]);
@@ -162,14 +164,58 @@ final class WebsiteOrder extends Model
             (new AuditLog())->record([
                 'actor_type' => 'customer',
                 'actor_id' => $customerId,
-                'action' => 'payment_demo_confirm',
+                'action' => 'payment_momo_confirm',
                 'entity_type' => 'invoice',
                 'entity_id' => $invoiceId,
-                'metadata' => ['provider' => PAYMENT_DEMO_PROVIDER],
+                'metadata' => ['provider' => PAYMENT_MOMO_PROVIDER] + $metadata,
             ]);
 
             $this->db->commit();
             return $this->detailForCustomer($customerId, $invoiceId);
+        } catch (\Throwable $exception) {
+            $this->db->rollBack();
+            throw $exception;
+        }
+    }
+
+    public function failMomoPayment(int $invoiceId, string $reason, array $metadata = []): array
+    {
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT i.*, wo.customer_id, wo.order_status
+                 FROM invoices i
+                 JOIN website_orders wo ON wo.invoice_id = i.id
+                 WHERE i.id = :invoice_id
+                 LIMIT 1
+                 FOR UPDATE"
+            );
+            $stmt->execute(['invoice_id' => $invoiceId]);
+            $invoice = $stmt->fetch();
+            if (!$invoice) {
+                throw new InvalidArgumentException('Website order not found.');
+            }
+
+            if (($invoice['status'] ?? '') === 'pending') {
+                (new Invoice())->restoreInventoryForCancelledInvoice($invoiceId, 'Restore stock for failed MoMo payment #' . $invoiceId);
+                $this->db->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = :id")->execute(['id' => $invoiceId]);
+                $this->db->prepare("UPDATE payments SET status = 'failed' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
+                $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
+                if (!empty($invoice['voucher_id'])) {
+                    (new Voucher())->restoreIfAvailable((int) $invoice['voucher_id']);
+                }
+            }
+
+            (new AuditLog())->record([
+                'actor_type' => 'system',
+                'action' => 'payment_momo_failed',
+                'entity_type' => 'invoice',
+                'entity_id' => $invoiceId,
+                'metadata' => ['reason' => $reason] + $metadata,
+            ]);
+
+            $this->db->commit();
+            return (new Invoice())->receipt($invoiceId);
         } catch (\Throwable $exception) {
             $this->db->rollBack();
             throw $exception;

@@ -252,3 +252,57 @@ API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `invento
 - Campaign `Tự phát theo segment` dùng `distribution_type = auto_issue` và tiếp tục phát voucher tự động cho nhóm khách phù hợp như luồng cũ.
 - Hệ thống tạo voucher riêng trong bảng `vouchers` gắn với `customer_id`; voucher mới lập tức hiện ở hồ sơ và dropdown checkout.
 - Khi thanh toán có chọn voucher, `Invoice::checkout()` validate voucher và tự chuyển voucher sang `redeemed`.
+
+## Cập nhật kho nguyên vật liệu và MoMo
+
+- `/pos/inventory` hiện quản lý nguyên vật liệu theo chi nhánh qua bảng `branch_material_inventory`; bảng tồn kho sản phẩm không còn là nội dung chính của module Kho.
+- `inventory_materials` là danh mục nguyên vật liệu: tên, đơn vị tính, nhà cung cấp và giá vốn mặc định.
+- Nhập/xuất/hao hụt kho tạo dòng `stock_movements` và cập nhật tồn nguyên vật liệu của đúng chi nhánh.
+- Khi checkout, hệ thống kiểm tra recipe/BOM trong `recipes` và `recipe_items`; nếu thiếu nguyên vật liệu ở chi nhánh xử lý thì đơn bị chặn.
+- Nếu đơn website pending bị hủy hoặc thanh toán MoMo thất bại, hệ thống trả lại tồn sản phẩm, tồn nguyên vật liệu và voucher đã giữ.
+
+### Cấu hình MoMo sandbox bằng ngrok
+
+1. Sao chép `config/payment.local.example.php` thành `config/payment.local.php`.
+2. Chạy XAMPP Apache/MySQL.
+3. Chạy `ngrok http 80` để lấy public HTTPS URL.
+4. Điền thông tin MoMo sandbox vào `config/payment.local.php`: `partner_code`, `access_key`, `secret_key`, `redirect_url`, `ipn_url`.
+5. Nếu chạy bằng thư mục con XAMPP như hiện tại, đặt `redirect_url` theo dạng `https://your-ngrok-domain/<duong-dan-du-an>/payment/momo-return`.
+6. Đặt `ipn_url` theo dạng `https://your-ngrok-domain/<duong-dan-du-an>/api/payment-momo-ipn`.
+7. Không commit `config/payment.local.php`; file này đã được thêm vào `.gitignore`.
+
+Luồng thanh toán website:
+
+- COD tạo invoice/payment `pending`.
+- MoMo tạo invoice/payment `pending`, sau đó redirect khách sang `payUrl` của MoMo.
+- IPN `/api/payment-momo-ipn` là nguồn xác nhận chính. Khi MoMo trả `resultCode = 0`, hệ thống chuyển invoice/payment sang `paid`, cộng điểm và redeem voucher.
+- Nếu MoMo thất bại hoặc bị hủy, payment chuyển `failed`, order chuyển `cancelled`, voucher và tồn kho được hoàn lại.
+
+## Đơn website pending trong POS
+
+- Website checkout COD vẫn tạo `invoices`, `payments`, `website_orders` ở trạng thái `pending`.
+- POS `/pos/orders` hiển thị nhóm `Đơn website chờ thanh toán` cho `cashier`, `manager`, `owner`, `admin`.
+- Danh sách này chỉ lấy đơn COD pending thuộc `branch_id` của ca POS đang mở trong `pos_sessions`.
+- Thu ngân cùng chi nhánh bấm `Xác nhận đã thanh toán` để chuyển invoice/payment/order sang `paid`, cộng điểm và redeem voucher nếu có.
+- Thu ngân chi nhánh khác không thấy đơn và nếu gọi API trực tiếp bằng `invoice_id` cũng bị backend chặn.
+
+## Dữ liệu mẫu theo chi nhánh
+
+Sau khi chạy `install.php` hoặc import `database/cafe_connect_schema.sql`, hệ thống có dữ liệu mẫu cho 4 chi nhánh:
+
+| Chi nhánh | Nhân viên mẫu | Ghi chú dữ liệu |
+| --- | --- | --- |
+| Coffee Connect - Cầu Giấy | `WAIT001`, `CASH001`, `BAR001`, `OWNER001`, `MKT001` | Có bàn, order đang mở, invoice POS/website, kho và thu chi mẫu. |
+| Coffee Connect - Hoàn Kiếm | `ADMIN001`, `MGR001`, `WAIT002`, `BAR002`, `CASH003` | Có bàn, order phục vụ, invoice card, kho và thu chi mẫu. |
+| Coffee Connect - Tây Hồ | `CASH002`, `WAIT003`, `BAR003`, `MGR003` | Có bàn lake view, order đang pha chế, invoice delivery, kho và thu chi mẫu. |
+| Coffee Connect - Số 1 | `WAIT004`, `CASH004`, `BAR004`, `MGR004` | Có bàn, order ready và một đơn website COD `pending` để cashier chi nhánh xác nhận trong `/pos/orders`. |
+
+Mật khẩu/PIN demo theo role:
+
+- Waiter: mật khẩu `waiter123`, PIN `1111`.
+- Cashier: mật khẩu `cashier123`, PIN `2222`.
+- Barista: mật khẩu `barista123`, PIN `3333`.
+- Manager: mật khẩu `manager123`, PIN `7777`.
+- Admin: mật khẩu `admin123`, PIN `6666`.
+- Owner: mật khẩu `owner123`, PIN `4444`.
+- Marketing: mật khẩu `marketing123`, PIN `5555`.

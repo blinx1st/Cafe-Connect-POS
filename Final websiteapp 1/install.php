@@ -137,6 +137,16 @@ function seed_demo_credentials(): void
         'admin@cafeconnect.test' => ['code' => 'ADMIN001', 'password' => 'admin123', 'pin' => '6666'],
         'manager.hk@cafeconnect.test' => ['code' => 'MGR001', 'password' => 'manager123', 'pin' => '7777'],
         'cashier.th@cafeconnect.test' => ['code' => 'CASH002', 'password' => 'cashier123', 'pin' => '2222'],
+        'cashier.hk@cafeconnect.test' => ['code' => 'CASH003', 'password' => 'cashier123', 'pin' => '2222'],
+        'waiter.hk@cafeconnect.test' => ['code' => 'WAIT002', 'password' => 'waiter123', 'pin' => '1111'],
+        'barista.hk@cafeconnect.test' => ['code' => 'BAR002', 'password' => 'barista123', 'pin' => '3333'],
+        'waiter.th@cafeconnect.test' => ['code' => 'WAIT003', 'password' => 'waiter123', 'pin' => '1111'],
+        'barista.th@cafeconnect.test' => ['code' => 'BAR003', 'password' => 'barista123', 'pin' => '3333'],
+        'manager.th@cafeconnect.test' => ['code' => 'MGR003', 'password' => 'manager123', 'pin' => '7777'],
+        'waiter.tvb@cafeconnect.test' => ['code' => 'WAIT004', 'password' => 'waiter123', 'pin' => '1111'],
+        'cashier.tvb@cafeconnect.test' => ['code' => 'CASH004', 'password' => 'cashier123', 'pin' => '2222'],
+        'barista.tvb@cafeconnect.test' => ['code' => 'BAR004', 'password' => 'barista123', 'pin' => '3333'],
+        'manager.tvb@cafeconnect.test' => ['code' => 'MGR004', 'password' => 'manager123', 'pin' => '7777'],
     ];
     $staffStmt = $pdo->prepare(
         "UPDATE staff

@@ -42,6 +42,8 @@ final class Database
                     (SELECT COUNT(*) FROM staff_shifts) AS staff_shifts_count,
                     (SELECT COUNT(*) FROM staff_login_sessions) AS staff_login_sessions_count,
                     (SELECT COUNT(*) FROM pos_activity_logs) AS pos_activity_logs_count,
+                    (SELECT COUNT(*) FROM branch_material_inventory) AS branch_material_inventory_count,
+                    (SELECT COUNT(*) FROM payment_transactions) AS payment_transactions_count,
                     (SELECT COUNT(password_hash) FROM customers) AS customer_password_count,
                     (SELECT COUNT(password_hash) FROM staff) AS staff_password_count,
                     (SELECT COUNT(staff_code) FROM staff) AS staff_code_count,

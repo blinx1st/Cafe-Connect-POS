@@ -1,10 +1,14 @@
 <?php require VIEW_PATH . '/website/partials/header.php'; ?>
+<?php
+$momoEnabled = !empty($appData['payment']['momo_enabled']);
+$member = $appData['member'] ?? null;
+?>
 
 <main class="page-main" data-site-checkout-page>
   <section class="page-hero compact-hero checkout-hero">
     <p class="eyebrow">Checkout</p>
     <h1>Đặt món và tích điểm</h1>
-    <p>Kiểm tra giỏ hàng, chọn hình thức nhận món, áp voucher và xác nhận thanh toán trên cùng một trang.</p>
+    <p>Kiểm tra giỏ hàng, chọn hình thức nhận món, áp voucher và thanh toán trên cùng một trang.</p>
   </section>
 
   <section class="section-shell page-section checkout-workspace">
@@ -51,7 +55,7 @@
               <input type="radio" name="site_fulfillment" value="delivery" data-site-fulfillment>
               <span>
                 <strong>Giao hàng</strong>
-                <small>Cần SĐT và địa chỉ nhận hàng.</small>
+                <small>Cần thông tin người nhận và địa chỉ giao hàng.</small>
               </span>
             </label>
           </div>
@@ -60,22 +64,43 @@
             <label class="field">Chi nhánh xử lý
               <select data-site-branch>
                 <?php foreach (($appData['branches'] ?? []) as $branch): ?>
-                  <option value="<?= e((string) $branch['id']) ?>" <?= ($branch['branch_name'] ?? '') === 'Coffee Connect số 1' ? 'selected' : '' ?>><?= e($branch['branch_name']) ?><?= !empty($branch['district']) ? ' - ' . e($branch['district']) : '' ?></option>
+                  <option value="<?= e((string) $branch['id']) ?>" <?= str_contains((string) ($branch['branch_name'] ?? ''), 'Số 1') ? 'selected' : '' ?>>
+                    <?= e($branch['branch_name']) ?><?= !empty($branch['district']) ? ' - ' . e($branch['district']) : '' ?>
+                  </option>
                 <?php endforeach; ?>
               </select>
             </label>
             <p class="checkout-note branch-info" data-site-branch-info></p>
             <p class="checkout-note" data-pickup-only>Vui lòng đến quầy theo thời gian nhận dự kiến. Nhân viên sẽ đối chiếu mã hóa đơn.</p>
-            <label class="field" data-delivery-only hidden>Số điện thoại nhận hàng
-              <input type="tel" data-site-receiver-phone placeholder="Ví dụ: 0900000001">
-            </label>
-            <label class="field" data-delivery-only hidden>Địa chỉ giao hàng
-              <input type="text" data-site-delivery-address placeholder="Số nhà, đường, phường/xã, quận/huyện">
-            </label>
+
+            <div class="delivery-recipient-fields" data-delivery-only hidden>
+              <label class="field">Email <span class="required-mark">(Yêu cầu)</span>
+                <input type="email" data-site-receiver-email value="<?= e((string) ($member['email'] ?? '')) ?>" placeholder="email@example.com" autocomplete="email">
+              </label>
+              <label class="field">Họ và tên
+                <input type="text" data-site-receiver-name value="<?= e((string) ($member['customer_name'] ?? '')) ?>" placeholder="Nguyễn Văn An" autocomplete="name">
+              </label>
+              <label class="field">SĐT <span class="required-mark">(Yêu cầu)</span>
+                <input type="tel" data-site-receiver-phone value="<?= e((string) ($member['phone_number'] ?? '')) ?>" placeholder="Ví dụ: 0900000001" autocomplete="tel">
+              </label>
+              <label class="field">Địa chỉ <span class="required-mark">(Yêu cầu)</span>
+                <input type="text" data-site-delivery-address placeholder="Số nhà, đường" autocomplete="street-address">
+              </label>
+              <label class="field">Tỉnh thành <span class="required-mark">(Yêu cầu)</span>
+                <input type="text" data-site-city placeholder="Hà Nội" autocomplete="address-level1">
+              </label>
+              <label class="field">Quận huyện <span>(Tùy chọn)</span>
+                <input type="text" data-site-district placeholder="Nam Từ Liêm" autocomplete="address-level2">
+              </label>
+              <label class="field">Phường xã <span>(Tùy chọn)</span>
+                <input type="text" data-site-ward placeholder="Xuân Phương" autocomplete="address-level3">
+              </label>
+            </div>
+
             <label class="field">Thời gian nhận dự kiến
               <input type="datetime-local" data-site-requested-at>
             </label>
-            <label class="field">Ghi chú đơn hàng
+            <label class="field">Ghi chú đơn hàng <span>(Tùy chọn)</span>
               <textarea data-site-customer-note rows="3" placeholder="Ghi chú giao hàng hoặc yêu cầu chung cho đơn..."></textarea>
             </label>
           </div>
@@ -96,17 +121,21 @@
             </label>
             <label class="field">Phương thức thanh toán
               <select data-site-payment>
-                <option value="e_wallet">DemoPay e-wallet - đã thanh toán</option>
-                <option value="card">DemoPay card - đã thanh toán</option>
-                <option value="cash">COD - thanh toán khi nhận hàng</option>
+                <?php if ($momoEnabled): ?>
+                  <option value="e_wallet">MoMo e-wallet - thanh toán online</option>
+                <?php endif; ?>
+                <option value="cash" <?= $momoEnabled ? '' : 'selected' ?>>COD - thanh toán khi nhận hàng</option>
               </select>
             </label>
+            <?php if (!$momoEnabled): ?>
+              <p class="checkout-note danger">MoMo chưa được cấu hình. Hệ thống tạm thời chỉ nhận COD.</p>
+            <?php endif; ?>
             <p class="checkout-note" data-site-payment-hint></p>
           </div>
 
           <div data-site-totals class="totals checkout-totals"></div>
           <button class="primary-btn full" type="button" data-site-checkout <?= $installed ? '' : 'disabled' ?>>Đặt hàng</button>
-          <p class="checkout-note">Sau khi đặt hàng thành công, hệ thống sẽ chuyển sang trang chi tiết đơn để xem trạng thái và receipt.</p>
+          <p class="checkout-note">Sau khi đặt hàng thành công, hệ thống sẽ chuyển sang trang chi tiết đơn hoặc cổng thanh toán MoMo.</p>
         </section>
       </aside>
     </div>

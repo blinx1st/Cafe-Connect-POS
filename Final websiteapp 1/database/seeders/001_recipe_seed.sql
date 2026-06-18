@@ -34,12 +34,22 @@ INSERT INTO recipe_items (recipe_id, material_id, quantity_per_unit) VALUES
 ((SELECT id FROM recipes WHERE product_id = 9), (SELECT id FROM inventory_materials WHERE material_name = 'Arabica beans'), 0.0180),
 ((SELECT id FROM recipes WHERE product_id = 9), (SELECT id FROM inventory_materials WHERE material_name = 'Fresh milk'), 0.1500);
 
-INSERT INTO website_orders (invoice_id, customer_id, fulfillment_type, order_status, delivery_address, customer_note, requested_at, created_at)
+INSERT INTO website_orders (
+    invoice_id, customer_id, fulfillment_type, order_status,
+    receiver_email, receiver_name, receiver_phone, delivery_address, city, district, ward,
+    customer_note, requested_at, created_at
+)
 SELECT id,
        customer_id,
        CASE WHEN sales_channel = 'delivery' THEN 'delivery' ELSE 'pickup' END,
-       'completed',
-       CASE WHEN sales_channel = 'delivery' THEN 'Sample delivery address' ELSE NULL END,
+       CASE WHEN status = 'pending' THEN 'pending' ELSE 'completed' END,
+       CASE WHEN sales_channel = 'delivery' THEN 'sample.customer@example.test' ELSE NULL END,
+       CASE WHEN sales_channel = 'delivery' THEN 'Khách giao hàng mẫu' ELSE NULL END,
+       CASE WHEN sales_channel = 'delivery' THEN '0900000000' ELSE NULL END,
+       CASE WHEN sales_channel = 'delivery' THEN 'Sample delivery address, Phường mẫu, Quận mẫu, Hà Nội' ELSE NULL END,
+       CASE WHEN sales_channel = 'delivery' THEN 'Hà Nội' ELSE NULL END,
+       CASE WHEN sales_channel = 'delivery' THEN 'Quận mẫu' ELSE NULL END,
+       CASE WHEN sales_channel = 'delivery' THEN 'Phường mẫu' ELSE NULL END,
        'Seeded from sample invoice',
        paid_at,
        created_at

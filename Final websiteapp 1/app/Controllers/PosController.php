@@ -128,6 +128,7 @@ final class PosController extends Controller
             'branches' => [],
             'tables' => [],
             'orders' => [],
+            'website_orders_pending' => [],
             'kitchen' => [],
             'dashboard' => null,
             'campaigns' => [],

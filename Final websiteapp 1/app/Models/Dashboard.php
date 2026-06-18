@@ -35,7 +35,7 @@ final class Dashboard extends Model
             'summary' => $summary,
             'month' => $month,
             'top_products' => $this->topProducts($monthStart, $businessDate),
-            'low_inventory' => array_slice((new Inventory())->productInventory(), 0, 8),
+            'low_inventory' => (new Inventory())->lowMaterials(8),
             'branch_revenue' => $this->branchRevenue($monthStart, $businessDate),
             'campaigns' => (new Campaign())->performance(),
             'recent_invoices' => $this->recentInvoices(),

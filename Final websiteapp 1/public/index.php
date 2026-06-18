@@ -22,6 +22,7 @@ $router->get('/account', [WebsiteController::class, 'account']);
 $router->get('/member', [WebsiteController::class, 'member']);
 $router->get('/checkout', [WebsiteController::class, 'checkout']);
 $router->get('/order', [WebsiteController::class, 'order']);
+$router->get('/payment/momo-return', [WebsiteController::class, 'momoReturn']);
 $router->get('/feedback', [WebsiteController::class, 'feedback']);
 
 $router->get('/pos', [PosController::class, 'index']);
@@ -86,6 +87,8 @@ $apiRoutes = [
     '/api/receipt-print-log',
     '/api/payment-demo-create',
     '/api/payment-demo-confirm',
+    '/api/payment-momo-ipn',
+    '/api/payment-status',
     '/api/checkout-closing',
     '/api/shift-closing',
     '/api/dashboard',

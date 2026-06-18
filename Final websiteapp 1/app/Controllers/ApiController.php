@@ -16,6 +16,7 @@ use App\Models\Customer;
 use App\Models\Dashboard;
 use App\Models\Inventory;
 use App\Models\Invoice;
+use App\Models\MomoPayment;
 use App\Models\Order;
 use App\Models\PosSession;
 use App\Models\Product;
@@ -77,7 +78,7 @@ final class ApiController extends Controller
                 '/api/newsletter-subscribe' => (new Customer())->newsletterSubscribe($payload),
                 '/api/favorite-toggle' => (new Customer())->toggleFavorite($payload),
                 '/api/checkout' => $this->checkout($payload, $auth),
-                '/api/orders' => $this->withEndpoint($route, $auth, $payload, fn () => ['orders' => (new Order())->activeOrders(), 'tables' => (new Order())->tables()]),
+                '/api/orders' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => $this->ordersPayload($payload, $staff)),
                 '/api/create-order' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => (new Order())->create($payload + ['staff_role' => $staff['staff_role']])),
                 '/api/update-order-item' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => (new Order())->updateItemStatus($payload + ['staff_role' => $staff['staff_role']])),
                 '/api/void-order-item' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => (new Order())->voidItem($payload + ['staff_role' => $staff['staff_role']])),
@@ -90,6 +91,8 @@ final class ApiController extends Controller
                 '/api/receipt-print-log' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->logReceiptPrint($payload)),
                 '/api/payment-demo-create' => $this->paymentDemoCreate($payload),
                 '/api/payment-demo-confirm' => $this->paymentDemoConfirm($payload),
+                '/api/payment-momo-ipn' => $this->paymentMomoIpn($payload),
+                '/api/payment-status' => $this->paymentStatus($payload),
                 '/api/checkout-closing' => $this->withEndpoint($route, $auth, $payload, fn () => (new PosSession())->logout($payload)),
                 '/api/shift-closing' => $this->withEndpoint($route, $auth, $payload, fn () => (new PosSession())->logout($payload)),
                 '/api/dashboard' => $this->withEndpoint($route, $auth, $payload, fn () => (new Dashboard())->data()),
@@ -182,6 +185,8 @@ final class ApiController extends Controller
                 'shift_closing' => '/api/shift-closing',
                 'payment_demo_create' => '/api/payment-demo-create',
                 'payment_demo_confirm' => '/api/payment-demo-confirm',
+                'payment_momo_ipn' => '/api/payment-momo-ipn',
+                'payment_status' => '/api/payment-status',
                 'order_status_update' => '/api/order-status-update',
                 'receipt_print_log' => '/api/receipt-print-log',
                 'reports_export' => '/api/reports-export',
@@ -207,6 +212,11 @@ final class ApiController extends Controller
             'products' => $product->active(),
             'categories' => $product->categories(),
             'reviews' => (new Customer())->reviews(),
+            'payment' => [
+                'momo_enabled' => PAYMENT_MOMO_ENABLED && (new MomoPayment())->isConfigured(),
+                'momo_provider' => PAYMENT_MOMO_PROVIDER,
+                'cod_provider' => PAYMENT_COD_PROVIDER,
+            ],
         ];
     }
 
@@ -236,6 +246,8 @@ final class ApiController extends Controller
             '/api/reports',
             '/api/receipt',
             '/api/product-list',
+            '/api/payment-momo-ipn',
+            '/api/payment-status',
         ];
 
         if (in_array($route, $readOnly, true)) {
@@ -284,6 +296,7 @@ final class ApiController extends Controller
             'branches' => $staff->branches(),
             'tables' => [],
             'orders' => [],
+            'website_orders_pending' => [],
             'kitchen' => [],
             'dashboard' => null,
             'campaigns' => [],
@@ -302,11 +315,14 @@ final class ApiController extends Controller
         }
 
         if (RolePolicy::canAccessModule($role, 'orders')) {
-            $data['tables'] = $order->tables();
-            $data['orders'] = $order->activeOrders();
+            $data['tables'] = $order->tables($branchId);
+            $data['orders'] = $order->activeOrders($branchId);
+            if (in_array($role, ['cashier', 'manager', 'owner', 'admin'], true)) {
+                $data['website_orders_pending'] = $order->pendingWebsiteOrdersForBranch($branchId);
+            }
         }
         if (RolePolicy::canAccessModule($role, 'kitchen')) {
-            $data['kitchen'] = $order->kitchenQueue();
+            $data['kitchen'] = $order->kitchenQueue($branchId);
         }
         if (RolePolicy::canAccessModule($role, 'dashboard') || RolePolicy::canAccessModule($role, 'reports')) {
             $data['dashboard'] = (new Dashboard())->data();
@@ -832,7 +848,27 @@ final class ApiController extends Controller
             $auth->requireStaffRole($payload, RolePolicy::rolesForEndpoint('/api/checkout') ?? ['cashier', 'manager', 'owner', 'admin']);
         }
 
-        return (new Invoice())->checkout($payload);
+        $isWebsiteMomo = in_array($salesChannel, ['website', 'delivery'], true)
+            && ($payload['payment_method'] ?? '') === 'e_wallet';
+        if ($isWebsiteMomo && !(new MomoPayment())->isConfigured()) {
+            throw new InvalidArgumentException('MoMo chưa được cấu hình. Vui lòng kiểm tra config/payment.local.php.');
+        }
+
+        $result = (new Invoice())->checkout($payload);
+        if ($isWebsiteMomo) {
+            $customerId = (int) ($payload['customer_id'] ?? Session::get('member_customer_id', 0));
+            if ($customerId <= 0) {
+                throw new InvalidArgumentException('Vui lòng đăng nhập thành viên trước khi thanh toán MoMo.');
+            }
+            try {
+                $result['momo_payment'] = (new MomoPayment())->createForInvoice($customerId, (int) $result['invoice_id']);
+            } catch (Throwable $exception) {
+                (new WebsiteOrder())->failMomoPayment((int) $result['invoice_id'], 'Cannot create MoMo payment: ' . $exception->getMessage());
+                throw $exception;
+            }
+        }
+
+        return $result;
     }
 
     private function paymentDemoCreate(array $payload): array
@@ -860,10 +896,55 @@ final class ApiController extends Controller
     {
         $customerId = (int) Session::get('member_customer_id', 0);
         if ($customerId <= 0) {
-            throw new InvalidArgumentException('Please login before confirming DemoPay payment.');
+            throw new InvalidArgumentException('Please login before confirming MoMo payment.');
         }
 
-        return (new WebsiteOrder())->confirmDemoPayment($customerId, (int) ($payload['invoice_id'] ?? 0));
+        return (new WebsiteOrder())->confirmMomoPayment($customerId, (int) ($payload['invoice_id'] ?? 0), [
+            'source' => 'manual_confirm',
+            'transaction_reference' => 'MANUAL-' . str_pad((string) ((int) ($payload['invoice_id'] ?? 0)), 6, '0', STR_PAD_LEFT),
+        ]);
+    }
+
+    private function paymentMomoIpn(array $payload): never
+    {
+        try {
+            (new MomoPayment())->handleNotification($payload, 'ipn');
+            http_response_code(204);
+        } catch (Throwable $exception) {
+            AppLogger::error($exception, ['route' => '/api/payment-momo-ipn', 'payload' => $payload]);
+            http_response_code(400);
+        }
+        exit;
+    }
+
+    private function paymentStatus(array $payload): array
+    {
+        $customerId = (int) Session::get('member_customer_id', 0);
+        return (new MomoPayment())->status(
+            (int) ($payload['invoice_id'] ?? 0),
+            $customerId > 0 ? $customerId : null,
+            trim((string) ($payload['provider_order_id'] ?? $payload['orderId'] ?? ''))
+        );
+    }
+
+    private function ordersPayload(array $payload, array $staff): array
+    {
+        $session = (new PosSession())->requireOpen($payload, $staff);
+        $branchId = (int) $session['branch_id'];
+        $role = (string) ($staff['staff_role'] ?? '');
+        $order = new Order();
+
+        $data = [
+            'orders' => $order->activeOrders($branchId),
+            'tables' => $order->tables($branchId),
+            'website_orders_pending' => [],
+        ];
+
+        if (in_array($role, ['cashier', 'manager', 'owner', 'admin'], true)) {
+            $data['website_orders_pending'] = $order->pendingWebsiteOrdersForBranch($branchId);
+        }
+
+        return $data;
     }
 
     private function withEndpoint(string $route, AuthController $auth, array $payload, callable $callback): mixed

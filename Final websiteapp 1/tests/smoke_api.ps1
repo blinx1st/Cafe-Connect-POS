@@ -194,7 +194,7 @@ Expect-CafeApiFailure "voucher-claim" @{
 $websitePaidOrder = Invoke-CafeApi "checkout" @{
   customer_id = $member.member.id
   voucher_id = $claimed.voucher_id
-  payment_method = "e_wallet"
+  payment_method = "cash"
   sales_channel = "website"
   fulfillment_type = "pickup"
   customer_note = "Smoke website checkout"
@@ -205,7 +205,7 @@ $websitePaidOrder = Invoke-CafeApi "checkout" @{
 Expect-CafeApiFailure "checkout" @{
   customer_id = $member.member.id
   voucher_id = $claimed.voucher_id
-  payment_method = "e_wallet"
+  payment_method = "cash"
   sales_channel = "website"
   fulfillment_type = "pickup"
   items = @(
@@ -215,14 +215,19 @@ Expect-CafeApiFailure "checkout" @{
 
 Invoke-CafeApi "website-orders" @{} | Out-Null
 Invoke-CafeApi "website-order-detail" @{ invoice_id = $websitePaidOrder.invoice_id } | Out-Null
-Invoke-CafeApi "payment-demo-confirm" @{ invoice_id = $websitePaidOrder.invoice_id } | Out-Null
 
 $websiteCodOrder = Invoke-CafeApi "checkout" @{
   customer_id = $member.member.id
   payment_method = "cash"
   sales_channel = "website"
   fulfillment_type = "delivery"
+  receiver_email = "smoke.customer@example.test"
+  receiver_name = "Smoke Customer"
+  receiver_phone = "0900999000"
   delivery_address = "Smoke delivery address"
+  city = "Ha Noi"
+  district = "Nam Tu Liem"
+  ward = "Xuan Phuong"
   customer_note = "Smoke COD pending"
   items = @(
     @{ product_id = 5; quantity = 1; size = "M" }
@@ -231,12 +236,19 @@ $websiteCodOrder = Invoke-CafeApi "checkout" @{
 if ($websiteCodOrder.status -ne "pending" -or $websiteCodOrder.order_status -ne "pending") {
   throw "Website COD checkout should create pending invoice/order."
 }
-Invoke-CafeApi "website-order-cancel" @{
-  invoice_id = $websiteCodOrder.invoice_id
-  reason = "Smoke customer cancel pending COD"
-} | Out-Null
 
 $cashier = New-PosSession -Identity "CASH001" -Password "cashier123" -Pin "2222" -OpeningCash 1000000
+$cashierOrders = Invoke-CafeApi "orders" (Add-Session @{} $cashier)
+$pendingWebsiteOrder = $cashierOrders.website_orders_pending | Where-Object { $_.invoice_id -eq $websiteCodOrder.invoice_id } | Select-Object -First 1
+if (-not $pendingWebsiteOrder) {
+  throw "Cashier same branch did not receive pending website COD order."
+}
+Invoke-CafeApi "order-status-update" (Add-Session @{
+  invoice_id = $websiteCodOrder.invoice_id
+  status = "paid"
+} $cashier) | Out-Null
+Invoke-CafeApi "website-order-detail" @{ invoice_id = $websiteCodOrder.invoice_id } | Out-Null
+
 $waiter = New-PosSession -Identity "WAIT001" -Password "waiter123" -Pin "1111"
 $barista = New-PosSession -Identity "BAR001" -Password "barista123" -Pin "3333"
 $marketing = New-PosSession -Identity "MKT001" -Password "marketing123" -Pin "5555"
@@ -447,8 +459,8 @@ Expect-CafeApiFailure "checkout" (Add-Session @{
   )
 } $cashier) "Voucher"
 
-$customerOne = Invoke-CafeApi "member-lookup" @{ identity = "1" }
-$customerFour = Invoke-CafeApi "member-lookup" @{ identity = "4" }
+$customerOne = Invoke-CafeApi "member-lookup" (Add-Session @{ identity = "1" } $cashier)
+$customerFour = Invoke-CafeApi "member-lookup" (Add-Session @{ identity = "4" } $cashier)
 $customerOneVoucher = $customerOne.vouchers | Where-Object { $_.promotion_name -eq "Smoke Campaign $suffix" -and $_.usable_on_pos } | Select-Object -First 1
 $customerFourVoucher = $customerFour.vouchers | Where-Object { $_.promotion_name -eq "Smoke Campaign $suffix" -and $_.usable_on_pos } | Select-Object -First 1
 if (-not $customerOneVoucher -or -not $customerFourVoucher) {
@@ -467,10 +479,15 @@ $codVoucherOrder = Invoke-CafeApi "checkout" @{
   )
 }
 
+Expect-CafeApiFailure "order-status-update" (Add-Session @{
+  invoice_id = $codVoucherOrder.invoice_id
+  status = "paid"
+} $manager)
+
 Invoke-CafeApi "order-status-update" (Add-Session @{
   invoice_id = $codVoucherOrder.invoice_id
   status = "cancelled"
-} $manager) | Out-Null
+} $cashier) | Out-Null
 
 $refundableVoucherOrder = Invoke-CafeApi "checkout" (Add-Session @{
   branch_id = 1

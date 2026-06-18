@@ -62,6 +62,11 @@ final class WebsiteController extends Controller
         $this->renderWebsite('website/order', 'Cafe Connect | Order Detail', 'website-order');
     }
 
+    public function momoReturn(): void
+    {
+        $this->renderWebsite('website/payment-momo-return', 'Cafe Connect | MoMo Payment', 'website-payment-return');
+    }
+
     public function member(): void
     {
         $authState = Database::ready() ? (new AuthController())->memberSession() : ['member' => null, 'web_staff' => null];
@@ -108,6 +113,11 @@ final class WebsiteController extends Controller
             'member' => null,
             'web_staff' => null,
             'can_access_customer_crm' => false,
+            'payment' => [
+                'momo_enabled' => false,
+                'momo_provider' => PAYMENT_MOMO_PROVIDER,
+                'cod_provider' => PAYMENT_COD_PROVIDER,
+            ],
         ];
 
         if (!Database::ready()) {
@@ -124,6 +134,11 @@ final class WebsiteController extends Controller
         $data['member'] = $authState['member'] ?? null;
         $data['web_staff'] = $authState['web_staff'] ?? null;
         $data['can_access_customer_crm'] = RolePolicy::canAccessCustomerCrm((string) ($data['web_staff']['staff_role'] ?? ''));
+        $data['payment'] = [
+            'momo_enabled' => PAYMENT_MOMO_ENABLED && (new \App\Models\MomoPayment())->isConfigured(),
+            'momo_provider' => PAYMENT_MOMO_PROVIDER,
+            'cod_provider' => PAYMENT_COD_PROVIDER,
+        ];
 
         return $data;
     }

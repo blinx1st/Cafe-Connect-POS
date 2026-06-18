@@ -133,6 +133,34 @@ function seed_missing_demo_credentials(PDO $pdo): void
 function seed_missing_operational_data(PDO $pdo): void
 {
     $pdo->exec(
+        "INSERT IGNORE INTO branch_inventory (branch_id, product_id, stock_quantity, min_stock_level, last_updated)
+         SELECT b.id, p.id,
+                CASE
+                    WHEN p.product_name IN ('Signature Brown Latte', 'Vietnamese Phin Coffee', 'Cold Brew Citrus', 'Lotus Oolong Tea', 'Peach Lemongrass Tea') THEN 30
+                    ELSE 20
+                END,
+                CASE
+                    WHEN p.product_name IN ('Signature Brown Latte', 'Vietnamese Phin Coffee') THEN 20
+                    ELSE 10
+                END,
+                NOW()
+         FROM branches b
+         CROSS JOIN products p
+         WHERE b.branch_name LIKE '%Số 1%' OR b.address LIKE '%Trịnh Văn Bô%'"
+    );
+    $pdo->exec(
+        "INSERT IGNORE INTO branch_inventory (branch_id, product_id, stock_quantity, min_stock_level, last_updated)
+         SELECT b.id,
+                p.id,
+                24,
+                CASE WHEN p.category IN ('coffee', 'tea') THEN 12 ELSE 8 END,
+                NOW()
+         FROM branches b
+         CROSS JOIN products p"
+    );
+    echo "checked product inventory for branch So 1" . PHP_EOL;
+
+    $pdo->exec(
         "UPDATE inventory_materials
          SET unit_cost = CASE material_name
             WHEN 'Arabica beans' THEN 190000
@@ -357,11 +385,56 @@ exec_if_missing_table($pdo, 'receipt_print_logs', "
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
+$pdo->exec("ALTER TABLE payments MODIFY paid_at DATETIME NULL");
+echo "ok payments.paid_at nullable" . PHP_EOL;
+
+exec_if_missing_table($pdo, 'payment_transactions', "
+    CREATE TABLE payment_transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        payment_id INT NULL,
+        invoice_id INT NOT NULL,
+        provider VARCHAR(40) NOT NULL DEFAULT 'momo',
+        provider_order_id VARCHAR(200) NOT NULL,
+        provider_request_id VARCHAR(80) NOT NULL,
+        provider_transaction_id VARCHAR(80) NULL,
+        amount DECIMAL(12,2) NOT NULL,
+        pay_url TEXT NULL,
+        deeplink TEXT NULL,
+        qr_code_url TEXT NULL,
+        result_code INT NULL,
+        message VARCHAR(255) NULL,
+        status ENUM('created', 'pending', 'paid', 'failed', 'cancelled') NOT NULL DEFAULT 'created',
+        raw_request_json TEXT NULL,
+        raw_response_json TEXT NULL,
+        raw_ipn_json TEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_payment_transactions_order (provider_order_id),
+        KEY idx_payment_transactions_invoice (invoice_id, created_at),
+        KEY idx_payment_transactions_payment (payment_id),
+        CONSTRAINT fk_payment_transactions_payment
+            FOREIGN KEY (payment_id) REFERENCES payments(id)
+            ON UPDATE CASCADE
+            ON DELETE SET NULL,
+        CONSTRAINT fk_payment_transactions_invoice
+            FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+            ON UPDATE CASCADE
+            ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+");
+
 add_column_if_missing($pdo, 'inventory_materials', 'unit_cost', 'unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER min_stock_level');
 add_column_if_missing($pdo, 'stock_movements', 'unit_cost', 'unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0 AFTER quantity');
 add_column_if_missing($pdo, 'stock_movements', 'supplier_name', 'supplier_name VARCHAR(150) NULL AFTER total_amount');
 add_column_if_missing($pdo, 'stock_movements', 'batch_code', 'batch_code VARCHAR(80) NULL AFTER supplier_name');
 add_column_if_missing($pdo, 'stock_movements', 'expiry_date', 'expiry_date DATE NULL AFTER batch_code');
+
+if (!enum_column_contains($pdo, 'stock_movements', 'movement_type', 'adjustment')) {
+    $pdo->exec("ALTER TABLE stock_movements MODIFY movement_type ENUM('import', 'sales_export', 'waste_export', 'adjustment') NOT NULL");
+    echo "updated enum stock_movements.movement_type" . PHP_EOL;
+} else {
+    echo "ok enum stock_movements.movement_type" . PHP_EOL;
+}
 
 if (!enum_column_contains($pdo, 'service_order_items', 'kitchen_status', 'cancelled')) {
     $pdo->exec("ALTER TABLE service_order_items MODIFY kitchen_status ENUM('waiting', 'preparing', 'ready', 'served', 'cancelled') NOT NULL DEFAULT 'waiting'");
@@ -406,7 +479,42 @@ exec_if_missing_table($pdo, 'recipe_items', "
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 ");
 
-$pdo->exec("INSERT IGNORE INTO schema_migrations (migration_name) VALUES ('001_security_operations')");
+exec_if_missing_table($pdo, 'branch_material_inventory', "
+    CREATE TABLE branch_material_inventory (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        branch_id INT NOT NULL,
+        material_id INT NOT NULL,
+        stock_quantity DECIMAL(12,2) NOT NULL DEFAULT 0,
+        min_stock_level DECIMAL(12,2) NOT NULL DEFAULT 0,
+        unit_cost DECIMAL(12,2) NOT NULL DEFAULT 0,
+        last_updated DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_branch_material_inventory (branch_id, material_id),
+        KEY idx_branch_material_inventory_material (material_id),
+        CONSTRAINT fk_branch_material_inventory_branch
+            FOREIGN KEY (branch_id) REFERENCES branches(id)
+            ON UPDATE CASCADE
+            ON DELETE CASCADE,
+        CONSTRAINT fk_branch_material_inventory_material
+            FOREIGN KEY (material_id) REFERENCES inventory_materials(id)
+            ON UPDATE CASCADE
+            ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+");
+
+$pdo->exec(
+    "INSERT INTO branch_material_inventory (
+        branch_id, material_id, stock_quantity, min_stock_level, unit_cost, last_updated
+     )
+     SELECT b.id, im.id, im.stock_quantity, im.min_stock_level, im.unit_cost, NOW()
+     FROM branches b
+     CROSS JOIN inventory_materials im
+     ON DUPLICATE KEY UPDATE
+        min_stock_level = VALUES(min_stock_level),
+        unit_cost = VALUES(unit_cost)"
+);
+echo "checked branch material inventory" . PHP_EOL;
+
+$pdo->exec("INSERT IGNORE INTO schema_migrations (migration_name) VALUES ('001_security_operations'), ('002_branch_material_momo_payment')");
 
 seed_missing_demo_credentials($pdo);
 seed_missing_operational_data($pdo);

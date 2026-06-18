@@ -8,6 +8,9 @@ define('VIEW_PATH', APP_PATH . '/Views');
 
 $appConfig = is_file(APP_ROOT . '/config/app.php') ? require APP_ROOT . '/config/app.php' : [];
 $paymentConfig = is_file(APP_ROOT . '/config/payment.php') ? require APP_ROOT . '/config/payment.php' : [];
+if (is_file(APP_ROOT . '/config/payment.local.php')) {
+    $paymentConfig = array_replace_recursive($paymentConfig, require APP_ROOT . '/config/payment.local.php');
+}
 
 date_default_timezone_set((string) ($appConfig['timezone'] ?? 'Asia/Bangkok'));
 
@@ -17,6 +20,14 @@ define('APP_DEBUG', (bool) ($appConfig['debug'] ?? true));
 define('APP_ALLOW_SAMPLE_RESET', (bool) ($appConfig['allow_sample_reset'] ?? (APP_ENV === 'local')));
 define('PAYMENT_DEMO_PROVIDER', (string) ($paymentConfig['demo_provider'] ?? 'Cafe Connect DemoPay'));
 define('PAYMENT_COD_PROVIDER', (string) ($paymentConfig['cod_provider'] ?? 'Cash on Delivery'));
+define('PAYMENT_MOMO_PROVIDER', (string) ($paymentConfig['momo']['provider'] ?? 'MoMo Sandbox'));
+define('PAYMENT_MOMO_ENABLED', (bool) ($paymentConfig['momo']['enabled'] ?? false));
+define('PAYMENT_MOMO_ENDPOINT', (string) ($paymentConfig['momo']['endpoint'] ?? 'https://test-payment.momo.vn/v2/gateway/api/create'));
+define('PAYMENT_MOMO_PARTNER_CODE', (string) ($paymentConfig['momo']['partner_code'] ?? ''));
+define('PAYMENT_MOMO_ACCESS_KEY', (string) ($paymentConfig['momo']['access_key'] ?? ''));
+define('PAYMENT_MOMO_SECRET_KEY', (string) ($paymentConfig['momo']['secret_key'] ?? ''));
+define('PAYMENT_MOMO_REDIRECT_URL', (string) ($paymentConfig['momo']['redirect_url'] ?? ''));
+define('PAYMENT_MOMO_IPN_URL', (string) ($paymentConfig['momo']['ipn_url'] ?? ''));
 
 define('DB_HOST', getenv('DB_HOST') ?: '127.0.0.1');
 define('DB_PORT', getenv('DB_PORT') ?: '3306');

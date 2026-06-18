@@ -10,20 +10,26 @@ use InvalidArgumentException;
 
 final class Order extends Model
 {
-    public function tables(): array
+    public function tables(?int $branchId = null): array
     {
-        return $this->db->query(
+        $where = $branchId !== null && $branchId > 0 ? 'WHERE t.branch_id = :branch_id' : '';
+        $stmt = $this->db->prepare(
             "SELECT t.id, t.table_name, t.area_name, t.seat_count, t.status,
                     so.id AS active_order_id, so.order_code, so.status AS order_status
              FROM dining_tables t
              LEFT JOIN service_orders so ON so.table_id = t.id AND so.status IN ('draft', 'preparing', 'ready', 'served')
+             $where
              ORDER BY t.area_name, t.table_name"
-        )->fetchAll();
+        );
+        $stmt->execute($where !== '' ? ['branch_id' => $branchId] : []);
+
+        return $stmt->fetchAll();
     }
 
-    public function activeOrders(): array
+    public function activeOrders(?int $branchId = null): array
     {
-        $orders = $this->db->query(
+        $where = $branchId !== null && $branchId > 0 ? 'AND so.branch_id = :branch_id' : '';
+        $stmt = $this->db->prepare(
             "SELECT so.id, so.order_code, so.table_id, so.customer_id, so.waiter_id, so.cashier_id,
                     so.branch_id, so.status, so.note, so.created_at,
                     t.table_name, b.branch_name,
@@ -37,14 +43,73 @@ final class Order extends Model
              LEFT JOIN staff s ON s.id = so.waiter_id
              LEFT JOIN service_order_items soi ON soi.service_order_id = so.id
              WHERE so.status IN ('draft', 'preparing', 'ready', 'served')
+             $where
              GROUP BY so.id, so.order_code, so.table_id, so.customer_id, so.waiter_id, so.cashier_id,
                       so.branch_id, so.status, so.note, so.created_at, t.table_name, b.branch_name,
                       c.customer_name, s.staff_name
              ORDER BY so.created_at DESC"
-        )->fetchAll();
+        );
+        $stmt->execute($where !== '' ? ['branch_id' => $branchId] : []);
+        $orders = $stmt->fetchAll();
 
         foreach ($orders as &$order) {
             $order['items'] = $this->items((int) $order['id']);
+        }
+
+        return $orders;
+    }
+
+    public function pendingWebsiteOrdersForBranch(int $branchId): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT wo.id AS website_order_id, wo.invoice_id, wo.customer_id, wo.fulfillment_type,
+                    wo.order_status, wo.receiver_email, wo.receiver_name, wo.receiver_phone,
+                    wo.delivery_address, wo.city, wo.district, wo.ward, wo.customer_note, wo.requested_at, wo.created_at,
+                    i.branch_id, i.invoice_date, i.invoice_time, i.bill_started_at, i.subtotal_amount,
+                    i.membership_discount_amount, i.voucher_discount_amount, i.total_amount,
+                    i.payment_method, i.status AS invoice_status,
+                    p.status AS payment_status, p.payment_provider, p.transaction_reference,
+                    b.branch_name,
+                    COALESCE(c.customer_name, 'Khách lẻ') AS customer_name,
+                    COALESCE(c.phone_number, '') AS phone_number,
+                    COALESCE(c.email, '') AS email
+             FROM website_orders wo
+             JOIN invoices i ON i.id = wo.invoice_id
+             JOIN branches b ON b.id = i.branch_id
+             LEFT JOIN payments p ON p.invoice_id = i.id
+             LEFT JOIN customers c ON c.id = wo.customer_id
+             WHERE i.branch_id = :branch_id
+               AND wo.order_status = 'pending'
+               AND i.status = 'pending'
+               AND i.payment_method = 'cash'
+               AND (p.status IS NULL OR p.status = 'pending')
+             ORDER BY wo.created_at ASC, wo.id ASC"
+        );
+        $stmt->execute(['branch_id' => $branchId]);
+        $orders = $stmt->fetchAll();
+        if (!$orders) {
+            return [];
+        }
+
+        $invoiceIds = array_map(static fn (array $order): int => (int) $order['invoice_id'], $orders);
+        $placeholders = implode(',', array_fill(0, count($invoiceIds), '?'));
+        $itemsStmt = $this->db->prepare(
+            "SELECT id.invoice_id, id.product_id, id.quantity, id.unit_price, id.size, id.topping, id.line_total,
+                    p.product_name, p.category
+             FROM invoice_details id
+             JOIN products p ON p.id = id.product_id
+             WHERE id.invoice_id IN ($placeholders)
+             ORDER BY id.invoice_id, id.id"
+        );
+        $itemsStmt->execute($invoiceIds);
+
+        $itemsByInvoice = [];
+        foreach ($itemsStmt->fetchAll() as $item) {
+            $itemsByInvoice[(int) $item['invoice_id']][] = $item;
+        }
+
+        foreach ($orders as &$order) {
+            $order['items'] = $itemsByInvoice[(int) $order['invoice_id']] ?? [];
         }
 
         return $orders;
@@ -141,7 +206,7 @@ final class Order extends Model
             ]);
             $this->db->commit();
 
-            return ['order_id' => $orderId, 'orders' => $this->activeOrders(), 'tables' => $this->tables()];
+            return ['order_id' => $orderId] + $this->posCollections($data, $branchId);
         } catch (\Throwable $exception) {
             $this->db->rollBack();
             throw $exception;
@@ -220,7 +285,7 @@ final class Order extends Model
             throw $exception;
         }
 
-        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+        return $this->posCollections($data);
     }
 
     public function voidItem(array $data): array
@@ -284,7 +349,7 @@ final class Order extends Model
             throw $exception;
         }
 
-        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+        return $this->posCollections($data);
     }
 
     public function cancel(array $data): array
@@ -341,7 +406,7 @@ final class Order extends Model
             throw $exception;
         }
 
-        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+        return $this->posCollections($data);
     }
 
     public function updateOrderStatus(array $data): array
@@ -371,7 +436,7 @@ final class Order extends Model
             )->execute(['id' => $orderId]);
         }
 
-        return ['orders' => $this->activeOrders(), 'kitchen' => $this->kitchenQueue(), 'tables' => $this->tables()];
+        return $this->posCollections($data);
     }
 
     private function updateWebsiteOrderStatus(array $data, string $status): array
@@ -381,6 +446,7 @@ final class Order extends Model
         if ($id <= 0) {
             throw new InvalidArgumentException('Website order id or invoice id is required.');
         }
+        $sessionBranchId = $this->branchIdForPayload($data);
 
         $this->db->beginTransaction();
         try {
@@ -397,11 +463,15 @@ final class Order extends Model
             if (!$invoice) {
                 throw new InvalidArgumentException('Website order not found.');
             }
+            if ($sessionBranchId !== null && (int) $invoice['branch_id'] !== $sessionBranchId) {
+                throw new InvalidArgumentException('Đơn website không thuộc chi nhánh của ca POS hiện tại.');
+            }
 
             if ($status === 'cancelled') {
                 if (($invoice['status'] ?? '') !== 'pending') {
                     throw new InvalidArgumentException('Only pending website orders can be cancelled without refund.');
                 }
+                (new Invoice())->restoreInventoryForCancelledInvoice((int) $invoice['id'], 'Cancelled by POS cashier before payment.');
                 $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE id = :id")
                     ->execute(['id' => (int) $invoice['website_order_id']]);
                 $this->db->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = :id")
@@ -412,6 +482,9 @@ final class Order extends Model
                     (new Voucher())->restoreIfAvailable((int) $invoice['voucher_id']);
                 }
             } elseif ($status === 'paid' && ($invoice['status'] ?? '') === 'pending') {
+                if (($invoice['payment_method'] ?? '') !== 'cash') {
+                    throw new InvalidArgumentException('Chỉ đơn website COD đang chờ mới được thu ngân xác nhận thanh toán.');
+                }
                 $points = !empty($invoice['customer_id']) ? (int) floor((float) $invoice['total_amount'] / 10000) : 0;
                 $this->db->prepare(
                     "UPDATE invoices
@@ -454,6 +527,8 @@ final class Order extends Model
                 if (!empty($invoice['voucher_id'])) {
                     (new Voucher())->redeem((int) $invoice['voucher_id']);
                 }
+            } elseif ($status === 'paid') {
+                throw new InvalidArgumentException('Chỉ đơn website đang chờ mới được xác nhận thanh toán.');
             } else {
                 $this->db->prepare("UPDATE website_orders SET order_status = :status WHERE id = :id")
                     ->execute(['status' => $status, 'id' => (int) $invoice['website_order_id']]);
@@ -467,9 +542,17 @@ final class Order extends Model
                 'entity_id' => (int) $invoice['website_order_id'],
                 'metadata' => ['status' => $status, 'invoice_id' => (int) $invoice['id']],
             ]);
+            (new PosSession())->logFromPayload($data, 'website_order_' . $status, [
+                'entity_type' => 'website_order',
+                'entity_id' => (int) $invoice['website_order_id'],
+                'amount' => (float) $invoice['total_amount'],
+                'status_from' => (string) $invoice['order_status'],
+                'status_to' => $status,
+                'note' => 'Invoice #' . (int) $invoice['id'],
+            ]);
 
             $this->db->commit();
-            return ['updated' => true];
+            return ['updated' => true] + $this->posCollections($data, $sessionBranchId);
         } catch (\Throwable $exception) {
             $this->db->rollBack();
             throw $exception;
@@ -490,9 +573,10 @@ final class Order extends Model
         )->execute(['customer_id' => $customerId]);
     }
 
-    public function kitchenQueue(): array
+    public function kitchenQueue(?int $branchId = null): array
     {
-        return $this->db->query(
+        $where = $branchId !== null && $branchId > 0 ? 'AND so.branch_id = :branch_id' : '';
+        $stmt = $this->db->prepare(
             "SELECT soi.id, soi.service_order_id, soi.product_id, soi.quantity, soi.size,
                     soi.topping, soi.note, soi.kitchen_status, p.product_name,
                     so.order_code, so.created_at, t.table_name, b.branch_name
@@ -502,8 +586,12 @@ final class Order extends Model
              JOIN dining_tables t ON t.id = so.table_id
              JOIN branches b ON b.id = so.branch_id
              WHERE so.status IN ('preparing', 'ready') AND soi.kitchen_status IN ('waiting', 'preparing', 'ready')
+             $where
              ORDER BY FIELD(soi.kitchen_status, 'waiting', 'preparing', 'ready'), so.created_at, soi.id"
-        )->fetchAll();
+        );
+        $stmt->execute($where !== '' ? ['branch_id' => $branchId] : []);
+
+        return $stmt->fetchAll();
     }
 
     public function find(int $orderId): ?array
@@ -533,6 +621,34 @@ final class Order extends Model
             )->execute(['cashier_id' => $cashierId, 'id' => $orderId]);
             $this->db->prepare("UPDATE dining_tables SET status = 'available' WHERE id = :id")->execute(['id' => $order['table_id']]);
         }
+    }
+
+    private function posCollections(array $data, ?int $branchId = null): array
+    {
+        $branchId ??= $this->branchIdForPayload($data);
+        $collections = [
+            'orders' => $this->activeOrders($branchId),
+            'kitchen' => $this->kitchenQueue($branchId),
+            'tables' => $this->tables($branchId),
+        ];
+
+        $role = (string) ($data['staff_role'] ?? '');
+        if ($branchId !== null && in_array($role, ['cashier', 'manager', 'owner', 'admin'], true)) {
+            $collections['website_orders_pending'] = $this->pendingWebsiteOrdersForBranch($branchId);
+        }
+
+        return $collections;
+    }
+
+    private function branchIdForPayload(array $data): ?int
+    {
+        if (!empty($data['pos_session_id']) && !empty($data['session_token'])) {
+            $session = (new PosSession())->requireOpen($data);
+            return (int) $session['branch_id'];
+        }
+
+        $branchId = (int) ($data['branch_id'] ?? 0);
+        return $branchId > 0 ? $branchId : null;
     }
 
     private function syncOrderStatus(int $orderId): void
