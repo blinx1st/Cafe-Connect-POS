@@ -83,6 +83,7 @@ $apiRoutes = [
     '/api/kitchen',
     '/api/checkout-order',
     '/api/refund-invoice',
+    '/api/refund-history',
     '/api/receipt',
     '/api/receipt-print-log',
     '/api/payment-demo-create',

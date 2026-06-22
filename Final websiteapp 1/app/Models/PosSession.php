@@ -247,6 +247,11 @@ final class PosSession extends Model
                 COALESCE(inv.cash_revenue, 0) AS cash_revenue,
                 COALESCE(inv.card_revenue, 0) AS card_revenue,
                 COALESCE(inv.ewallet_revenue, 0) AS ewallet_revenue,
+                COALESCE(ref.refund_count, 0) AS refund_count,
+                COALESCE(ref.refund_amount, 0) AS refund_amount,
+                COALESCE(ref.cash_refund_amount, 0) AS cash_refund_amount,
+                COALESCE(ref.noncash_refund_amount, 0) AS noncash_refund_amount,
+                COALESCE(inv.revenue_total, 0) - COALESCE(ref.refund_amount, 0) AS net_session_revenue,
                 COALESCE(ord.order_count, 0) AS order_count,
                 COALESCE(ord.order_items, 0) AS order_items,
                 COALESCE(ord.order_value, 0) AS order_value,
@@ -268,9 +273,19 @@ final class PosSession extends Model
                        SUM(CASE WHEN payment_method = 'card' THEN total_amount ELSE 0 END) AS card_revenue,
                        SUM(CASE WHEN payment_method = 'e_wallet' THEN total_amount ELSE 0 END) AS ewallet_revenue
                 FROM invoices
-                WHERE status = 'paid' AND pos_session_id IS NOT NULL
+                WHERE status IN ('paid', 'partially_refunded', 'refunded') AND pos_session_id IS NOT NULL
                 GROUP BY pos_session_id
              ) inv ON inv.pos_session_id = ps.id
+             LEFT JOIN (
+                SELECT pos_session_id,
+                       COUNT(*) AS refund_count,
+                       SUM(refund_amount) AS refund_amount,
+                       SUM(CASE WHEN refund_method = 'cash' THEN refund_amount ELSE 0 END) AS cash_refund_amount,
+                       SUM(CASE WHEN refund_method <> 'cash' THEN refund_amount ELSE 0 END) AS noncash_refund_amount
+                FROM invoice_refunds
+                WHERE status = 'approved' AND pos_session_id IS NOT NULL
+                GROUP BY pos_session_id
+             ) ref ON ref.pos_session_id = ps.id
              LEFT JOIN (
                 SELECT pos_session_id,
                        SUM(CASE WHEN action_type = 'order_created' THEN 1 ELSE 0 END) AS order_count,
@@ -443,7 +458,7 @@ final class PosSession extends Model
         $stmt = $this->db->prepare(
             "SELECT
                 :opening_cash
-                + COALESCE((SELECT SUM(total_amount) FROM invoices WHERE pos_session_id = :invoice_session_id AND status = 'paid' AND payment_method = 'cash'), 0)
+                + COALESCE((SELECT SUM(total_amount) FROM invoices WHERE pos_session_id = :invoice_session_id AND status IN ('paid', 'partially_refunded', 'refunded') AND payment_method = 'cash'), 0)
                 + COALESCE((SELECT SUM(amount) FROM cash_transactions WHERE pos_session_id = :cash_in_session_id AND transaction_type = 'in'), 0)
                 - COALESCE((SELECT SUM(amount) FROM cash_transactions WHERE pos_session_id = :cash_out_session_id AND transaction_type = 'out'), 0)"
         );

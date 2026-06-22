@@ -24,7 +24,21 @@ final class Report extends Model
             'staff_performance' => $this->staffPerformance($start, $end),
             'gross_margin' => $this->grossMargin($start, $end),
             'cash_transactions' => $this->cashTransactions(),
+            'refund_summary' => $this->refundSummary($start, $end),
+            'refund_history' => (new Invoice())->refundHistory(['limit' => 50]),
+            'refundable_invoices' => (new Invoice())->refundableInvoices(['limit' => 50]),
             'session_reports' => (new PosSession())->report(),
+        ];
+    }
+
+    public function cashData(array $filters = []): array
+    {
+        $branchId = max(0, (int) ($filters['branch_id'] ?? 0));
+
+        return [
+            'cash_transactions' => $this->cashTransactions(['branch_id' => $branchId, 'limit' => 100]),
+            'refund_history' => (new Invoice())->refundHistory(['branch_id' => $branchId, 'limit' => 100]),
+            'refundable_invoices' => (new Invoice())->refundableInvoices(['branch_id' => $branchId, 'limit' => 100]),
         ];
     }
 
@@ -105,6 +119,15 @@ final class Report extends Model
                 $row['revenue_handled'],
             ]);
         }
+        foreach ($data['refund_history'] as $row) {
+            fputcsv($handle, [
+                'Refund history',
+                '#' . $row['invoice_id'],
+                $row['staff_name'],
+                $row['refund_method'],
+                $row['refund_amount'],
+            ]);
+        }
         rewind($handle);
         $csv = stream_get_contents($handle);
         fclose($handle);
@@ -119,10 +142,19 @@ final class Report extends Model
     private function revenueByChannel(string $start, string $end): array
     {
         $stmt = $this->db->prepare(
-            "SELECT sales_channel, COUNT(*) AS paid_invoice_count, COALESCE(SUM(total_amount), 0) AS net_revenue
-             FROM invoices
-             WHERE status = 'paid' AND invoice_date BETWEEN :start AND :end
-             GROUP BY sales_channel
+            "SELECT i.sales_channel,
+                    SUM(CASE WHEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0 THEN 1 ELSE 0 END) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS gross_sales,
+                    COALESCE(SUM(COALESCE(r.refunded_amount, 0)), 0) AS refund_amount,
+                    COALESCE(SUM(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS net_revenue
+             FROM invoices i
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
+             WHERE i.status IN ('paid', 'partially_refunded', 'refunded')
+               AND i.invoice_date BETWEEN :start AND :end
+             GROUP BY i.sales_channel
              ORDER BY net_revenue DESC"
         );
         $stmt->execute(['start' => $start, 'end' => $end]);
@@ -133,18 +165,23 @@ final class Report extends Model
     {
         $stmt = $this->db->prepare(
             "SELECT b.id AS branch_id, b.branch_name,
-                    COUNT(i.id) AS paid_invoice_count,
-                    COALESCE(SUM(i.total_amount), 0) AS net_revenue,
+                    SUM(CASE WHEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0 THEN 1 ELSE 0 END) AS paid_invoice_count,
+                    COALESCE(SUM(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS net_revenue,
                     COALESCE(SUM(i.subtotal_amount), 0) AS gross_sales,
+                    COALESCE(SUM(COALESCE(r.refunded_amount, 0)), 0) AS refund_amount,
                     COALESCE(SUM(i.membership_discount_amount), 0) AS membership_discount,
                     COALESCE(SUM(i.voucher_discount_amount), 0) AS voucher_discount,
-                    COALESCE(AVG(i.total_amount), 0) AS average_invoice_value,
-                    COALESCE(SUM(CASE WHEN i.sales_channel = 'pos' THEN i.total_amount ELSE 0 END), 0) AS pos_revenue,
-                    COALESCE(SUM(CASE WHEN i.sales_channel IN ('website', 'delivery') THEN i.total_amount ELSE 0 END), 0) AS website_revenue
+                    COALESCE(AVG(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS average_invoice_value,
+                    COALESCE(SUM(CASE WHEN i.sales_channel = 'pos' THEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) ELSE 0 END), 0) AS pos_revenue,
+                    COALESCE(SUM(CASE WHEN i.sales_channel IN ('website', 'delivery') THEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) ELSE 0 END), 0) AS website_revenue
              FROM branches b
              LEFT JOIN invoices i ON i.branch_id = b.id
-                AND i.status = 'paid'
+                AND i.status IN ('paid', 'partially_refunded', 'refunded')
                 AND i.invoice_date BETWEEN :start AND :end
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
              WHERE b.status = 'active'
              GROUP BY b.id, b.branch_name
              ORDER BY net_revenue DESC, b.branch_name"
@@ -159,13 +196,19 @@ final class Report extends Model
             "SELECT DATE_FORMAT(i.invoice_date, '%Y-%m') AS revenue_month,
                     b.id AS branch_id,
                     b.branch_name,
-                    COUNT(i.id) AS paid_invoice_count,
-                    COALESCE(SUM(i.total_amount), 0) AS net_revenue,
+                    SUM(CASE WHEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0 THEN 1 ELSE 0 END) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS gross_sales,
+                    COALESCE(SUM(COALESCE(r.refunded_amount, 0)), 0) AS refund_amount,
+                    COALESCE(SUM(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS net_revenue,
                     COALESCE(SUM(i.voucher_discount_amount), 0) AS voucher_discount,
-                    COALESCE(AVG(i.total_amount), 0) AS average_invoice_value
+                    COALESCE(AVG(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS average_invoice_value
              FROM invoices i
              JOIN branches b ON b.id = i.branch_id
-             WHERE i.status = 'paid'
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
+             WHERE i.status IN ('paid', 'partially_refunded', 'refunded')
                AND i.invoice_date BETWEEN :start AND :end
              GROUP BY revenue_month, b.id, b.branch_name
              ORDER BY revenue_month DESC, net_revenue DESC, b.branch_name"
@@ -178,11 +221,17 @@ final class Report extends Model
     {
         $stmt = $this->db->prepare(
             "SELECT b.branch_name, i.payment_method,
-                    COUNT(i.id) AS paid_invoice_count,
-                    COALESCE(SUM(i.total_amount), 0) AS net_revenue
+                    SUM(CASE WHEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0 THEN 1 ELSE 0 END) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS gross_sales,
+                    COALESCE(SUM(COALESCE(r.refunded_amount, 0)), 0) AS refund_amount,
+                    COALESCE(SUM(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS net_revenue
              FROM invoices i
              JOIN branches b ON b.id = i.branch_id
-             WHERE i.status = 'paid'
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
+             WHERE i.status IN ('paid', 'partially_refunded', 'refunded')
                AND i.invoice_date BETWEEN :start AND :end
              GROUP BY b.id, b.branch_name, i.payment_method
              ORDER BY b.branch_name, net_revenue DESC"
@@ -215,11 +264,17 @@ final class Report extends Model
     {
         $stmt = $this->db->prepare(
             "SELECT HOUR(i.invoice_time) AS business_hour,
-                    COUNT(i.id) AS paid_invoice_count,
-                    COALESCE(SUM(i.total_amount), 0) AS net_revenue,
-                    COALESCE(AVG(i.total_amount), 0) AS average_invoice_value
+                    SUM(CASE WHEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0 THEN 1 ELSE 0 END) AS paid_invoice_count,
+                    COALESCE(SUM(i.total_amount), 0) AS gross_sales,
+                    COALESCE(SUM(COALESCE(r.refunded_amount, 0)), 0) AS refund_amount,
+                    COALESCE(SUM(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS net_revenue,
+                    COALESCE(AVG(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS average_invoice_value
              FROM invoices i
-             WHERE i.status = 'paid'
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
+             WHERE i.status IN ('paid', 'partially_refunded', 'refunded')
                AND i.invoice_date BETWEEN :start AND :end
              GROUP BY business_hour
              ORDER BY business_hour"
@@ -231,12 +286,19 @@ final class Report extends Model
     private function staffPerformance(string $start, string $end): array
     {
         $stmt = $this->db->prepare(
-            "SELECT s.staff_name, s.staff_role, COUNT(i.id) AS orders_processed,
-                    COALESCE(SUM(i.total_amount), 0) AS revenue_handled
+            "SELECT s.staff_name, s.staff_role,
+                    SUM(CASE WHEN GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0 THEN 1 ELSE 0 END) AS orders_processed,
+                    COALESCE(SUM(i.total_amount), 0) AS gross_revenue_handled,
+                    COALESCE(SUM(COALESCE(r.refunded_amount, 0)), 0) AS refund_amount,
+                    COALESCE(SUM(GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0)), 0) AS revenue_handled
              FROM staff s
              LEFT JOIN invoices i ON i.staff_id = s.id
-                AND i.status = 'paid'
+                AND i.status IN ('paid', 'partially_refunded', 'refunded')
                 AND i.invoice_date BETWEEN :start AND :end
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
              GROUP BY s.id, s.staff_name, s.staff_role
              ORDER BY revenue_handled DESC, orders_processed DESC"
         );
@@ -244,17 +306,50 @@ final class Report extends Model
         return $stmt->fetchAll();
     }
 
-    private function cashTransactions(): array
+    public function cashTransactions(array $filters = []): array
     {
-        return $this->db->query(
-            "SELECT ct.id, ct.pos_session_id, ct.transaction_type, ct.reason, ct.amount, ct.created_at,
+        $where = [];
+        $params = [];
+        if ((int) ($filters['branch_id'] ?? 0) > 0) {
+            $where[] = 'ct.branch_id = :branch_id';
+            $params['branch_id'] = (int) $filters['branch_id'];
+        }
+        if ((int) ($filters['pos_session_id'] ?? 0) > 0) {
+            $where[] = 'ct.pos_session_id = :pos_session_id';
+            $params['pos_session_id'] = (int) $filters['pos_session_id'];
+        }
+        $limit = max(1, min(200, (int) ($filters['limit'] ?? 50)));
+        $stmt = $this->db->prepare(
+            "SELECT ct.id, ct.pos_session_id, ct.invoice_id, ct.invoice_refund_id,
+                    ct.transaction_type, ct.reason, ct.amount, ct.created_at,
                     s.staff_name, b.branch_name
              FROM cash_transactions ct
              JOIN staff s ON s.id = ct.staff_id
              JOIN branches b ON b.id = ct.branch_id
-             ORDER BY ct.created_at DESC
-             LIMIT 12"
-        )->fetchAll();
+             " . ($where ? 'WHERE ' . implode(' AND ', $where) : '') . "
+             ORDER BY ct.created_at DESC, ct.id DESC
+             LIMIT $limit"
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll();
+    }
+
+    private function refundSummary(string $start, string $end): array
+    {
+        $stmt = $this->db->prepare(
+            "SELECT b.id AS branch_id, b.branch_name, ir.refund_method,
+                    COUNT(ir.id) AS refund_count,
+                    COALESCE(SUM(ir.refund_amount), 0) AS refund_amount
+             FROM invoice_refunds ir
+             JOIN invoices i ON i.id = ir.invoice_id
+             JOIN branches b ON b.id = i.branch_id
+             WHERE ir.status = 'approved'
+               AND DATE(ir.created_at) BETWEEN :start AND :end
+             GROUP BY b.id, b.branch_name, ir.refund_method
+             ORDER BY refund_amount DESC, b.branch_name"
+        );
+        $stmt->execute(['start' => $start, 'end' => $end]);
+        return $stmt->fetchAll();
     }
 
     private function grossMargin(string $start, string $end): array
@@ -262,17 +357,25 @@ final class Report extends Model
         $stmt = $this->db->prepare(
             "SELECT grouped.sales_channel,
                     COUNT(*) AS invoice_count,
-                    COALESCE(SUM(grouped.total_amount), 0) AS net_revenue,
+                    COALESCE(SUM(grouped.total_amount), 0) AS gross_sales,
+                    COALESCE(SUM(grouped.refunded_amount), 0) AS refund_amount,
+                    COALESCE(SUM(GREATEST(grouped.total_amount - grouped.refunded_amount, 0)), 0) AS net_revenue,
                     COALESCE(SUM(grouped.cogs_amount), 0) AS cogs_amount,
-                    COALESCE(SUM(grouped.total_amount - grouped.cogs_amount), 0) AS gross_margin_amount
+                    COALESCE(SUM(GREATEST(grouped.total_amount - grouped.refunded_amount, 0) - grouped.cogs_amount), 0) AS gross_margin_amount
              FROM (
                 SELECT i.id, i.sales_channel, i.total_amount,
+                       COALESCE(r.refunded_amount, 0) AS refunded_amount,
                        COALESCE(SUM(sm.total_amount), 0) AS cogs_amount
                 FROM invoices i
                 LEFT JOIN stock_movements sm
                     ON sm.note LIKE CONCAT('Auto consume for invoice #', i.id, ' -%')
-                WHERE i.status = 'paid' AND i.invoice_date BETWEEN :start AND :end
-                GROUP BY i.id, i.sales_channel, i.total_amount
+                LEFT JOIN (
+                    SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                    FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+                ) r ON r.invoice_id = i.id
+                WHERE i.status IN ('paid', 'partially_refunded', 'refunded')
+                  AND i.invoice_date BETWEEN :start AND :end
+                GROUP BY i.id, i.sales_channel, i.total_amount, r.refunded_amount
              ) grouped
              GROUP BY grouped.sales_channel
              ORDER BY gross_margin_amount DESC"

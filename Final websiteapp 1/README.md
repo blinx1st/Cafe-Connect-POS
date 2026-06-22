@@ -226,13 +226,20 @@ Quyen POS hien duoc khai bao tap trung trong `app/Core/RolePolicy.php` va duoc d
 | --- | --- | --- | --- |
 | `waiter` | `orders`, `kitchen` | Tạo order bàn, gửi món xuống bếp, đánh dấu món `ready -> served`, void món chưa ready/served có lý do | `orders`, `create-order`, `update-order-item`, `void-order-item` |
 | `barista` | `kitchen` | Xem kitchen queue, chuyen mon `waiting/preparing -> preparing/ready` | `kitchen`, `update-order-item` |
-| `cashier` | `checkout`, `orders`, `customers`, `cash` | Bán hàng tại quầy, checkout service order, lookup/tạo khách, áp voucher, thu chi, xem/in receipt | `checkout`, `checkout-order`, `customer-create`, `cash-transaction`, `receipt` |
+| `cashier` | `checkout`, `orders`, `customers`, `cash` | Bán hàng tại quầy, checkout service order, lookup/tạo khách, thu chi, xem/in receipt và hoàn hóa đơn đúng chi nhánh | `checkout`, `checkout-order`, `customer-create`, `cash-transaction`, `receipt`, `refund-invoice`, `refund-history` |
 | `marketing` | `customers`, `campaigns` | CRM, campaign/voucher/newsletter, xem hieu qua campaign | `customer-create`, `campaigns`, `create-campaign` |
 | `manager` | `dashboard`, `reports`, `inventory`, `products`, `campaigns`, `cash`, `orders`, `kitchen` | Báo cáo, kho, sản phẩm, refund invoice, cancel order, void override, export CSV | `dashboard`, `reports`, `reports-export`, `inventory`, `product-save`, `refund-invoice`, `cancel-order` |
 | `owner` | Như manager + `staff` | Vận hành và nhân sự | Toàn bộ API quản lý, gồm `staff-save` |
 | `admin` | Toàn quyền POS | Quản trị hệ thống, nhân sự, dữ liệu vận hành | Toàn bộ API POS nội bộ |
 
 API doc/ghi nhay cam nhu `orders`, `kitchen`, `dashboard`, `campaigns`, `inventory`, `reports`, `reports-export`, `receipt`, `checkout`, `checkout-order`, `refund-invoice`, `void-order-item`, `cancel-order`, `stock-movement`, `cash-transaction`, `product-save`, `staff-save` deu bat buoc `staff_id`, `pos_session_id`, `session_token` va role hop le.
+
+## Hoàn đơn và thu chi theo ca
+
+- `cashier`, `manager`, `owner`, `admin` được hoàn toàn phần hoặc một phần; cashier chỉ xử lý hóa đơn thuộc chi nhánh của ca đang mở.
+- Hoàn toàn phần chuyển invoice/payment sang `refunded` và hủy website/service order liên quan. Hoàn một phần giữ order hoạt động và chuyển invoice/payment sang `partially_refunded`.
+- Hoàn tiền mặt tạo giao dịch `cash_transactions.type = out` liên kết với invoice/refund trong đúng ca thực hiện. Hoàn card/e-wallet bắt buộc mã tham chiếu và xác nhận đã xử lý bên ngoài, không làm thay đổi két tiền.
+- Nguyên liệu của món lỗi không được cộng lại kho; refund lưu `inventory_disposition = waste`. Báo cáo hiển thị gross sales, refund và net revenue.
 
 ## CRUD sản phẩm POS
 

@@ -767,6 +767,8 @@ function downloadTextFile(filename, text) {
 function showReceiptDialog(receipt) {
   const invoice = receipt.invoice || {};
   const items = receipt.items || [];
+  const refunds = receipt.refunds || [];
+  const refundSummary = receipt.refund_summary || {};
   document.querySelector("[data-receipt-dialog]")?.remove();
   const dialog = document.createElement("div");
   dialog.className = "receipt-dialog";
@@ -778,11 +780,109 @@ function showReceiptDialog(receipt) {
       <h2>Hóa đơn #${escapeHtml(invoice.id || "")}</h2>
       <p>${escapeHtml(invoice.branch_name || "")} - ${escapeHtml(formatDateTime(invoice.paid_at || invoice.invoice_date || ""))}</p>
       ${tableHtml(items, ["Món", "SL", "Giá", "Tổng"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
-      <div class="totals"><p><span>Tổng</span><strong>${formatMoney(invoice.total_amount)}</strong></p></div>
+      <div class="totals">
+        <p><span>Tổng hóa đơn</span><strong>${formatMoney(invoice.total_amount)}</strong></p>
+        ${Number(refundSummary.total_refunded || 0) > 0 ? `<p><span>Đã hoàn</span><strong>${formatMoney(refundSummary.total_refunded)}</strong></p>` : ""}
+        <p><span>Trạng thái</span><strong>${escapeHtml(invoice.status || "")}</strong></p>
+      </div>
+      ${refunds.length ? `<div class="refund-receipt-list"><h3>Lịch sử hoàn</h3>${refunds.map((refund) => `<p><strong>${formatMoney(refund.refund_amount)}</strong> · ${escapeHtml(refund.refund_type)} · ${escapeHtml(refund.refund_method)}<br><small>${escapeHtml(refund.note || refund.reason || "")} - ${escapeHtml(formatDateTime(refund.created_at))}</small></p>`).join("")}</div>` : ""}
       <button type="button" class="primary-btn full" data-receipt-print="${escapeHtml(invoice.id || "")}">In receipt</button>
     </div>
   `;
   document.body.appendChild(dialog);
+}
+
+function canRefundInvoice(role = state.pos.user?.staff_role) {
+  return ["cashier", "manager", "owner", "admin"].includes(role);
+}
+
+function updateRefundDialogState(dialog = document.querySelector("[data-refund-dialog]")) {
+  if (!dialog) return;
+  const form = dialog.querySelector("[data-refund-form]");
+  if (!form) return;
+  const type = form.elements.refund_type?.value || "full";
+  const method = form.elements.refund_method?.value || "cash";
+  const amount = form.elements.refund_amount;
+  if (amount) {
+    amount.readOnly = type === "full";
+    if (type === "full") amount.value = amount.dataset.remaining || amount.value;
+  }
+  const nonCash = method !== "cash";
+  const referenceWrap = dialog.querySelector("[data-refund-reference-wrap]");
+  const confirmWrap = dialog.querySelector("[data-refund-confirm-wrap]");
+  if (referenceWrap) referenceWrap.hidden = !nonCash;
+  if (confirmWrap) confirmWrap.hidden = !nonCash;
+  if (form.elements.refund_reference) form.elements.refund_reference.required = nonCash;
+  if (form.elements.external_refund_confirmed) {
+    form.elements.external_refund_confirmed.required = nonCash;
+    if (!nonCash) form.elements.external_refund_confirmed.checked = true;
+  }
+}
+
+function showRefundDialog(receipt) {
+  const invoice = receipt.invoice || {};
+  const summary = receipt.refund_summary || {};
+  const remaining = Math.max(0, Number(summary.remaining_refundable ?? invoice.total_amount ?? 0));
+  document.querySelector("[data-refund-dialog]")?.remove();
+  const dialog = document.createElement("div");
+  dialog.className = "refund-dialog";
+  dialog.dataset.refundDialog = "true";
+  dialog.innerHTML = `
+    <form class="refund-box" data-refund-form>
+      <button type="button" class="receipt-close" data-refund-close aria-label="Đóng">x</button>
+      <p class="eyebrow">Hoàn đơn</p>
+      <h2>Hóa đơn #${escapeHtml(invoice.id || "")}</h2>
+      <input type="hidden" name="invoice_id" value="${escapeHtml(invoice.id || "")}">
+      <div class="refund-metrics">
+        <div><small>Tổng đơn</small><strong>${formatMoney(invoice.total_amount)}</strong></div>
+        <div><small>Đã hoàn</small><strong>${formatMoney(summary.total_refunded || 0)}</strong></div>
+        <div><small>Còn có thể hoàn</small><strong>${formatMoney(remaining)}</strong></div>
+      </div>
+      <div class="refund-form-grid">
+        <label>Loại hoàn
+          <select name="refund_type" data-refund-type>
+            <option value="full">Hoàn toàn phần</option>
+            <option value="partial">Hoàn một phần</option>
+          </select>
+        </label>
+        <label>Số tiền
+          <input type="number" name="refund_amount" min="1" max="${remaining}" step="1000" value="${remaining}" data-remaining="${remaining}" readonly required>
+        </label>
+        <label>Lý do
+          <select name="reason_code" required>
+            <option value="quality_issue">Đồ uống/sản phẩm có vấn đề</option>
+            <option value="wrong_item">Sai món hoặc sai pha chế</option>
+            <option value="duplicate_charge">Thanh toán trùng</option>
+            <option value="customer_request">Yêu cầu của khách</option>
+            <option value="other">Khác</option>
+          </select>
+        </label>
+        <label>Phương thức hoàn
+          <select name="refund_method" data-refund-method>
+            <option value="cash" ${invoice.payment_method === "cash" ? "selected" : ""}>Tiền mặt</option>
+            <option value="card" ${invoice.payment_method === "card" ? "selected" : ""}>Thẻ</option>
+            <option value="e_wallet" ${invoice.payment_method === "e_wallet" ? "selected" : ""}>Ví điện tử / MoMo</option>
+          </select>
+        </label>
+        <label class="span-2">Ghi chú chi tiết
+          <textarea name="note" maxlength="500" required placeholder="Mô tả vấn đề và cách xử lý cho khách"></textarea>
+        </label>
+        <label class="span-2" data-refund-reference-wrap>Mã tham chiếu hoàn bên ngoài
+          <input name="refund_reference" maxlength="120" placeholder="Mã giao dịch hoàn card/e-wallet/MoMo">
+        </label>
+        <label class="refund-confirm span-2" data-refund-confirm-wrap>
+          <input type="checkbox" name="external_refund_confirmed" value="1"> Đã xử lý hoàn tiền trên hệ thống thanh toán bên ngoài
+        </label>
+      </div>
+      <div class="refund-warning">Nguyên liệu đã sử dụng không được cộng lại kho. Hệ thống ghi nhận hao hụt do hoàn đơn.</div>
+      <div class="refund-actions">
+        <button type="button" class="secondary-btn" data-refund-close>Hủy</button>
+        <button type="submit" class="primary-btn">Xác nhận hoàn tiền</button>
+      </div>
+    </form>
+  `;
+  document.body.appendChild(dialog);
+  updateRefundDialogState(dialog);
 }
 
 function persistCart(scope) {
@@ -2905,6 +3005,53 @@ function renderInventoryCrudModule() {
   `;
 }
 
+function refundableInvoicesTable() {
+  const rows = cafeApp.reports?.refundable_invoices || [];
+  return tableHtml(rows, ["Hóa đơn", "Khách", "Chi nhánh", "Thanh toán", "Tổng", "Đã hoàn", "Còn lại", ""], (row) => `
+    <tr>
+      <td>#${escapeHtml(row.id)}<br><small>${escapeHtml(row.status)}</small></td>
+      <td>${escapeHtml(row.customer_name || "Khách lẻ")}</td>
+      <td>${escapeHtml(row.branch_name || "")}</td>
+      <td>${escapeHtml(row.payment_method || "")}</td>
+      <td>${formatMoney(row.total_amount)}</td>
+      <td>${formatMoney(row.refunded_amount)}</td>
+      <td>${formatMoney(row.remaining_refundable)}</td>
+      <td>${canRefundInvoice() ? `<button type="button" class="secondary-btn compact" data-refund-invoice="${escapeHtml(row.id)}">Hoàn đơn</button>` : ""}</td>
+    </tr>
+  `, "Không có hóa đơn có thể hoàn.");
+}
+
+function refundHistoryTable() {
+  const rows = cafeApp.reports?.refund_history || [];
+  return tableHtml(rows, ["Refund", "Hóa đơn", "Loại", "Phương thức", "Số tiền", "Nhân viên / ca", "Lý do & note", "Thời gian"], (row) => `
+    <tr>
+      <td>#${escapeHtml(row.id)}</td>
+      <td>#${escapeHtml(row.invoice_id)}<br><small>${escapeHtml(row.invoice_status || "")}</small></td>
+      <td><span class="status ${row.refund_type === "full" ? "bad" : ""}">${row.refund_type === "full" ? "Toàn phần" : "Một phần"}</span></td>
+      <td>${escapeHtml(row.refund_method || "")}${row.refund_reference ? `<br><small>${escapeHtml(row.refund_reference)}</small>` : ""}</td>
+      <td>${formatMoney(row.refund_amount)}</td>
+      <td>${escapeHtml(row.staff_name || "")}<br><small>Ca #${escapeHtml(row.pos_session_id || "-")}</small></td>
+      <td>${escapeHtml(row.reason || "")}<br><small>${escapeHtml(row.note || "")}</small></td>
+      <td>${escapeHtml(formatDateTime(row.created_at))}</td>
+    </tr>
+  `, "Chưa có lịch sử hoàn đơn.");
+}
+
+function linkedCashTable() {
+  const rows = cafeApp.reports?.cash_transactions || [];
+  return tableHtml(rows, ["Loại", "Tham chiếu", "Lý do", "Số tiền", "Nhân viên", "Chi nhánh / ca", "Thời gian"], (row) => `
+    <tr>
+      <td><span class="status ${row.transaction_type === "in" ? "good" : "bad"}">${escapeHtml(row.transaction_type)}</span></td>
+      <td>${row.invoice_id ? `HĐ #${escapeHtml(row.invoice_id)}` : "-"}${row.invoice_refund_id ? `<br><small>Refund #${escapeHtml(row.invoice_refund_id)}</small>` : ""}</td>
+      <td>${escapeHtml(row.reason)}</td>
+      <td>${formatMoney(row.amount)}</td>
+      <td>${escapeHtml(row.staff_name)}</td>
+      <td>${escapeHtml(row.branch_name || "")}<br><small>Ca #${escapeHtml(row.pos_session_id || "-")}</small></td>
+      <td>${escapeHtml(formatDateTime(row.created_at))}</td>
+    </tr>
+  `, "Chưa có lịch sử thu chi.");
+}
+
 function cashTable() {
   const rows = cafeApp.reports?.cash_transactions || [];
   return tableHtml(rows, ["Loại", "Lý do", "Số tiền", "Nhân viên", "Thời gian"], (row) => `
@@ -2914,18 +3061,19 @@ function cashTable() {
 
 function sessionReportsTable() {
   const rows = cafeApp.reports?.session_reports || cafeApp.session_reports || [];
-  return tableHtml(rows, ["Nhân viên", "Role", "Ca", "Thời lượng", "Doanh thu", "Bill", "Order", "Món pha", "Thu/chi", "Log"], (row) => `
+  return tableHtml(rows, ["Nhân viên", "Role", "Ca", "Thời lượng", "Bán / hoàn / net", "Bill", "Refund", "Order", "Món pha", "Thu/chi", "Log"], (row) => `
     <tr>
       <td>${escapeHtml(row.staff_name)}</td>
       <td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td>
       <td>${escapeHtml(formatDateTime(row.opened_at))}<br><small>${escapeHtml(row.status)}${row.closed_reason ? ` - ${escapeHtml(row.closed_reason)}` : ""}</small></td>
-      <td>${Number(row.duration_minutes || 0)} phut</td>
-      <td>${formatMoney(row.revenue_total)}</td>
+      <td>${Number(row.duration_minutes || 0)} phút</td>
+      <td>${formatMoney(row.revenue_total)}<br><small>-${formatMoney(row.refund_amount)} / ${formatMoney(row.net_session_revenue)}</small></td>
       <td>${Number(row.invoice_count || 0)}</td>
-      <td>${Number(row.order_count || 0)} / ${Number(row.order_items || 0)} mon</td>
+      <td>${Number(row.refund_count || 0)}<br><small>Cash ${formatMoney(row.cash_refund_amount)} / Non-cash ${formatMoney(row.noncash_refund_amount)}</small></td>
+      <td>${Number(row.order_count || 0)} / ${Number(row.order_items || 0)} món</td>
       <td>${Number(row.prepared_quantity || 0)}<br><small>TB ${Number(row.avg_prepare_minutes || 0).toFixed(1)}p</small></td>
       <td>${formatMoney(row.cash_in)} / ${formatMoney(row.cash_out)}</td>
-      <td><small>${escapeHtml(row.main_actions || `${Number(row.activity_count || 0)} thao tac`)}</small></td>
+      <td><small>${escapeHtml(row.main_actions || `${Number(row.activity_count || 0)} thao tác`)}</small></td>
     </tr>
   `, "Chưa có phiên làm việc.");
 }
@@ -2944,16 +3092,6 @@ function reportFilterPayload() {
 function renderReportsModule() {
   const reports = cafeApp.reports || {};
   const filters = reportFilterPayload();
-  const recentInvoices = cafeApp.dashboard?.recent_invoices || [];
-  const invoiceActions = tableHtml(recentInvoices, ["HĐ", "Khách", "Kênh", "Tổng", ""], (row) => `
-    <tr>
-      <td>#${row.id}</td>
-      <td>${escapeHtml(row.customer_name || "Khach le")}</td>
-      <td>${escapeHtml(row.sales_channel || "")}</td>
-      <td>${formatMoney(row.total_amount)}</td>
-      <td><button type="button" data-receipt-invoice="${row.id}">Receipt</button>${isOverrideRole() ? `<button type="button" data-refund-invoice="${row.id}">Refund</button>` : ""}</td>
-    </tr>
-  `, "Chưa có hóa đơn.");
   return `
     <div class="dashboard-columns">
       <section class="panel span-2">
@@ -2977,9 +3115,10 @@ function renderReportsModule() {
       <section class="panel span-2"><h2>Sản phẩm bán chạy theo chi nhánh</h2>${tableHtml(reports.top_products_by_branch || [], ["Chi nhánh", "Sản phẩm", "SL", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.branch_name)}</td><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity_sold || 0)}</td><td>${formatMoney(row.product_revenue)}</td></tr>`)}</section>
       <section class="panel"><h2>Giờ cao điểm</h2>${tableHtml(reports.hourly_revenue || [], ["Giờ", "Đơn", "Doanh thu", "TB/HĐ"], (row) => `<tr><td>${String(row.business_hour).padStart(2, "0")}:00</td><td>${Number(row.paid_invoice_count || 0)}</td><td>${formatMoney(row.net_revenue)}</td><td>${formatMoney(row.average_invoice_value)}</td></tr>`)}</section>
       <section class="panel"><h2>Hiệu suất nhân viên</h2>${tableHtml(reports.staff_performance || [], ["Nhân viên", "Role", "Đơn", "Doanh thu"], (row) => `<tr><td>${escapeHtml(row.staff_name)}</td><td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td><td>${Number(row.orders_processed || 0)}</td><td>${formatMoney(row.revenue_handled)}</td></tr>`)}</section>
-      <section class="panel span-2"><h2>Hóa đơn gần nhất</h2>${invoiceActions}</section>
+      <section class="panel span-2"><h2>Hóa đơn có thể hoàn</h2>${refundableInvoicesTable()}</section>
+      <section class="panel span-2"><h2>Lịch sử hoàn đơn</h2>${refundHistoryTable()}</section>
       <section class="panel span-2"><h2>Phiên làm việc POS</h2>${sessionReportsTable()}</section>
-      <section class="panel span-2"><h2>Thu chi gần nhất</h2>${cashTable()}</section>
+      <section class="panel span-2"><h2>Thu chi gần nhất</h2>${linkedCashTable()}</section>
     </div>
   `;
 }
@@ -3223,7 +3362,9 @@ function renderCashModule() {
         <label>Số tiền <input type="number" name="amount" value="50000" min="0"></label>
         <button class="primary-btn" type="submit">Ghi nhận</button>
       </form>
-      <section class="panel"><h2>Lịch sử thu chi</h2>${cashTable()}</section>
+      <section class="panel"><h2>Lịch sử thu chi</h2>${linkedCashTable()}</section>
+      <section class="panel span-2"><h2>Hóa đơn có thể hoàn</h2>${refundableInvoicesTable()}</section>
+      <section class="panel span-2"><h2>Lịch sử hoàn đơn trong chi nhánh</h2>${refundHistoryTable()}</section>
     </div>
   `;
 }
@@ -3749,6 +3890,7 @@ function wireEvents() {
     const orderCheckout = event.target.closest("[data-order-checkout]");
     const receiptInvoice = event.target.closest("[data-receipt-invoice]");
     const refundInvoice = event.target.closest("[data-refund-invoice]");
+    const refundClose = event.target.closest("[data-refund-close]");
     const reportExport = event.target.closest("[data-report-export]");
     const receiptClose = event.target.closest("[data-receipt-close]");
     const receiptPrint = event.target.closest("[data-receipt-print]");
@@ -4070,13 +4212,14 @@ function wireEvents() {
       }
       return;
     }
+    if (refundClose) {
+      document.querySelector("[data-refund-dialog]")?.remove();
+      return;
+    }
     if (refundInvoice) {
-      const reason = window.prompt("Lý do hoàn tiền?");
-      if (!reason || !reason.trim()) return;
       try {
-        await api("refund-invoice", { invoice_id: refundInvoice.dataset.refundInvoice, reason: reason.trim() });
-        await refreshPosData(false);
-        showToast("Đã hoàn tiền hóa đơn.");
+        const receipt = await api("receipt", { invoice_id: refundInvoice.dataset.refundInvoice });
+        showRefundDialog(receipt);
       } catch (error) {
         showToast(error.message);
       }
@@ -4497,6 +4640,7 @@ function wireEvents() {
     const stockForm = event.target.closest("[data-stock-movement]");
     const recipeForm = event.target.closest("[data-recipe-save]");
     const cashForm = event.target.closest("[data-cash-transaction]");
+    const refundForm = event.target.closest("[data-refund-form]");
     const productForm = event.target.closest("[data-product-save]");
     const categoryForm = event.target.closest("[data-category-save]");
     const staffForm = event.target.closest("[data-staff-save]");
@@ -4822,6 +4966,24 @@ function wireEvents() {
       }
       return;
     }
+    if (refundForm) {
+      event.preventDefault();
+      const submitButton = refundForm.querySelector("button[type='submit']");
+      if (submitButton) submitButton.disabled = true;
+      try {
+        const payload = Object.fromEntries(new FormData(refundForm));
+        payload.external_refund_confirmed = refundForm.elements.external_refund_confirmed?.checked ? "1" : "0";
+        const result = await api("refund-invoice", payload);
+        document.querySelector("[data-refund-dialog]")?.remove();
+        await refreshPosData(false);
+        showToast(result.invoice_status === "refunded" ? "Đã hoàn toàn bộ và hủy đơn." : "Đã ghi nhận hoàn một phần.");
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        if (submitButton) submitButton.disabled = false;
+      }
+      return;
+    }
     if (productForm) {
       event.preventDefault();
       try {
@@ -4888,6 +5050,7 @@ function wireEvents() {
     const posCartSize = event.target.closest("[data-pos-cart-size]");
     const adminStatusFilter = event.target.closest("[data-admin-product-status]");
     const adminCategoryFilter = event.target.closest("[data-admin-product-category]");
+    const refundControl = event.target.closest("[data-refund-type], [data-refund-method]");
     if (siteVoucher) {
       state.site.voucherId = siteVoucher.value;
       renderTotals("site");
@@ -4932,6 +5095,10 @@ function wireEvents() {
     if (adminCategoryFilter) {
       state.pos.adminProductCategory = adminCategoryFilter.value || "";
       renderPosApp();
+      return;
+    }
+    if (refundControl) {
+      updateRefundDialogState();
     }
   });
 

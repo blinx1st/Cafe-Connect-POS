@@ -267,7 +267,14 @@ CREATE TABLE IF NOT EXISTS invoice_refunds (
     staff_id INT NOT NULL,
     pos_session_id INT NULL,
     refund_amount DECIMAL(12,2) NOT NULL,
+    refund_type ENUM('full', 'partial') NOT NULL DEFAULT 'full',
+    refund_method ENUM('cash', 'card', 'e_wallet') NOT NULL DEFAULT 'cash',
+    refund_reference VARCHAR(120) NULL,
+    reason_code VARCHAR(40) NOT NULL DEFAULT 'other',
     reason VARCHAR(255) NOT NULL,
+    note VARCHAR(500) NULL,
+    external_refund_confirmed TINYINT(1) NOT NULL DEFAULT 0,
+    inventory_disposition ENUM('waste', 'restock', 'none') NOT NULL DEFAULT 'waste',
     status ENUM('approved', 'rejected') NOT NULL DEFAULT 'approved',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_invoice_refunds_invoice (invoice_id),
@@ -285,6 +292,55 @@ CREATE TABLE IF NOT EXISTS invoice_refunds (
         ON UPDATE CASCADE
         ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE invoices
+    MODIFY status ENUM('pending', 'paid', 'partially_refunded', 'cancelled', 'refunded') NOT NULL DEFAULT 'paid';
+
+ALTER TABLE payments
+    MODIFY status ENUM('pending', 'paid', 'partially_refunded', 'failed', 'refunded') NOT NULL DEFAULT 'paid';
+
+ALTER TABLE invoice_refunds
+    ADD COLUMN IF NOT EXISTS refund_type ENUM('full', 'partial') NOT NULL DEFAULT 'full' AFTER refund_amount,
+    ADD COLUMN IF NOT EXISTS refund_method ENUM('cash', 'card', 'e_wallet') NOT NULL DEFAULT 'cash' AFTER refund_type,
+    ADD COLUMN IF NOT EXISTS refund_reference VARCHAR(120) NULL AFTER refund_method,
+    ADD COLUMN IF NOT EXISTS reason_code VARCHAR(40) NOT NULL DEFAULT 'other' AFTER refund_reference,
+    ADD COLUMN IF NOT EXISTS note VARCHAR(500) NULL AFTER reason,
+    ADD COLUMN IF NOT EXISTS external_refund_confirmed TINYINT(1) NOT NULL DEFAULT 0 AFTER note,
+    ADD COLUMN IF NOT EXISTS inventory_disposition ENUM('waste', 'restock', 'none') NOT NULL DEFAULT 'waste' AFTER external_refund_confirmed;
+
+ALTER TABLE cash_transactions
+    ADD COLUMN IF NOT EXISTS invoice_id INT NULL AFTER pos_session_id,
+    ADD COLUMN IF NOT EXISTS invoice_refund_id INT NULL AFTER invoice_id,
+    ADD KEY IF NOT EXISTS idx_cash_transactions_invoice (invoice_id),
+    ADD UNIQUE KEY IF NOT EXISTS uq_cash_transactions_refund (invoice_refund_id);
+
+SET @add_cash_invoice_fk = IF(
+    EXISTS(
+        SELECT 1 FROM information_schema.referential_constraints
+        WHERE constraint_schema = DATABASE()
+          AND table_name = 'cash_transactions'
+          AND constraint_name = 'fk_cash_transactions_invoice'
+    ),
+    'SELECT 1',
+    'ALTER TABLE cash_transactions ADD CONSTRAINT fk_cash_transactions_invoice FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON UPDATE CASCADE ON DELETE SET NULL'
+);
+PREPARE add_cash_invoice_fk_stmt FROM @add_cash_invoice_fk;
+EXECUTE add_cash_invoice_fk_stmt;
+DEALLOCATE PREPARE add_cash_invoice_fk_stmt;
+
+SET @add_cash_refund_fk = IF(
+    EXISTS(
+        SELECT 1 FROM information_schema.referential_constraints
+        WHERE constraint_schema = DATABASE()
+          AND table_name = 'cash_transactions'
+          AND constraint_name = 'fk_cash_transactions_refund'
+    ),
+    'SELECT 1',
+    'ALTER TABLE cash_transactions ADD CONSTRAINT fk_cash_transactions_refund FOREIGN KEY (invoice_refund_id) REFERENCES invoice_refunds(id) ON UPDATE CASCADE ON DELETE SET NULL'
+);
+PREPARE add_cash_refund_fk_stmt FROM @add_cash_refund_fk;
+EXECUTE add_cash_refund_fk_stmt;
+DEALLOCATE PREPARE add_cash_refund_fk_stmt;
 
 CREATE TABLE IF NOT EXISTS receipt_print_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -512,6 +568,7 @@ SELECT b.id,
        NOW()
 FROM branches b
 CROSS JOIN inventory_materials im
+WHERE 1 = 1
 ON DUPLICATE KEY UPDATE
     min_stock_level = VALUES(min_stock_level),
     unit_cost = VALUES(unit_cost),

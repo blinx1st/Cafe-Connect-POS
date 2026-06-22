@@ -33,7 +33,7 @@ Những phần đã nâng trong bản vận hành nội bộ v1:
 | POS auth | Đạt | Mật khẩu nhân viên + PIN mở ca + heartbeat + session token |
 | Role policy | Đạt | Backend/frontend dùng quyền tập trung trong `RolePolicy` |
 | Website commerce | Đạt v1 | Cart, voucher, COD/DemoPay, order detail, cancel pending |
-| POS cashier | Đạt v1 | Checkout, receipt, refund, cash, closing shift baseline |
+| POS cashier | Đạt | Checkout, receipt, hoàn toàn phần/một phần theo chi nhánh, thu chi liên kết refund và closing shift |
 | Service order | Đạt | Waiter tạo order, barista xử lý, cashier thanh toán |
 | Inventory | Đạt baseline | Stock movement, recipe/BOM, trừ nguyên liệu khi invoice paid |
 | Report | Đạt baseline | Dashboard, session performance, CSV export |
@@ -77,7 +77,10 @@ Kết quả:
 - Cashier checkout POS, lookup/tạo khách, áp voucher, thu chi và in/xem receipt.
 - Waiter tạo order bàn và đánh dấu món đã phục vụ.
 - Barista xử lý kitchen queue.
-- Manager/owner/admin có dashboard, report, inventory, product, campaign, refund, cancel và override.
+- Cashier được hoàn hóa đơn đúng chi nhánh; manager/owner/admin có quyền hoàn và tra cứu mở rộng.
+- Refund tiền mặt tạo cash-out theo ca; refund card/e-wallet lưu mã tham chiếu, không tác động két tiền.
+- Báo cáo và phiên làm việc tách gross sales, refund, net revenue; nguyên liệu lỗi được ghi nhận `waste` và không hoàn kho.
+- Manager/owner/admin có dashboard, report, inventory, product, campaign, cancel và override.
 
 ### Backend/API
 
@@ -112,7 +115,7 @@ Kết quả:
 - [x] Order detail và cancel pending.
 - [x] Voucher claim/redeem/reserve.
 - [x] POS checkout/service order/kitchen.
-- [x] Receipt/refund/void/cancel baseline.
+- [x] Receipt, full/partial refund, cash-out theo ca, void và cancel.
 - [x] Inventory recipe baseline.
 - [x] Dashboard/report/export baseline.
 - [x] CSRF, lockout, audit log, app logger.

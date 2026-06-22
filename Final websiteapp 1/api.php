@@ -48,6 +48,7 @@ $legacyActionMap = [
     'recipe_delete' => '/api/recipe-delete',
     'recipe_restore' => '/api/recipe-restore',
     'refund_invoice' => '/api/refund-invoice',
+    'refund_history' => '/api/refund-history',
     'void_order_item' => '/api/void-order-item',
     'cancel_order' => '/api/cancel-order',
     'checkout_closing' => '/api/checkout-closing',

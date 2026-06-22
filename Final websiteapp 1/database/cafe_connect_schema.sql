@@ -490,7 +490,7 @@ CREATE TABLE invoices (
     total_amount DECIMAL(12,2) NOT NULL DEFAULT 0,
     points_earned INT NOT NULL DEFAULT 0,
     payment_method ENUM('cash', 'card', 'e_wallet') NOT NULL,
-    status ENUM('pending', 'paid', 'cancelled', 'refunded') NOT NULL DEFAULT 'paid',
+    status ENUM('pending', 'paid', 'partially_refunded', 'cancelled', 'refunded') NOT NULL DEFAULT 'paid',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_invoices_date_branch (invoice_date, branch_id),
     KEY idx_invoices_customer_date (customer_id, invoice_date),
@@ -531,7 +531,7 @@ CREATE TABLE payments (
     amount DECIMAL(12,2) NOT NULL,
     paid_at DATETIME NULL,
     transaction_reference VARCHAR(120) NULL,
-    status ENUM('pending', 'paid', 'failed', 'refunded') NOT NULL DEFAULT 'paid',
+    status ENUM('pending', 'paid', 'partially_refunded', 'failed', 'refunded') NOT NULL DEFAULT 'paid',
     KEY idx_payments_invoice_method (invoice_id, payment_method),
     CONSTRAINT fk_payments_invoice
         FOREIGN KEY (invoice_id) REFERENCES invoices(id)
@@ -608,7 +608,14 @@ CREATE TABLE invoice_refunds (
     staff_id INT NOT NULL,
     pos_session_id INT NULL,
     refund_amount DECIMAL(12,2) NOT NULL,
+    refund_type ENUM('full', 'partial') NOT NULL DEFAULT 'full',
+    refund_method ENUM('cash', 'card', 'e_wallet') NOT NULL DEFAULT 'cash',
+    refund_reference VARCHAR(120) NULL,
+    reason_code VARCHAR(40) NOT NULL DEFAULT 'other',
     reason VARCHAR(255) NOT NULL,
+    note VARCHAR(500) NULL,
+    external_refund_confirmed TINYINT(1) NOT NULL DEFAULT 0,
+    inventory_disposition ENUM('waste', 'restock', 'none') NOT NULL DEFAULT 'waste',
     status ENUM('approved', 'rejected') NOT NULL DEFAULT 'approved',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_invoice_refunds_invoice (invoice_id),
@@ -895,11 +902,15 @@ CREATE TABLE cash_transactions (
     branch_id INT NOT NULL,
     staff_id INT NOT NULL,
     pos_session_id INT NULL,
+    invoice_id INT NULL,
+    invoice_refund_id INT NULL,
     transaction_type ENUM('in', 'out') NOT NULL,
     reason VARCHAR(180) NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     KEY idx_cash_transactions_created (created_at),
+    KEY idx_cash_transactions_invoice (invoice_id),
+    UNIQUE KEY uq_cash_transactions_refund (invoice_refund_id),
     CONSTRAINT fk_cash_transactions_branch
         FOREIGN KEY (branch_id) REFERENCES branches(id)
         ON UPDATE CASCADE
@@ -911,7 +922,15 @@ CREATE TABLE cash_transactions (
     CONSTRAINT fk_cash_transactions_session
         FOREIGN KEY (pos_session_id) REFERENCES pos_sessions(id)
         ON UPDATE CASCADE
-        ON DELETE RESTRICT
+        ON DELETE RESTRICT,
+    CONSTRAINT fk_cash_transactions_invoice
+        FOREIGN KEY (invoice_id) REFERENCES invoices(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL,
+    CONSTRAINT fk_cash_transactions_refund
+        FOREIGN KEY (invoice_refund_id) REFERENCES invoice_refunds(id)
+        ON UPDATE CASCADE
+        ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE loyalty_point_transactions (

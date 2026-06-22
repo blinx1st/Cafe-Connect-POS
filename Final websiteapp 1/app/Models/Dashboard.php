@@ -86,12 +86,18 @@ final class Dashboard extends Model
     {
         return $this->db->query(
             "SELECT i.id, i.invoice_date, i.invoice_time, i.bill_started_at, i.paid_at, i.sales_channel, i.total_amount,
-                    i.payment_method, COALESCE(c.customer_name, 'Guest') AS customer_name,
+                    i.payment_method, i.status, COALESCE(r.refunded_amount, 0) AS refunded_amount,
+                    GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) AS remaining_refundable,
+                    COALESCE(c.customer_name, 'Guest') AS customer_name,
                     b.branch_name
              FROM invoices i
              JOIN branches b ON b.id = i.branch_id
              LEFT JOIN customers c ON c.id = i.customer_id
-             WHERE i.status = 'paid'
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
+             WHERE i.status IN ('paid', 'partially_refunded', 'refunded')
              ORDER BY i.invoice_date DESC, i.invoice_time DESC, i.id DESC
              LIMIT 8"
         )->fetchAll();

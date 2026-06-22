@@ -86,7 +86,8 @@ final class ApiController extends Controller
                 '/api/order-status-update' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => (new Order())->updateOrderStatus($payload + ['staff_role' => $staff['staff_role']])),
                 '/api/kitchen' => $this->withEndpoint($route, $auth, $payload, fn () => ['kitchen' => (new Order())->kitchenQueue()]),
                 '/api/checkout-order' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->checkout($payload)),
-                '/api/refund-invoice' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->refund($payload)),
+                '/api/refund-invoice' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => $this->refundInvoice($payload, $staff)),
+                '/api/refund-history' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => $this->refundHistory($payload, $staff)),
                 '/api/receipt' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->receipt((int) ($payload['invoice_id'] ?? 0))),
                 '/api/receipt-print-log' => $this->withEndpoint($route, $auth, $payload, fn () => (new Invoice())->logReceiptPrint($payload)),
                 '/api/payment-demo-create' => $this->paymentDemoCreate($payload),
@@ -193,6 +194,7 @@ final class ApiController extends Controller
                 'pos_session_logout' => '/api/pos-session-logout',
                 'pos_session_report' => '/api/pos-session-report',
                 'refund_invoice' => '/api/refund-invoice',
+                'refund_history' => '/api/refund-history',
                 'void_order_item' => '/api/void-order-item',
                 'cancel_order' => '/api/cancel-order',
                 'checkout_closing' => '/api/checkout-closing',
@@ -353,6 +355,8 @@ final class ApiController extends Controller
             $reports['session_reports'] = $sessionReports;
             $data['reports'] = $reports;
             $data['session_reports'] = $sessionReports;
+        } elseif (RolePolicy::canAccessModule($role, 'cash')) {
+            $data['reports'] = (new Report())->cashData(['branch_id' => $branchId]);
         }
         if (RolePolicy::canAccessModule($role, 'staff')) {
             $data['staff'] = $staff->allForAdmin();
@@ -959,6 +963,35 @@ final class ApiController extends Controller
         }
 
         return $data;
+    }
+
+    private function refundInvoice(array $payload, array $staff): array
+    {
+        $session = (new PosSession())->requireOpen($payload, $staff);
+
+        return (new Invoice())->refund(array_merge($payload, [
+            'staff_id' => (int) $staff['id'],
+            'staff_role' => (string) $staff['staff_role'],
+            'pos_session_id' => (int) $session['id'],
+            'session_branch_id' => (int) $session['branch_id'],
+        ]));
+    }
+
+    private function refundHistory(array $payload, array $staff): array
+    {
+        $session = (new PosSession())->requireOpen($payload, $staff);
+        $role = (string) $staff['staff_role'];
+        $branchId = $role === 'cashier'
+            ? (int) $session['branch_id']
+            : max(0, (int) ($payload['branch_id'] ?? 0));
+
+        return [
+            'refund_history' => (new Invoice())->refundHistory([
+                'branch_id' => $branchId,
+                'pos_session_id' => max(0, (int) ($payload['filter_pos_session_id'] ?? 0)),
+                'limit' => max(1, min(200, (int) ($payload['limit'] ?? 100))),
+            ]),
+        ];
     }
 
     private function withEndpoint(string $route, AuthController $auth, array $payload, callable $callback): mixed

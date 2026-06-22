@@ -540,7 +540,10 @@ $refundableVoucherOrder = Invoke-CafeApi "checkout" (Add-Session @{
 
 Invoke-CafeApi "refund-invoice" (Add-Session @{
   invoice_id = $refundableVoucherOrder.invoice_id
-  reason = "Smoke full refund restores voucher"
+  refund_type = "full"
+  refund_method = "cash"
+  reason_code = "quality_issue"
+  note = "Smoke full refund restores voucher"
 } $manager) | Out-Null
 
 Invoke-CafeApi "checkout" (Add-Session @{
@@ -569,8 +572,11 @@ $partialVoucherOrder = Invoke-CafeApi "checkout" (Add-Session @{
 
 Invoke-CafeApi "refund-invoice" (Add-Session @{
   invoice_id = $partialVoucherOrder.invoice_id
+  refund_type = "partial"
   refund_amount = 1000
-  reason = "Smoke partial refund keeps voucher redeemed"
+  refund_method = "cash"
+  reason_code = "quality_issue"
+  note = "Smoke partial refund keeps voucher redeemed"
 } $manager) | Out-Null
 
 Expect-CafeApiFailure "checkout" (Add-Session @{
@@ -669,10 +675,69 @@ Invoke-CafeApi "recipe-restore" (Add-Session @{ id = $recipeId } $manager) | Out
 Invoke-CafeApi "material-delete" (Add-Session @{ id = $materialId } $manager) | Out-Null
 Invoke-CafeApi "material-restore" (Add-Session @{ id = $materialId } $manager) | Out-Null
 
-Invoke-CafeApi "refund-invoice" (Add-Session @{
+$cashierRefund = Invoke-CafeApi "refund-invoice" (Add-Session @{
   invoice_id = $posCheckout.invoice_id
-  reason = "Smoke test refund"
-} $manager) | Out-Null
+  refund_type = "full"
+  refund_method = "cash"
+  reason_code = "quality_issue"
+  note = "Smoke cashier cash refund"
+} $cashier)
+if ($cashierRefund.invoice_status -ne "refunded" -or -not $cashierRefund.cash_transaction_id) {
+  throw "Cashier cash refund did not create refunded status and linked cash-out transaction."
+}
+
+$crossBranchInvoice = Invoke-CafeApi "checkout" (Add-Session @{
+  branch_id = 2
+  payment_method = "cash"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 1; quantity = 1; size = "M" }
+  )
+} $manager)
+Expect-CafeApiFailure "refund-invoice" (Add-Session @{
+  invoice_id = $crossBranchInvoice.invoice_id
+  refund_type = "full"
+  refund_method = "cash"
+  reason_code = "quality_issue"
+  note = "Cashier must not refund another branch"
+} $cashier) "branch"
+
+$cardInvoice = Invoke-CafeApi "checkout" (Add-Session @{
+  branch_id = 1
+  payment_method = "card"
+  sales_channel = "pos"
+  bill_started_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+  items = @(
+    @{ product_id = 2; quantity = 1; size = "M" }
+  )
+} $cashier)
+Expect-CafeApiFailure "refund-invoice" (Add-Session @{
+  invoice_id = $cardInvoice.invoice_id
+  refund_type = "partial"
+  refund_amount = 1000
+  refund_method = "card"
+  reason_code = "duplicate_charge"
+  note = "Missing external refund reference"
+} $cashier) "reference"
+$cardRefund = Invoke-CafeApi "refund-invoice" (Add-Session @{
+  invoice_id = $cardInvoice.invoice_id
+  refund_type = "partial"
+  refund_amount = 1000
+  refund_method = "card"
+  refund_reference = "SMOKE-CARD-$suffix"
+  external_refund_confirmed = $true
+  reason_code = "duplicate_charge"
+  note = "Smoke external card refund"
+} $cashier)
+if ($cardRefund.invoice_status -ne "partially_refunded" -or $cardRefund.cash_transaction_id) {
+  throw "Non-cash partial refund status or cash-drawer behavior is incorrect."
+}
+
+$refundHistory = Invoke-CafeApi "refund-history" (Add-Session @{} $cashier)
+if (-not ($refundHistory.refund_history | Where-Object { $_.invoice_id -eq $posCheckout.invoice_id })) {
+  throw "Cashier refund history does not contain the same-branch refunded invoice."
+}
 
 Invoke-CafeApi "dashboard" (Add-Session @{} $manager) | Out-Null
 Invoke-CafeApi "pos-session-report" (Add-Session @{} $manager) | Out-Null

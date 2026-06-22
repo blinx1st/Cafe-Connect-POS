@@ -333,11 +333,24 @@ final class Invoice extends Model
     public function refund(array $data): array
     {
         $invoiceId = (int) ($data['invoice_id'] ?? 0);
-        $staffId = max(1, (int) ($data['staff_id'] ?? 1));
-        $posSessionId = isset($data['pos_session_id']) && (int) $data['pos_session_id'] > 0 ? (int) $data['pos_session_id'] : null;
-        $reason = trim((string) ($data['reason'] ?? ''));
-        if ($invoiceId <= 0 || $reason === '') {
-            throw new InvalidArgumentException('Refund requires invoice_id and reason.');
+        $staffId = (int) ($data['staff_id'] ?? 0);
+        $staffRole = (string) ($data['staff_role'] ?? '');
+        $posSessionId = (int) ($data['pos_session_id'] ?? 0);
+        $sessionBranchId = (int) ($data['session_branch_id'] ?? 0);
+        $note = trim((string) ($data['note'] ?? $data['reason'] ?? ''));
+        $reasonCodeCandidate = (string) ($data['reason_code'] ?? 'other');
+        $reasonCode = in_array($reasonCodeCandidate, [
+            'quality_issue', 'wrong_item', 'duplicate_charge', 'customer_request', 'other',
+        ], true) ? $reasonCodeCandidate : 'other';
+        $reasonLabels = [
+            'quality_issue' => 'Product quality issue',
+            'wrong_item' => 'Wrong item or preparation',
+            'duplicate_charge' => 'Duplicate charge',
+            'customer_request' => 'Customer request',
+            'other' => 'Other refund reason',
+        ];
+        if ($invoiceId <= 0 || $staffId <= 0 || $posSessionId <= 0 || $sessionBranchId <= 0 || $note === '') {
+            throw new InvalidArgumentException('Refund requires invoice, active POS session and note.');
         }
 
         $this->db->beginTransaction();
@@ -348,45 +361,135 @@ final class Invoice extends Model
             if (!$invoice) {
                 throw new InvalidArgumentException('Invoice not found.');
             }
-            if ($invoice['status'] !== 'paid') {
-                throw new InvalidArgumentException('Only paid invoices can be refunded.');
+            if (!in_array($invoice['status'], ['paid', 'partially_refunded'], true)) {
+                throw new InvalidArgumentException('Only paid or partially refunded invoices can be refunded.');
+            }
+            if ($staffRole === 'cashier' && (int) $invoice['branch_id'] !== $sessionBranchId) {
+                throw new InvalidArgumentException('Cashier can only refund invoices from the active branch.');
             }
 
-            $amount = isset($data['refund_amount']) && (float) $data['refund_amount'] > 0
-                ? min((float) $data['refund_amount'], (float) $invoice['total_amount'])
-                : (float) $invoice['total_amount'];
-            $isFullRefund = $amount >= ((float) $invoice['total_amount'] - 0.01);
+            $refundRows = $this->db->prepare(
+                "SELECT id, refund_amount
+                 FROM invoice_refunds
+                 WHERE invoice_id = :invoice_id AND status = 'approved'
+                 FOR UPDATE"
+            );
+            $refundRows->execute(['invoice_id' => $invoiceId]);
+            $refundedBefore = array_reduce(
+                $refundRows->fetchAll(),
+                static fn (float $sum, array $row): float => $sum + (float) $row['refund_amount'],
+                0.0
+            );
+            $invoiceTotal = (float) $invoice['total_amount'];
+            $remaining = max(0.0, $invoiceTotal - $refundedBefore);
+            if ($remaining < 0.01) {
+                throw new InvalidArgumentException('Invoice has already been fully refunded.');
+            }
+
+            $requestedType = ($data['refund_type'] ?? 'full') === 'partial' ? 'partial' : 'full';
+            $amount = $requestedType === 'full'
+                ? $remaining
+                : (float) ($data['refund_amount'] ?? 0);
+            if ($amount <= 0) {
+                throw new InvalidArgumentException('Partial refund amount must be greater than zero.');
+            }
+            if ($amount > $remaining + 0.01) {
+                throw new InvalidArgumentException('Refund amount exceeds the remaining refundable amount.');
+            }
+            $amount = min($amount, $remaining);
+            $refundedAfter = min($invoiceTotal, $refundedBefore + $amount);
+            $isFullRefund = $refundedAfter >= ($invoiceTotal - 0.01);
+            $refundType = $isFullRefund ? 'full' : 'partial';
+            $refundMethod = in_array(($data['refund_method'] ?? $invoice['payment_method']), ['cash', 'card', 'e_wallet'], true)
+                ? (string) ($data['refund_method'] ?? $invoice['payment_method'])
+                : (string) $invoice['payment_method'];
+            $refundReference = substr(trim((string) ($data['refund_reference'] ?? '')), 0, 120) ?: null;
+            $externalConfirmed = $refundMethod === 'cash' || filter_var(
+                $data['external_refund_confirmed'] ?? false,
+                FILTER_VALIDATE_BOOLEAN
+            );
+            if ($refundMethod !== 'cash' && (!$externalConfirmed || $refundReference === null)) {
+                throw new InvalidArgumentException('Non-cash refund requires an external reference and confirmation.');
+            }
+
             $restoredVoucherStatus = null;
 
             $this->db->prepare(
-                "INSERT INTO invoice_refunds (invoice_id, staff_id, pos_session_id, refund_amount, reason, status, created_at)
-                 VALUES (:invoice_id, :staff_id, :pos_session_id, :refund_amount, :reason, 'approved', NOW())"
+                "INSERT INTO invoice_refunds (
+                    invoice_id, staff_id, pos_session_id, refund_amount, refund_type, refund_method,
+                    refund_reference, reason_code, reason, note, external_refund_confirmed,
+                    inventory_disposition, status, created_at
+                 ) VALUES (
+                    :invoice_id, :staff_id, :pos_session_id, :refund_amount, :refund_type, :refund_method,
+                    :refund_reference, :reason_code, :reason, :note, :external_refund_confirmed,
+                    'waste', 'approved', NOW()
+                 )"
             )->execute([
                 'invoice_id' => $invoiceId,
                 'staff_id' => $staffId,
                 'pos_session_id' => $posSessionId,
                 'refund_amount' => $amount,
-                'reason' => $reason,
+                'refund_type' => $refundType,
+                'refund_method' => $refundMethod,
+                'refund_reference' => $refundReference,
+                'reason_code' => $reasonCode,
+                'reason' => $reasonLabels[$reasonCode],
+                'note' => substr($note, 0, 500),
+                'external_refund_confirmed' => $externalConfirmed ? 1 : 0,
             ]);
             $refundId = (int) $this->db->lastInsertId();
 
-            $this->db->prepare("UPDATE invoices SET status = 'refunded' WHERE id = :id")->execute(['id' => $invoiceId]);
-            $this->db->prepare("UPDATE payments SET status = 'refunded' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
-            $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE invoice_id = :invoice_id")->execute(['invoice_id' => $invoiceId]);
+            $invoiceStatus = $isFullRefund ? 'refunded' : 'partially_refunded';
+            $this->db->prepare("UPDATE invoices SET status = :status WHERE id = :id")
+                ->execute(['status' => $invoiceStatus, 'id' => $invoiceId]);
+            $this->db->prepare("UPDATE payments SET status = :status WHERE invoice_id = :invoice_id")
+                ->execute(['status' => $invoiceStatus, 'invoice_id' => $invoiceId]);
+            if ($isFullRefund) {
+                $this->db->prepare("UPDATE website_orders SET order_status = 'cancelled' WHERE invoice_id = :invoice_id")
+                    ->execute(['invoice_id' => $invoiceId]);
+                if (!empty($invoice['service_order_id'])) {
+                    $this->db->prepare(
+                        "UPDATE service_orders
+                         SET status = 'cancelled',
+                             note = TRIM(CONCAT(COALESCE(note, ''), ' [Refund #', :refund_id, '] ', :note)),
+                             updated_at = NOW()
+                         WHERE id = :service_order_id"
+                    )->execute([
+                        'refund_id' => $refundId,
+                        'note' => substr($note, 0, 180),
+                        'service_order_id' => (int) $invoice['service_order_id'],
+                    ]);
+                }
+            }
             if ($isFullRefund && !empty($invoice['voucher_id'])) {
                 $restoredVoucherStatus = (new Voucher())->restoreIfAvailable((int) $invoice['voucher_id']);
             }
 
             if (!empty($invoice['customer_id'])) {
-                $points = (int) $invoice['points_earned'];
-                if ($points > 0) {
+                $pointsEarned = (int) $invoice['points_earned'];
+                $reversedStmt = $this->db->prepare(
+                    "SELECT COALESCE(SUM(points), 0)
+                     FROM loyalty_point_transactions
+                     WHERE invoice_id = :invoice_id
+                       AND transaction_type = 'adjust'
+                       AND points < 0
+                       AND description LIKE 'Refund adjustment for invoice #%'
+                    "
+                );
+                $reversedStmt->execute(['invoice_id' => $invoiceId]);
+                $pointsAlreadyReversed = abs((int) $reversedStmt->fetchColumn());
+                $targetReversedPoints = $isFullRefund
+                    ? $pointsEarned
+                    : min($pointsEarned, (int) floor($pointsEarned * ($refundedAfter / max($invoiceTotal, 0.01))));
+                $pointsToReverse = max(0, $targetReversedPoints - $pointsAlreadyReversed);
+                if ($pointsToReverse > 0) {
                     $this->db->prepare(
                         "INSERT INTO loyalty_point_transactions (customer_id, invoice_id, transaction_type, points, description, created_at)
                          VALUES (:customer_id, :invoice_id, 'adjust', :points, :description, NOW())"
                     )->execute([
                         'customer_id' => (int) $invoice['customer_id'],
                         'invoice_id' => $invoiceId,
-                        'points' => -$points,
+                        'points' => -$pointsToReverse,
                         'description' => 'Refund adjustment for invoice #' . $invoiceId,
                     ]);
                 }
@@ -396,43 +499,156 @@ final class Invoice extends Model
                          total_spending = GREATEST(total_spending - :amount, 0)
                      WHERE id = :customer_id"
                 )->execute([
-                    'points' => $points,
+                    'points' => $pointsToReverse,
                     'amount' => $amount,
                     'customer_id' => (int) $invoice['customer_id'],
                 ]);
                 $this->upgradeTier((int) $invoice['customer_id']);
             }
 
-            if ($posSessionId) {
-                (new PosSession())->logFromPayload($data, 'invoice_refund', [
-                    'entity_type' => 'invoice_refund',
-                    'entity_id' => $refundId,
+            $cashTransactionId = null;
+            if ($refundMethod === 'cash') {
+                $cashReason = substr('Refund #' . $refundId . ' for invoice #' . $invoiceId . ' - ' . $note, 0, 180);
+                $this->db->prepare(
+                    "INSERT INTO cash_transactions (
+                        branch_id, staff_id, pos_session_id, invoice_id, invoice_refund_id,
+                        transaction_type, reason, amount, created_at
+                     ) VALUES (
+                        :branch_id, :staff_id, :pos_session_id, :invoice_id, :invoice_refund_id,
+                        'out', :reason, :amount, NOW()
+                     )"
+                )->execute([
+                    'branch_id' => $sessionBranchId,
+                    'staff_id' => $staffId,
+                    'pos_session_id' => $posSessionId,
+                    'invoice_id' => $invoiceId,
+                    'invoice_refund_id' => $refundId,
+                    'reason' => $cashReason,
                     'amount' => $amount,
-                    'status_to' => 'refunded',
-                    'note' => $reason,
                 ]);
+                $cashTransactionId = (int) $this->db->lastInsertId();
             }
+
+            $activityAction = $isFullRefund ? 'invoice_refund' : 'invoice_partial_refund';
+            (new PosSession())->logFromPayload($data, $activityAction, [
+                'entity_type' => 'invoice_refund',
+                'entity_id' => $refundId,
+                'amount' => $amount,
+                'status_from' => (string) $invoice['status'],
+                'status_to' => $invoiceStatus,
+                'note' => $note,
+            ]);
 
             (new AuditLog())->record([
                 'actor_type' => 'staff',
                 'actor_id' => $staffId,
+                'actor_role' => $staffRole,
                 'action' => 'invoice_refund',
                 'entity_type' => 'invoice',
                 'entity_id' => $invoiceId,
                 'metadata' => [
                     'refund_amount' => $amount,
-                    'reason' => $reason,
+                    'refund_type' => $refundType,
+                    'refund_method' => $refundMethod,
+                    'refund_reference' => $refundReference,
+                    'reason_code' => $reasonCode,
+                    'note' => $note,
                     'is_full_refund' => $isFullRefund,
                     'voucher_status' => $restoredVoucherStatus,
+                    'cash_transaction_id' => $cashTransactionId,
+                    'inventory_disposition' => 'waste',
                 ],
             ]);
 
             $this->db->commit();
-            return ['refund_id' => $refundId, 'invoice' => $this->receipt($invoiceId)];
+            return [
+                'refund_id' => $refundId,
+                'refund_type' => $refundType,
+                'refund_amount' => $amount,
+                'total_refunded' => $refundedAfter,
+                'remaining_refundable' => max(0, $invoiceTotal - $refundedAfter),
+                'invoice_status' => $invoiceStatus,
+                'cash_transaction_id' => $cashTransactionId,
+                'invoice' => $this->receipt($invoiceId),
+            ];
         } catch (\Throwable $exception) {
             $this->db->rollBack();
             throw $exception;
         }
+    }
+
+    public function refundHistory(array $filters = []): array
+    {
+        $where = ["ir.status = 'approved'"];
+        $params = [];
+        if ((int) ($filters['invoice_id'] ?? 0) > 0) {
+            $where[] = 'ir.invoice_id = :invoice_id';
+            $params['invoice_id'] = (int) $filters['invoice_id'];
+        }
+        if ((int) ($filters['branch_id'] ?? 0) > 0) {
+            $where[] = 'i.branch_id = :branch_id';
+            $params['branch_id'] = (int) $filters['branch_id'];
+        }
+        if ((int) ($filters['pos_session_id'] ?? 0) > 0) {
+            $where[] = 'ir.pos_session_id = :pos_session_id';
+            $params['pos_session_id'] = (int) $filters['pos_session_id'];
+        }
+        $limit = max(1, min(200, (int) ($filters['limit'] ?? 100)));
+
+        $stmt = $this->db->prepare(
+            "SELECT ir.*, i.total_amount AS invoice_total, i.status AS invoice_status,
+                    i.sales_channel, i.payment_method AS original_payment_method,
+                    b.branch_name AS invoice_branch_name, s.staff_name, s.staff_role,
+                    ps.opened_at AS refund_session_opened_at,
+                    ct.id AS cash_transaction_id, ct.branch_id AS cash_branch_id,
+                    cb.branch_name AS cash_branch_name
+             FROM invoice_refunds ir
+             JOIN invoices i ON i.id = ir.invoice_id
+             JOIN branches b ON b.id = i.branch_id
+             JOIN staff s ON s.id = ir.staff_id
+             LEFT JOIN pos_sessions ps ON ps.id = ir.pos_session_id
+             LEFT JOIN cash_transactions ct ON ct.invoice_refund_id = ir.id
+             LEFT JOIN branches cb ON cb.id = ct.branch_id
+             WHERE " . implode(' AND ', $where) . "
+             ORDER BY ir.created_at DESC, ir.id DESC
+             LIMIT $limit"
+        );
+        $stmt->execute($params);
+
+        return $stmt->fetchAll();
+    }
+
+    public function refundableInvoices(array $filters = []): array
+    {
+        $where = ["i.status IN ('paid', 'partially_refunded')"];
+        $params = [];
+        if ((int) ($filters['branch_id'] ?? 0) > 0) {
+            $where[] = 'i.branch_id = :branch_id';
+            $params['branch_id'] = (int) $filters['branch_id'];
+        }
+        $limit = max(1, min(200, (int) ($filters['limit'] ?? 50)));
+
+        $stmt = $this->db->prepare(
+            "SELECT i.id, i.branch_id, i.invoice_date, i.invoice_time, i.paid_at,
+                    i.sales_channel, i.payment_method, i.status, i.total_amount,
+                    COALESCE(r.refunded_amount, 0) AS refunded_amount,
+                    GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) AS remaining_refundable,
+                    COALESCE(c.customer_name, 'Guest') AS customer_name,
+                    b.branch_name
+             FROM invoices i
+             JOIN branches b ON b.id = i.branch_id
+             LEFT JOIN customers c ON c.id = i.customer_id
+             LEFT JOIN (
+                SELECT invoice_id, SUM(refund_amount) AS refunded_amount
+                FROM invoice_refunds WHERE status = 'approved' GROUP BY invoice_id
+             ) r ON r.invoice_id = i.id
+             WHERE " . implode(' AND ', $where) . "
+               AND GREATEST(i.total_amount - COALESCE(r.refunded_amount, 0), 0) > 0.009
+             ORDER BY i.invoice_date DESC, i.invoice_time DESC, i.id DESC
+             LIMIT $limit"
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll();
     }
 
     public function receipt(int $invoiceId): array
@@ -472,14 +688,22 @@ final class Invoice extends Model
         $payments = $this->db->prepare("SELECT * FROM payments WHERE invoice_id = :invoice_id ORDER BY id");
         $payments->execute(['invoice_id' => $invoiceId]);
 
-        $refunds = $this->db->prepare("SELECT * FROM invoice_refunds WHERE invoice_id = :invoice_id ORDER BY created_at DESC");
-        $refunds->execute(['invoice_id' => $invoiceId]);
+        $refunds = $this->refundHistory(['invoice_id' => $invoiceId, 'limit' => 100]);
+        $totalRefunded = array_reduce(
+            $refunds,
+            static fn (float $sum, array $refund): float => $sum + (float) $refund['refund_amount'],
+            0.0
+        );
 
         return [
             'invoice' => $invoice,
             'items' => $items->fetchAll(),
             'payments' => $payments->fetchAll(),
-            'refunds' => $refunds->fetchAll(),
+            'refunds' => $refunds,
+            'refund_summary' => [
+                'total_refunded' => $totalRefunded,
+                'remaining_refundable' => max(0, (float) $invoice['total_amount'] - $totalRefunded),
+            ],
         ];
     }
 
