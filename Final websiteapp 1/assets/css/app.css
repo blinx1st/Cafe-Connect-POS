@@ -87,6 +87,16 @@
   gap: 12px;
 }
 
+.order-receipt-section {
+  display: grid;
+  gap: 18px;
+  padding: 22px;
+  border: 1px solid rgba(74, 38, 24, 0.12);
+  border-radius: 18px;
+  background: #fffaf5;
+  box-shadow: 0 18px 44px rgba(67, 42, 28, 0.08);
+}
+
 @media (max-width: 760px) {
   .menu-toolbar,
   .product-detail-layout,
@@ -786,10 +796,12 @@
 
 .receipt-box {
   position: relative;
-  width: min(720px, 100%);
+  width: min(460px, 100%);
   max-height: min(86vh, 900px);
   overflow: auto;
-  padding: 28px;
+  display: grid;
+  gap: 16px;
+  padding: 24px;
   border-radius: 14px;
   background: #fffaf5;
   box-shadow: 0 24px 70px rgba(31, 23, 16, 0.28);
@@ -806,6 +818,134 @@
   background: #2c2118;
   color: #fffaf5;
   cursor: pointer;
+}
+
+.receipt-toolbar {
+  display: flex;
+  justify-content: center;
+}
+
+.thermal-receipt {
+  width: min(80mm, 100%);
+  margin: 0 auto;
+  padding: 16px 14px;
+  border: 1px solid #e1d2c2;
+  background: #fff;
+  color: #111;
+  box-shadow: 0 18px 46px rgba(31, 23, 16, 0.16);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.thermal-receipt * {
+  box-sizing: border-box;
+}
+
+.thermal-receipt h3,
+.thermal-receipt h4,
+.thermal-receipt p {
+  margin: 0;
+}
+
+.thermal-receipt-head,
+.thermal-receipt-foot {
+  display: grid;
+  gap: 4px;
+  text-align: center;
+}
+
+.thermal-receipt-head h3 {
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.thermal-receipt h4 {
+  margin: 10px 0;
+  text-align: center;
+  font-size: 14px;
+  letter-spacing: 0;
+}
+
+.receipt-separator {
+  height: 1px;
+  margin: 9px 0;
+  border-top: 1px dashed #111;
+}
+
+.receipt-meta,
+.receipt-totals {
+  display: grid;
+  gap: 4px;
+}
+
+.receipt-meta p,
+.receipt-totals p {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.receipt-meta span,
+.receipt-totals span {
+  color: #333;
+}
+
+.receipt-meta strong,
+.receipt-totals strong {
+  max-width: 58%;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.receipt-note,
+.receipt-refunds {
+  display: grid;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #777;
+}
+
+.thermal-items {
+  width: 100%;
+  margin-top: 10px;
+  border-collapse: collapse;
+}
+
+.thermal-items th,
+.thermal-items td {
+  padding: 5px 3px;
+  border-bottom: 1px solid #d8d8d8;
+  vertical-align: top;
+  text-align: right;
+}
+
+.thermal-items th:first-child,
+.thermal-items td:first-child {
+  width: 44%;
+  text-align: left;
+}
+
+.thermal-items th:nth-child(3),
+.thermal-items td:nth-child(3) {
+  width: 28px;
+  text-align: center;
+}
+
+.thermal-items td strong,
+.thermal-items td small {
+  display: block;
+}
+
+.thermal-items td small {
+  margin-top: 2px;
+  color: #555;
+  font-size: 10px;
+}
+
+.thermal-receipt-foot {
+  margin-top: 12px;
 }
 
 .refund-dialog {
@@ -955,6 +1095,18 @@
 }
 
 @media print {
+  @page {
+    size: 80mm 297mm;
+    margin: 0;
+  }
+
+  html,
+  body {
+    width: 80mm;
+    margin: 0 !important;
+    background: #fff !important;
+  }
+
   body > *:not(.receipt-dialog) {
     display: none !important;
   }
@@ -967,12 +1119,27 @@
   }
 
   .receipt-box {
-    width: 100%;
+    width: 80mm;
     max-height: none;
+    overflow: visible;
+    padding: 0;
+    border-radius: 0;
+    background: #fff;
     box-shadow: none;
   }
 
+  .thermal-receipt {
+    width: 80mm;
+    max-width: 80mm;
+    margin: 0;
+    padding: 4mm;
+    border: 0;
+    box-shadow: none;
+    font-size: 10.5px;
+  }
+
   .receipt-close,
+  .receipt-toolbar,
   .receipt-box [data-receipt-print] {
     display: none !important;
   }

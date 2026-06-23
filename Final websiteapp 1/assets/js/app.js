@@ -300,6 +300,25 @@ function durationSince(value, closedAt = "") {
   return hours > 0 ? `${hours}h ${rest}p` : `${rest} phut`;
 }
 
+function formatDateTime(value) {
+  if (!value) return "Chưa có";
+  const normalized = String(value).replace(" ", "T");
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("vi-VN", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
+}
+
+function durationSince(value, closedAt = "") {
+  if (!value) return "0 phút";
+  const start = new Date(String(value).replace(" ", "T"));
+  const end = closedAt ? new Date(String(closedAt).replace(" ", "T")) : new Date();
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return "0 phút";
+  const minutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return hours > 0 ? `${hours}h ${rest}p` : `${rest} phút`;
+}
+
 const escapeHtml = (value) =>
   String(value ?? "")
     .replaceAll("&", "&amp;")
@@ -787,6 +806,171 @@ function showReceiptDialog(receipt) {
       </div>
       ${refunds.length ? `<div class="refund-receipt-list"><h3>Lịch sử hoàn</h3>${refunds.map((refund) => `<p><strong>${formatMoney(refund.refund_amount)}</strong> · ${escapeHtml(refund.refund_type)} · ${escapeHtml(refund.refund_method)}<br><small>${escapeHtml(refund.note || refund.reason || "")} - ${escapeHtml(formatDateTime(refund.created_at))}</small></p>`).join("")}</div>` : ""}
       <button type="button" class="primary-btn full" data-receipt-print="${escapeHtml(invoice.id || "")}">In receipt</button>
+    </div>
+  `;
+  document.body.appendChild(dialog);
+}
+
+function receiptCode(invoice = {}) {
+  const prefix = ["website", "delivery"].includes(invoice.sales_channel) ? "WEB" : "CC";
+  return `${prefix}-${String(invoice.id || "").padStart(6, "0")}`;
+}
+
+function receiptPaymentLabel(method = "", provider = "") {
+  if (provider && String(provider).toLowerCase().includes("momo")) return "MoMo";
+  return {
+    cash: "Tiền mặt",
+    card: "Thẻ",
+    e_wallet: "Ví điện tử",
+  }[method] || method || "Chưa có";
+}
+
+function receiptStatusLabel(status = "") {
+  return {
+    pending: "Chờ thanh toán",
+    paid: "Đã thanh toán",
+    partially_refunded: "Hoàn một phần",
+    refunded: "Đã hoàn",
+    cancelled: "Đã hủy",
+    failed: "Thất bại",
+    full: "Toàn phần",
+    partial: "Một phần",
+  }[status] || status || "Chưa có";
+}
+
+function receiptFulfillmentLabel(invoice = {}) {
+  if (invoice.fulfillment_type === "delivery" || invoice.sales_channel === "delivery") return "Giao hàng";
+  if (invoice.sales_channel === "website") return "Nhận tại quầy";
+  return "Tại quầy";
+}
+
+function receiptStartedAt(invoice = {}) {
+  return invoice.bill_started_at || invoice.created_at || `${invoice.invoice_date || ""} ${invoice.invoice_time || ""}`.trim();
+}
+
+function receiptPaidAmount(invoice = {}, payments = []) {
+  if ((invoice.status || "") === "pending") return 0;
+  const paid = payments
+    .filter((payment) => !["failed", "cancelled"].includes(payment.status || ""))
+    .reduce((sum, payment) => sum + Number(payment.amount || 0), 0);
+  return paid || Number(invoice.total_amount || 0);
+}
+
+function renderReceiptPaper(receipt) {
+  const invoice = receipt?.invoice || {};
+  const items = receipt?.items || [];
+  const payments = receipt?.payments || [];
+  const payment = payments[0] || {};
+  const refunds = receipt?.refunds || [];
+  const refundSummary = receipt?.refund_summary || {};
+  const subtotal = Number(invoice.subtotal_amount || items.reduce((sum, item) => sum + Number(item.line_total || 0), 0));
+  const totalDiscount = Number(invoice.membership_discount_amount || 0) + Number(invoice.voucher_discount_amount || 0);
+  const total = Number(invoice.total_amount || 0);
+  const paid = receiptPaidAmount(invoice, payments);
+  const change = Math.max(0, paid - total);
+  const totalRefunded = Number(refundSummary.total_refunded || 0);
+  const customerName = invoice.receiver_name || invoice.customer_name || "Khách lẻ";
+  const customerPhone = invoice.receiver_phone || invoice.phone_number || "";
+  const cashierName = invoice.staff_name || "Cafe Connect";
+  const paidAt = invoice.paid_at || payment.paid_at || "";
+  const paymentRef = payment.transaction_reference || "";
+  const status = receiptStatusLabel(invoice.status || payment.status || "");
+
+  const itemRows = items.length ? items.map((row) => {
+    const noteParts = [
+      row.size ? `Size ${row.size}` : "",
+      row.topping ? `Ghi chú: ${row.topping}` : "",
+    ].filter(Boolean);
+    return `
+      <tr>
+        <td>
+          <strong>${escapeHtml(row.product_name || "")}</strong>
+          ${noteParts.length ? `<small>${escapeHtml(noteParts.join(" · "))}</small>` : ""}
+        </td>
+        <td>${formatMoney(row.unit_price)}</td>
+        <td>${Number(row.quantity || 0)}</td>
+        <td>${formatMoney(row.line_total)}</td>
+      </tr>
+    `;
+  }).join("") : '<tr><td colspan="4">Chưa có món.</td></tr>';
+
+  const receiverInfo = invoice.fulfillment_type === "delivery" ? `
+    <div class="receipt-note">
+      <strong>Giao hàng</strong>
+      ${invoice.delivery_address ? `<span>${escapeHtml(invoice.delivery_address)}</span>` : ""}
+      ${invoice.receiver_email ? `<span>Email: ${escapeHtml(invoice.receiver_email)}</span>` : ""}
+      ${invoice.customer_note ? `<span>Ghi chú: ${escapeHtml(invoice.customer_note)}</span>` : ""}
+    </div>
+  ` : (invoice.customer_note ? `<div class="receipt-note"><strong>Ghi chú</strong><span>${escapeHtml(invoice.customer_note)}</span></div>` : "");
+
+  const refundBlock = refunds.length ? `
+    <div class="receipt-refunds">
+      <strong>Lịch sử hoàn</strong>
+      ${refunds.map((refund) => `
+        <p>${formatMoney(refund.refund_amount)} · ${escapeHtml(receiptStatusLabel(refund.refund_type))}<br>
+        <small>${escapeHtml(refund.note || refund.reason || "")} · ${escapeHtml(formatDateTime(refund.created_at))}</small></p>
+      `).join("")}
+    </div>
+  ` : "";
+
+  return `
+    <article class="thermal-receipt" data-thermal-receipt>
+      <header class="thermal-receipt-head">
+        <h3>CAFE CONNECT</h3>
+        <p>${escapeHtml(invoice.branch_name || "Cafe Connect")}</p>
+        ${invoice.branch_address ? `<p>ĐC: ${escapeHtml(invoice.branch_address)}</p>` : ""}
+      </header>
+      <div class="receipt-separator"></div>
+      <h4>HÓA ĐƠN THANH TOÁN</h4>
+      <div class="receipt-meta">
+        <p><span>Số HĐ</span><strong>${escapeHtml(receiptCode(invoice))}</strong></p>
+        <p><span>Ngày</span><strong>${escapeHtml(formatDateTime(invoice.invoice_date || invoice.created_at || ""))}</strong></p>
+        <p><span>Vào</span><strong>${escapeHtml(formatDateTime(receiptStartedAt(invoice)))}</strong></p>
+        <p><span>Ra</span><strong>${escapeHtml(paidAt ? formatDateTime(paidAt) : "Chưa thanh toán")}</strong></p>
+        <p><span>Khách hàng</span><strong>${escapeHtml(customerName)}</strong></p>
+        ${customerPhone ? `<p><span>SĐT</span><strong>${escapeHtml(customerPhone)}</strong></p>` : ""}
+        <p><span>Thu ngân</span><strong>${escapeHtml(cashierName)}</strong></p>
+        <p><span>Nhận hàng</span><strong>${escapeHtml(receiptFulfillmentLabel(invoice))}</strong></p>
+      </div>
+      ${receiverInfo}
+      <table class="thermal-items">
+        <thead><tr><th>Tên hàng</th><th>Đ.giá</th><th>SL</th><th>TT</th></tr></thead>
+        <tbody>${itemRows}</tbody>
+      </table>
+      <div class="receipt-totals">
+        <p><span>Tổng thành tiền</span><strong>${formatMoney(subtotal)}</strong></p>
+        ${totalDiscount > 0 ? `<p><span>Giảm giá</span><strong>-${formatMoney(totalDiscount)}</strong></p>` : ""}
+        <p><span>Tổng cộng</span><strong>${formatMoney(total)}</strong></p>
+        <p><span>Phương thức</span><strong>${escapeHtml(receiptPaymentLabel(invoice.payment_method || payment.payment_method, payment.payment_provider))}</strong></p>
+        ${paymentRef ? `<p><span>Mã giao dịch</span><strong>${escapeHtml(paymentRef)}</strong></p>` : ""}
+        <p><span>Trạng thái</span><strong>${escapeHtml(status)}</strong></p>
+        <p><span>Khách trả</span><strong>${formatMoney(paid)}</strong></p>
+        <p><span>Tiền thừa</span><strong>${formatMoney(change)}</strong></p>
+        ${totalRefunded > 0 ? `<p><span>Đã hoàn</span><strong>${formatMoney(totalRefunded)}</strong></p>` : ""}
+      </div>
+      ${refundBlock}
+      <footer class="thermal-receipt-foot">
+        <div class="receipt-separator"></div>
+        <p>Xin cảm ơn, hẹn gặp lại quý khách!</p>
+        <small>Powered by Cafe Connect POS</small>
+      </footer>
+    </article>
+  `;
+}
+
+function showReceiptDialog(receipt) {
+  const invoice = receipt?.invoice || {};
+  document.querySelector("[data-receipt-dialog]")?.remove();
+  const dialog = document.createElement("div");
+  dialog.className = "receipt-dialog";
+  dialog.dataset.receiptDialog = "true";
+  dialog.innerHTML = `
+    <div class="receipt-box">
+      <button type="button" class="receipt-close" data-receipt-close aria-label="Đóng">×</button>
+      ${renderReceiptPaper(receipt)}
+      <div class="receipt-toolbar">
+        <button type="button" class="primary-btn full" data-receipt-print="${escapeHtml(invoice.id || "")}">In hóa đơn</button>
+      </div>
     </div>
   `;
   document.body.appendChild(dialog);
@@ -2108,6 +2292,106 @@ function renderWebsiteOrderDetail(receipt) {
       </div>
     </article>
   `;
+}
+
+function renderWebsiteOrderDetail(receipt) {
+  const target = document.querySelector("[data-order-detail]");
+  if (!target) return;
+
+  const invoice = receipt?.invoice || {};
+  const items = receipt?.items || [];
+  const payments = receipt?.payments || [];
+  const payment = payments[0] || {};
+  const refundSummary = receipt?.refund_summary || {};
+  const canCancel = invoice.order_status === "pending";
+  const receiverName = invoice.receiver_name || invoice.customer_name || "";
+  const receiverPhone = invoice.receiver_phone || invoice.phone_number || "";
+  const receiverAddress = invoice.delivery_address || [invoice.ward, invoice.district, invoice.city].filter(Boolean).join(", ");
+  const receiverBlock = invoice.fulfillment_type === "delivery" ? `
+      <div class="delivery-detail-box">
+        <strong>Thông tin người nhận</strong>
+        <span>${escapeHtml(receiverName || "Chưa có tên người nhận")}</span>
+        ${invoice.receiver_email ? `<span>Email: ${escapeHtml(invoice.receiver_email)}</span>` : ""}
+        ${receiverPhone ? `<span>SĐT: ${escapeHtml(receiverPhone)}</span>` : ""}
+        ${receiverAddress ? `<span>Địa chỉ: ${escapeHtml(receiverAddress)}</span>` : ""}
+        ${invoice.customer_note ? `<span>Ghi chú: ${escapeHtml(invoice.customer_note)}</span>` : ""}
+      </div>
+    ` : (invoice.customer_note ? `<p><strong>Ghi chú:</strong> ${escapeHtml(invoice.customer_note)}</p>` : "");
+  const refunded = Number(refundSummary.total_refunded || 0);
+
+  target.innerHTML = `
+    <article class="auth-card order-detail-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Order #${escapeHtml(invoice.id || "")}</p>
+          <h2>${escapeHtml(receiptStatusLabel(invoice.order_status || invoice.status || "order"))}</h2>
+        </div>
+        <span class="status ${invoice.order_status === "cancelled" ? "bad" : (invoice.status === "paid" ? "good" : "")}">${escapeHtml(receiptStatusLabel(invoice.status || ""))}</span>
+      </div>
+      <div class="receipt-summary-grid">
+        <div class="metric"><strong>${formatMoney(invoice.total_amount)}</strong><small>Tổng tiền</small></div>
+        <div class="metric"><strong>${escapeHtml(receiptPaymentLabel(invoice.payment_method || payment.payment_method, payment.payment_provider))}</strong><small>Thanh toán</small></div>
+        <div class="metric"><strong>${escapeHtml(receiptStatusLabel(payment.status || invoice.status || ""))}</strong><small>Trạng thái payment</small></div>
+        <div class="metric"><strong>${escapeHtml(receiptFulfillmentLabel(invoice))}</strong><small>Nhận hàng</small></div>
+        ${refunded > 0 ? `<div class="metric"><strong>${formatMoney(refunded)}</strong><small>Đã hoàn</small></div>` : ""}
+      </div>
+      <div class="order-status-line">
+        <span>Đặt lúc: ${escapeHtml(formatDateTime(invoice.created_at || invoice.bill_started_at || ""))}</span>
+        <span>Thanh toán: ${escapeHtml(invoice.paid_at ? formatDateTime(invoice.paid_at) : "Chưa thanh toán")}</span>
+        <span>Chi nhánh: ${escapeHtml(invoice.branch_name || "")}</span>
+      </div>
+      ${receiverBlock}
+      ${tableHtml(items, ["Món", "SL", "Size", "Ghi chú", "Giá", "Tổng"], (row) => `<tr><td>${escapeHtml(row.product_name)}</td><td>${Number(row.quantity || 0)}</td><td>${escapeHtml(row.size || "")}</td><td>${escapeHtml(row.topping || "")}</td><td>${formatMoney(row.unit_price)}</td><td>${formatMoney(row.line_total)}</td></tr>`)}
+      <div class="order-action-row">
+        <button type="button" class="secondary-btn" data-order-receipt>In / xem receipt</button>
+        ${canCancel ? `<button type="button" class="secondary-btn danger" data-website-order-cancel="${escapeHtml(invoice.id || "")}">Hủy đơn đang chờ</button>` : ""}
+      </div>
+    </article>
+
+    <section class="order-receipt-section">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Printable receipt</p>
+          <h2>Bill in hóa đơn</h2>
+          <p>Phiên bản giấy in 80mm dùng chung cho website và POS.</p>
+        </div>
+        <button type="button" class="primary-btn" data-order-receipt>In hóa đơn</button>
+      </div>
+      ${renderReceiptPaper(receipt)}
+    </section>
+  `;
+}
+
+async function loadWebsiteOrderDetail() {
+  const target = document.querySelector("[data-order-detail]");
+  if (!target) return;
+  const invoiceId = Number(queryParam("invoice_id") || 0);
+  if (!invoiceId) {
+    target.innerHTML = '<div class="empty-state">Thiếu mã hóa đơn. Vui lòng mở lại đơn từ hồ sơ hoặc lịch sử đơn hàng.</div>';
+    return;
+  }
+  try {
+    const receipt = await api("website-order-detail", { invoice_id: invoiceId });
+    renderWebsiteOrderDetail(receipt);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function loadWebsiteOrderDetail() {
+  const target = document.querySelector("[data-order-detail]");
+  if (!target) return;
+  const invoiceId = Number(queryParam("invoice_id") || 0);
+  if (!invoiceId) {
+    target.innerHTML = '<div class="empty-state">Thiếu mã hóa đơn. Vui lòng mở lại đơn từ hồ sơ hoặc lịch sử đơn hàng.</div>';
+    return;
+  }
+  try {
+    const receipt = await api("website-order-detail", { invoice_id: invoiceId });
+    renderWebsiteOrderDetail(receipt);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 async function loadWebsiteOrderDetail() {
