@@ -297,6 +297,70 @@ final class AuthController extends Controller
         return ['changed' => true, 'account_type' => 'staff'];
     }
 
+    public function staffChangePassword(array $payload): array
+    {
+        $staff = $this->staffAccountForCredentialChange($payload);
+        $currentPassword = require_field($payload, 'current_password', 'Current password');
+        $newPassword = require_field($payload, 'password', 'New password');
+        $confirm = require_field($payload, 'password_confirm', 'Password confirmation');
+        if (strlen($newPassword) < 6) {
+            throw new InvalidArgumentException('Mật khẩu mới phải có ít nhất 6 ký tự.');
+        }
+        if ($newPassword !== $confirm) {
+            throw new InvalidArgumentException('Mật khẩu xác nhận không khớp.');
+        }
+
+        $staffModel = new Staff();
+        $hash = $staffModel->passwordHash((int) $staff['id']);
+        if (!$hash || !password_verify($currentPassword, $hash)) {
+            throw new InvalidArgumentException('Mật khẩu hiện tại không đúng.');
+        }
+
+        $staffModel->updatePassword((int) $staff['id'], password_hash($newPassword, PASSWORD_DEFAULT));
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) $staff['id'],
+            'actor_role' => (string) $staff['staff_role'],
+            'action' => 'staff_change_password',
+            'entity_type' => 'staff',
+            'entity_id' => (int) $staff['id'],
+        ]);
+
+        return ['changed' => true, 'account_type' => 'staff'];
+    }
+
+    public function staffChangePin(array $payload): array
+    {
+        $staff = $this->staffAccountForCredentialChange($payload);
+        $currentPin = require_field($payload, 'current_pin', 'Current PIN');
+        $newPin = require_field($payload, 'pin', 'New PIN');
+        $confirm = require_field($payload, 'pin_confirm', 'PIN confirmation');
+        if (!ctype_digit($newPin) || strlen($newPin) < 4) {
+            throw new InvalidArgumentException('PIN mới phải là số và có ít nhất 4 ký tự.');
+        }
+        if ($newPin !== $confirm) {
+            throw new InvalidArgumentException('PIN xác nhận không khớp.');
+        }
+
+        $staffModel = new Staff();
+        $hash = $staffModel->pinHash((int) $staff['id']);
+        if (!$hash || !password_verify($currentPin, $hash)) {
+            throw new InvalidArgumentException('PIN hiện tại không đúng.');
+        }
+
+        $staffModel->updatePin((int) $staff['id'], password_hash($newPin, PASSWORD_DEFAULT));
+        (new AuditLog())->record([
+            'actor_type' => 'staff',
+            'actor_id' => (int) $staff['id'],
+            'actor_role' => (string) $staff['staff_role'],
+            'action' => 'staff_change_pin',
+            'entity_type' => 'staff',
+            'entity_id' => (int) $staff['id'],
+        ]);
+
+        return ['changed' => true, 'account_type' => 'staff'];
+    }
+
     public function memberForgotPassword(array $payload): array
     {
         $identity = require_field($payload, 'identity', 'Phone or email');
@@ -399,6 +463,28 @@ final class AuthController extends Controller
         if ($requireSession) {
             (new PosSession())->requireOpen($payload, $staff);
         }
+
+        return $staff;
+    }
+
+    private function staffAccountForCredentialChange(array $payload): array
+    {
+        $webStaff = $this->currentWebStaff();
+        if ($webStaff) {
+            return $webStaff;
+        }
+
+        $staffId = (int) ($payload['staff_id'] ?? 0);
+        if ($staffId <= 0) {
+            throw new InvalidArgumentException('Vui lòng đăng nhập tài khoản nhân viên.');
+        }
+
+        $staff = (new Staff())->find($staffId);
+        if (!$staff) {
+            throw new InvalidArgumentException('Không tìm thấy tài khoản nhân viên.');
+        }
+
+        (new PosSession())->requireOpen($payload, $staff);
 
         return $staff;
     }

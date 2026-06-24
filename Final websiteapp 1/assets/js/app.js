@@ -2471,6 +2471,33 @@ function isOverrideRole(role = state.pos.user?.staff_role) {
   return overrideRoles().includes(role);
 }
 
+function roleRank(role = "") {
+  return Number(cafeApp.permissions?.role_rank?.[role] ?? {
+    waiter: 10,
+    barista: 10,
+    cashier: 20,
+    marketing: 30,
+    manager: 60,
+    admin: 80,
+    owner: 100,
+  }[role] ?? 0);
+}
+
+function canManageStaffRow(row, actor = state.pos.user) {
+  const actorRole = actor?.staff_role || "";
+  const targetRole = row?.staff_role || "";
+  if (actorRole === "owner") return true;
+  if (actorRole !== "admin") return false;
+  if (targetRole === "owner") return false;
+  if (Number(actor?.id || 0) === Number(row?.id || 0)) return false;
+  return roleRank(actorRole) >= roleRank(targetRole);
+}
+
+function canCreateStaffRole(role, actor = state.pos.user) {
+  const actorRole = actor?.staff_role || "";
+  return actorRole === "owner" || (actorRole === "admin" && role !== "owner");
+}
+
 function canAccessModule(moduleId, role = state.pos.user?.staff_role) {
   const module = posModules.find((item) => item.id === moduleId);
   return Boolean(module && role && module.roles.includes(role));
@@ -2577,6 +2604,25 @@ function legacyRenderPosShell(contentHtml) {
           <label>Nhân viên <input value="${escapeHtml(state.pos.user.staff_name)}" disabled></label>
         </div>
       </div>
+      <details class="pos-account-tools">
+        <summary>Tài khoản POS: ${escapeHtml(state.pos.user.staff_name)} · ${escapeHtml(roleLabels[state.pos.user.staff_role] || state.pos.user.staff_role)}</summary>
+        <div class="pos-account-grid">
+          <form class="create-form compact" data-staff-change-password>
+            <h3>Đổi mật khẩu đăng nhập</h3>
+            <label>Mật khẩu hiện tại <input type="password" name="current_password" required autocomplete="current-password"></label>
+            <label>Mật khẩu mới <input type="password" name="password" minlength="6" required autocomplete="new-password"></label>
+            <label>Xác nhận mật khẩu <input type="password" name="password_confirm" minlength="6" required autocomplete="new-password"></label>
+            <button type="submit" class="secondary-btn">Đổi mật khẩu</button>
+          </form>
+          <form class="create-form compact" data-staff-change-pin>
+            <h3>Đổi PIN mở ca</h3>
+            <label>PIN hiện tại <input type="password" name="current_pin" inputmode="numeric" required autocomplete="off"></label>
+            <label>PIN mới <input type="password" name="pin" inputmode="numeric" minlength="4" required autocomplete="off"></label>
+            <label>Xác nhận PIN <input type="password" name="pin_confirm" inputmode="numeric" minlength="4" required autocomplete="off"></label>
+            <button type="submit" class="secondary-btn">Đổi PIN</button>
+          </form>
+        </div>
+      </details>
       ${contentHtml}
     </main>
   `;
@@ -3585,7 +3631,7 @@ function renderStaffModule() {
 
 function renderStaffCrudModule() {
   const staff = cafeApp.staff || [];
-  const roles = cafeApp.roles || Object.keys(roleLabels);
+  const roles = (cafeApp.roles || Object.keys(roleLabels)).filter((role) => canCreateStaffRole(role));
   return `
     <div class="admin-grid">
       <form class="create-form" data-staff-save>
@@ -3615,7 +3661,9 @@ function renderStaffCrudModule() {
           <h2>Danh sách nhân viên</h2>
           <p>Tạo, sửa, ngừng hoạt động và khôi phục tài khoản POS.</p>
         </div>
-        ${tableHtml(staff, ["Mã", "Tên", "Role", "Chi nhánh", "Liên hệ", "Trạng thái", ""], (row) => `<tr class="${row.status === "inactive" ? "is-muted" : ""}">
+        ${tableHtml(staff, ["Mã", "Tên", "Role", "Chi nhánh", "Liên hệ", "Trạng thái", ""], (row) => {
+          const canManage = canManageStaffRow(row);
+          return `<tr class="${row.status === "inactive" ? "is-muted" : ""}">
           <td>${escapeHtml(row.staff_code || "")}</td>
           <td><strong>${escapeHtml(row.staff_name)}</strong></td>
           <td>${escapeHtml(roleLabels[row.staff_role] || row.staff_role)}</td>
@@ -3624,13 +3672,15 @@ function renderStaffCrudModule() {
           <td><span class="status ${row.status === "active" ? "good" : "bad"}">${row.status === "active" ? "Đang hoạt động" : "Ngừng hoạt động"}</span></td>
           <td>
             <div class="table-actions">
-              <button type="button" class="secondary-btn compact" data-edit-staff="${row.id}">Sửa</button>
-              ${row.status === "active"
+              ${canManage ? `<button type="button" class="secondary-btn compact" data-edit-staff="${row.id}">Sửa</button>` : `<span class="muted-text">Không có quyền</span>`}
+              ${canManage && row.status === "active"
                 ? `<button type="button" class="secondary-btn compact danger" data-staff-delete="${row.id}">Ngừng</button>`
-                : `<button type="button" class="secondary-btn compact" data-staff-restore="${row.id}">Khôi phục</button>`}
+                : ""}
+              ${canManage && row.status !== "active" ? `<button type="button" class="secondary-btn compact" data-staff-restore="${row.id}">Khôi phục</button>` : ""}
             </div>
           </td>
-        </tr>`)}
+        </tr>`;
+        })}
       </section>
     </div>
   `;
@@ -4080,6 +4130,25 @@ function renderPosShell(contentHtml) {
           <label>Nhân viên <input value="${escapeHtml(state.pos.user.staff_name)}" disabled></label>
         </div>
       </div>
+      <details class="pos-account-tools">
+        <summary>Tài khoản POS: ${escapeHtml(state.pos.user.staff_name)} · ${escapeHtml(roleLabels[state.pos.user.staff_role] || state.pos.user.staff_role)}</summary>
+        <div class="pos-account-grid">
+          <form class="create-form compact" data-staff-change-password>
+            <h3>Đổi mật khẩu đăng nhập</h3>
+            <label>Mật khẩu hiện tại <input type="password" name="current_password" required autocomplete="current-password"></label>
+            <label>Mật khẩu mới <input type="password" name="password" minlength="6" required autocomplete="new-password"></label>
+            <label>Xác nhận mật khẩu <input type="password" name="password_confirm" minlength="6" required autocomplete="new-password"></label>
+            <button type="submit" class="secondary-btn">Đổi mật khẩu</button>
+          </form>
+          <form class="create-form compact" data-staff-change-pin>
+            <h3>Đổi PIN mở ca</h3>
+            <label>PIN hiện tại <input type="password" name="current_pin" inputmode="numeric" required autocomplete="off"></label>
+            <label>PIN mới <input type="password" name="pin" inputmode="numeric" minlength="4" required autocomplete="off"></label>
+            <label>Xác nhận PIN <input type="password" name="pin_confirm" inputmode="numeric" minlength="4" required autocomplete="off"></label>
+            <button type="submit" class="secondary-btn">Đổi PIN</button>
+          </form>
+        </div>
+      </details>
       ${contentHtml}
     </main>
   `;
@@ -4909,6 +4978,8 @@ function wireEvents() {
     const memberRegisterForm = event.target.closest("[data-member-register]");
     const memberProfileForm = event.target.closest("[data-member-profile-update]");
     const memberPasswordForm = event.target.closest("[data-member-change-password]");
+    const staffPasswordForm = event.target.closest("[data-staff-change-password]");
+    const staffPinForm = event.target.closest("[data-staff-change-pin]");
     const memberForgotForm = event.target.closest("[data-member-forgot-password]");
     const memberResetForm = event.target.closest("[data-member-reset-password]");
     const voucherClaimCodeForm = event.target.closest("[data-voucher-claim-code]");
@@ -5001,6 +5072,28 @@ function wireEvents() {
         await api("member-change-password", Object.fromEntries(new FormData(memberPasswordForm)));
         memberPasswordForm.reset();
         showToast("Đã đổi mật khẩu.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (staffPasswordForm) {
+      event.preventDefault();
+      try {
+        await api("staff-change-password", Object.fromEntries(new FormData(staffPasswordForm)));
+        staffPasswordForm.reset();
+        showToast("Đã đổi mật khẩu POS.");
+      } catch (error) {
+        showToast(error.message);
+      }
+      return;
+    }
+    if (staffPinForm) {
+      event.preventDefault();
+      try {
+        await api("staff-change-pin", Object.fromEntries(new FormData(staffPinForm)));
+        staffPinForm.reset();
+        showToast("Đã đổi PIN mở ca.");
       } catch (error) {
         showToast(error.message);
       }

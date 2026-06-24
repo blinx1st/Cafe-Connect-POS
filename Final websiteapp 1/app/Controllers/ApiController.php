@@ -55,6 +55,8 @@ final class ApiController extends Controller
                 '/api/member-logout' => $auth->memberLogout(),
                 '/api/member-profile-update' => $auth->memberProfileUpdate($payload),
                 '/api/member-change-password' => $auth->memberChangePassword($payload),
+                '/api/staff-change-password' => $auth->staffChangePassword($payload),
+                '/api/staff-change-pin' => $auth->staffChangePin($payload),
                 '/api/member-forgot-password' => $auth->memberForgotPassword($payload),
                 '/api/member-reset-password' => $auth->memberResetPassword($payload),
                 '/api/member-feedback' => $this->memberFeedback($payload),
@@ -120,9 +122,9 @@ final class ApiController extends Controller
                 '/api/category-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveCategory($payload)),
                 '/api/content-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveContent($payload)),
                 '/api/staff-list' => $this->withEndpoint($route, $auth, $payload, fn () => ['staff' => (new Staff())->allForAdmin()]),
-                '/api/staff-save' => $this->withEndpoint($route, $auth, $payload, fn () => $this->saveStaff($payload)),
-                '/api/staff-delete' => $this->withEndpoint($route, $auth, $payload, fn () => $this->deleteStaff($payload)),
-                '/api/staff-restore' => $this->withEndpoint($route, $auth, $payload, fn () => $this->restoreStaff($payload)),
+                '/api/staff-save' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => $this->saveStaff($payload, $staff)),
+                '/api/staff-delete' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => $this->deleteStaff($payload, $staff)),
+                '/api/staff-restore' => $this->withEndpoint($route, $auth, $payload, fn (array $staff) => $this->restoreStaff($payload, $staff)),
                 '/api/reports' => $this->withEndpoint($route, $auth, $payload, fn () => (new Report())->data($payload)),
                 '/api/reports-export' => $this->withEndpoint($route, $auth, $payload, fn () => (new Report())->exportCsv($payload)),
                 default => throw new InvalidArgumentException('Unknown API route: ' . $route),
@@ -159,6 +161,8 @@ final class ApiController extends Controller
                 'member_logout' => '/api/member-logout',
                 'member_profile_update' => '/api/member-profile-update',
                 'member_change_password' => '/api/member-change-password',
+                'staff_change_password' => '/api/staff-change-password',
+                'staff_change_pin' => '/api/staff-change-pin',
                 'member_forgot_password' => '/api/member-forgot-password',
                 'member_reset_password' => '/api/member-reset-password',
                 'member_feedback' => '/api/member-feedback',
@@ -629,9 +633,11 @@ final class ApiController extends Controller
         return ['content' => $current];
     }
 
-    private function saveStaff(array $payload): array
+    private function saveStaff(array $payload, array $actor): array
     {
-        $result = (new Staff())->save($payload);
+        $payload['staff_id'] = (int) $actor['id'];
+        $payload['staff_role'] = (string) $actor['staff_role'];
+        $result = (new Staff())->save($payload, $actor);
         (new PosSession())->logFromPayload($payload, 'staff_save', [
             'entity_type' => 'staff',
             'entity_id' => (int) ($result['id'] ?? $payload['id'] ?? 0),
@@ -739,10 +745,12 @@ final class ApiController extends Controller
         ];
     }
 
-    private function deleteStaff(array $payload): array
+    private function deleteStaff(array $payload, array $actor): array
     {
         $id = (int) ($payload['id'] ?? 0);
-        $result = (new Staff())->deactivate($id, (int) ($payload['staff_id'] ?? 0));
+        $payload['staff_id'] = (int) $actor['id'];
+        $payload['staff_role'] = (string) $actor['staff_role'];
+        $result = (new Staff())->deactivate($id, $actor);
         (new PosSession())->logFromPayload($payload, 'staff_delete', [
             'entity_type' => 'staff',
             'entity_id' => $id,
@@ -762,10 +770,12 @@ final class ApiController extends Controller
         return $result;
     }
 
-    private function restoreStaff(array $payload): array
+    private function restoreStaff(array $payload, array $actor): array
     {
         $id = (int) ($payload['id'] ?? 0);
-        $result = (new Staff())->restore($id);
+        $payload['staff_id'] = (int) $actor['id'];
+        $payload['staff_role'] = (string) $actor['staff_role'];
+        $result = (new Staff())->restore($id, $actor);
         (new PosSession())->logFromPayload($payload, 'staff_restore', [
             'entity_type' => 'staff',
             'entity_id' => $id,

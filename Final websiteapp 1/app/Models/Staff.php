@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Core\RolePolicy;
 use App\Core\Model;
 
 final class Staff extends Model
@@ -32,7 +33,7 @@ final class Staff extends Model
              JOIN branches b ON b.id = s.branch_id
              LEFT JOIN staff_shifts sh ON sh.staff_id = s.id AND sh.status = 'active'
              ORDER BY FIELD(s.status, 'active', 'inactive'),
-                      FIELD(s.staff_role, 'admin', 'owner', 'manager', 'cashier', 'waiter', 'barista', 'marketing'),
+                      FIELD(s.staff_role, 'owner', 'admin', 'manager', 'cashier', 'waiter', 'barista', 'marketing'),
                       s.staff_name"
         )->fetchAll();
     }
@@ -150,7 +151,22 @@ final class Staff extends Model
             ->execute(['password_hash' => $passwordHash, 'id' => $id]);
     }
 
-    public function save(array $data): array
+    public function pinHash(int $id): ?string
+    {
+        $stmt = $this->db->prepare("SELECT pin_hash FROM staff WHERE id = :id AND status = 'active' LIMIT 1");
+        $stmt->execute(['id' => $id]);
+        $hash = $stmt->fetchColumn();
+
+        return $hash ? (string) $hash : null;
+    }
+
+    public function updatePin(int $id, string $pinHash): void
+    {
+        $this->db->prepare("UPDATE staff SET pin_hash = :pin_hash WHERE id = :id AND status = 'active'")
+            ->execute(['pin_hash' => $pinHash, 'id' => $id]);
+    }
+
+    public function save(array $data, array $actor = []): array
     {
         $id = (int) ($data['id'] ?? 0);
         $payload = [
@@ -162,6 +178,26 @@ final class Staff extends Model
             'email' => trim((string) ($data['email'] ?? '')) ?: null,
             'status' => in_array(($data['status'] ?? 'active'), ['active', 'inactive'], true) ? $data['status'] : 'active',
         ];
+
+        $actorRole = (string) ($actor['staff_role'] ?? '');
+        $actorId = (int) ($actor['id'] ?? 0);
+        if ($actorRole !== '') {
+            if ($id > 0) {
+                $target = $this->findAny($id);
+                if (!$target) {
+                    throw new \InvalidArgumentException('Không tìm thấy nhân viên.');
+                }
+                $sameAccount = $actorId > 0 && $actorId === (int) $target['id'];
+                if (!RolePolicy::canManageStaffRole($actorRole, (string) $target['staff_role'], $sameAccount)) {
+                    throw new \InvalidArgumentException('Bạn không có quyền chỉnh sửa tài khoản này.');
+                }
+                if ($payload['staff_role'] === 'owner' && $actorRole !== 'owner') {
+                    throw new \InvalidArgumentException('Chỉ Owner được cấp hoặc chuyển role Owner.');
+                }
+            } elseif (!RolePolicy::canCreateStaffRole($actorRole, (string) $payload['staff_role'])) {
+                throw new \InvalidArgumentException('Bạn không có quyền tạo nhân viên với role này.');
+            }
+        }
 
         try {
             if ($id > 0) {
@@ -210,12 +246,14 @@ final class Staff extends Model
         return ['id' => $id, 'staff' => $this->allForAdmin()];
     }
 
-    public function deactivate(int $id, int $actorId = 0): array
+    public function deactivate(int $id, array $actor = []): array
     {
         if ($id <= 0) {
             throw new \InvalidArgumentException('Nhân viên không hợp lệ.');
         }
-        if ($actorId > 0 && $id === $actorId) {
+        $actorRole = (string) ($actor['staff_role'] ?? '');
+        $actorId = (int) ($actor['id'] ?? 0);
+        if ($actorId > 0 && $id === $actorId && $actorRole !== 'owner') {
             throw new \InvalidArgumentException('Không thể ngừng hoạt động chính tài khoản đang đăng nhập.');
         }
 
@@ -223,7 +261,11 @@ final class Staff extends Model
         if (!$staff) {
             throw new \InvalidArgumentException('Không tìm thấy nhân viên.');
         }
-        if (in_array((string) $staff['staff_role'], ['owner', 'admin'], true) && $this->activeAdminCount() <= 1) {
+        $sameAccount = $actorId > 0 && $actorId === $id;
+        if ($actorRole !== '' && !RolePolicy::canManageStaffRole($actorRole, (string) $staff['staff_role'], $sameAccount)) {
+            throw new \InvalidArgumentException('Bạn không có quyền ngừng hoặc xóa tài khoản này.');
+        }
+        if (!$sameAccount && in_array((string) $staff['staff_role'], ['owner', 'admin'], true) && $this->activeAdminCount() <= 1) {
             throw new \InvalidArgumentException('Phải giữ lại ít nhất một tài khoản owner/admin đang hoạt động.');
         }
 
@@ -237,11 +279,20 @@ final class Staff extends Model
         return ['id' => $id, 'staff' => $this->allForAdmin()];
     }
 
-    public function restore(int $id): array
+    public function restore(int $id, array $actor = []): array
     {
         if ($id <= 0) {
             throw new \InvalidArgumentException('Nhân viên không hợp lệ.');
         }
+        $staff = $this->findAny($id);
+        if (!$staff) {
+            throw new \InvalidArgumentException('Không tìm thấy nhân viên.');
+        }
+        $actorRole = (string) ($actor['staff_role'] ?? '');
+        if ($actorRole !== '' && !RolePolicy::canManageStaffRole($actorRole, (string) $staff['staff_role'], false)) {
+            throw new \InvalidArgumentException('Bạn không có quyền khôi phục tài khoản này.');
+        }
+
         $this->db->prepare("UPDATE staff SET status = 'active' WHERE id = :id")
             ->execute(['id' => $id]);
 

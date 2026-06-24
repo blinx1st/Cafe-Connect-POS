@@ -948,6 +948,38 @@
   margin-top: 12px;
 }
 
+.pos-account-tools {
+  margin: 0 0 18px;
+  border: 1px solid rgba(74, 38, 24, 0.12);
+  border-radius: 10px;
+  background: #fffaf5;
+}
+
+.pos-account-tools summary {
+  cursor: pointer;
+  padding: 12px 14px;
+  font-weight: 800;
+}
+
+.pos-account-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 0 14px 14px;
+}
+
+.muted-text {
+  color: #7a6b5d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+@media (max-width: 760px) {
+  .pos-account-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .refund-dialog {
   position: fixed;
   inset: 0;

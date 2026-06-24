@@ -71,6 +71,16 @@ require VIEW_PATH . '/website/partials/header.php';
           </form>
         </section>
 
+        <section class="auth-card" id="change-pin">
+          <h3>Đổi PIN mở ca POS</h3>
+          <form class="create-form compact" data-staff-change-pin>
+            <label>PIN hiện tại <input type="password" name="current_pin" inputmode="numeric" required autocomplete="off"></label>
+            <label>PIN mới <input type="password" name="pin" inputmode="numeric" minlength="4" required autocomplete="off"></label>
+            <label>Xác nhận PIN <input type="password" name="pin_confirm" inputmode="numeric" minlength="4" required autocomplete="off"></label>
+            <button type="submit" class="primary-btn">Đổi PIN</button>
+          </form>
+        </section>
+
         <section class="auth-card">
           <h3>Quyền truy cập website</h3>
           <p>Tài khoản admin/staff đăng nhập được website như member, có thể cập nhật hồ sơ, đổi mật khẩu và mở POS. Điểm, voucher và lịch sử mua hàng chỉ áp dụng cho khách hàng thành viên.</p>

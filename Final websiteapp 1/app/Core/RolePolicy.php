@@ -6,6 +6,16 @@ namespace App\Core;
 
 final class RolePolicy
 {
+    private const ROLE_RANK = [
+        'waiter' => 10,
+        'barista' => 10,
+        'cashier' => 20,
+        'marketing' => 30,
+        'manager' => 60,
+        'admin' => 80,
+        'owner' => 100,
+    ];
+
     public const MODULES = [
         'checkout' => ['label' => 'POS bán hàng', 'roles' => ['cashier', 'manager', 'owner', 'admin']],
         'orders' => ['label' => 'Bàn & order', 'roles' => ['waiter', 'cashier', 'manager', 'owner', 'admin']],
@@ -145,12 +155,48 @@ final class RolePolicy
         return in_array($role, ['manager', 'owner', 'admin'], true);
     }
 
+    public static function roleRank(string $role): int
+    {
+        return self::ROLE_RANK[$role] ?? 0;
+    }
+
+    public static function canManageStaffRole(string $actorRole, string $targetRole, bool $sameAccount = false): bool
+    {
+        if ($actorRole === 'owner') {
+            return true;
+        }
+
+        if ($actorRole !== 'admin') {
+            return false;
+        }
+
+        if ($targetRole === 'owner') {
+            return false;
+        }
+
+        if ($sameAccount) {
+            return false;
+        }
+
+        return self::roleRank($actorRole) >= self::roleRank($targetRole);
+    }
+
+    public static function canCreateStaffRole(string $actorRole, string $newRole): bool
+    {
+        if ($actorRole === 'owner') {
+            return true;
+        }
+
+        return $actorRole === 'admin' && $newRole !== 'owner';
+    }
+
     public static function permissionsPayload(): array
     {
         return [
             'modules' => self::moduleList(),
             'endpoint_roles' => self::ENDPOINT_ROLES,
             'override_roles' => ['manager', 'owner', 'admin'],
+            'role_rank' => self::ROLE_RANK,
         ];
     }
 }

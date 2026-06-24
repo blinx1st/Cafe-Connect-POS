@@ -12,6 +12,8 @@ $legacyActionMap = [
     'member_logout' => '/api/member-logout',
     'member_profile_update' => '/api/member-profile-update',
     'member_change_password' => '/api/member-change-password',
+    'staff_change_password' => '/api/staff-change-password',
+    'staff_change_pin' => '/api/staff-change-pin',
     'member_forgot_password' => '/api/member-forgot-password',
     'member_reset_password' => '/api/member-reset-password',
     'member_feedback' => '/api/member-feedback',
@@ -66,6 +68,10 @@ $legacyActionMap = [
     'product_image_upload' => '/api/product-image-upload',
     'category_save' => '/api/category-save',
     'content_save' => '/api/content-save',
+    'staff_list' => '/api/staff-list',
+    'staff_save' => '/api/staff-save',
+    'staff_delete' => '/api/staff-delete',
+    'staff_restore' => '/api/staff-restore',
 ];
 
 if (isset($_GET['endpoint'])) {
